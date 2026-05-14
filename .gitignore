@@ -1,0 +1,21 @@
+node_modules
+out
+dist
+release
+*.log
+npm-install.log
+
+.env
+.env.*
+!.env.example
+
+.DS_Store
+Thumbs.db
+
+.vscode/.cache
+.idea
+
+*.local
+
+# TypeScript incremental build
+*.tsbuildinfo

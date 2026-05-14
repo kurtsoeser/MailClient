@@ -1,0 +1,355 @@
+/**
+ * Kalender-Styling innerhalb .calendar-notion-shell — folgt den App-CSS-Variablen
+ * (hell/dunkel, Paletten). FullCalendar v6: https://fullcalendar.io/docs/css-custom-properties
+ */
+.calendar-notion-shell {
+  --cal-today: hsl(var(--destructive));
+  --cal-now-line: hsl(var(--primary));
+
+  --fc-border-color: hsl(var(--border));
+  --fc-page-bg-color: hsl(var(--background));
+  --fc-neutral-bg-color: hsl(var(--muted));
+  --fc-neutral-text-color: hsl(var(--muted-foreground));
+  --fc-today-bg-color: hsl(var(--accent) / 0.45);
+  /* Auswahl beim Ziehen (neuer Termin) — etwas kräftiger für bessere Sichtbarkeit */
+  --fc-highlight-color: hsl(var(--primary) / 0.22);
+  --fc-now-indicator-color: var(--cal-now-line);
+  --fc-list-event-hover-bg-color: hsl(var(--muted));
+
+  --fc-button-text-color: hsl(var(--foreground));
+  --fc-button-bg-color: hsl(var(--secondary));
+  --fc-button-border-color: hsl(var(--border));
+  --fc-button-hover-bg-color: hsl(var(--accent));
+  --fc-button-hover-border-color: hsl(var(--border));
+  --fc-button-active-bg-color: hsl(var(--muted));
+  --fc-event-border-color: transparent;
+  --fc-event-text-on-color: hsl(var(--primary-foreground));
+}
+
+.calendar-notion-shell .fc {
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    'Noto Sans', sans-serif;
+  font-size: 12px;
+  letter-spacing: 0.01em;
+}
+
+.calendar-notion-shell .fc-theme-standard td,
+.calendar-notion-shell .fc-theme-standard th {
+  border-color: hsl(var(--border));
+}
+
+.calendar-notion-shell .fc-scrollgrid {
+  border-color: hsl(var(--border));
+}
+
+.calendar-notion-shell .fc-col-header-cell {
+  background: hsl(var(--background));
+  padding: 10px 0 8px;
+  font-weight: 500;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+  text-transform: none;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.calendar-notion-shell .fc-col-header-cell-cushion {
+  color: inherit;
+}
+
+.calendar-notion-shell .fc-day-today .fc-col-header-cell-cushion {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--cal-today);
+  color: hsl(var(--destructive-foreground)) !important;
+  font-weight: 600;
+}
+
+.calendar-notion-shell .fc-day-today .fc-scrollgrid-sync-inner {
+  position: relative;
+}
+
+.calendar-notion-shell .fc-timegrid-axis-cushion,
+.calendar-notion-shell .fc-timegrid-slot-label-cushion {
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.calendar-notion-shell .fc-timegrid-slot {
+  height: 3rem;
+}
+
+/* Tag/Woche: Slot-Hoehe je nach gewaehlter Rasterweite (Klasse `cal-slot-*` am Shell-Wrapper). */
+.calendar-notion-shell.cal-slot-5 .fc-timegrid-slot {
+  height: 1.05rem;
+}
+.calendar-notion-shell.cal-slot-6 .fc-timegrid-slot {
+  height: 1.125rem;
+}
+.calendar-notion-shell.cal-slot-10 .fc-timegrid-slot {
+  height: 1.25rem;
+}
+.calendar-notion-shell.cal-slot-12 .fc-timegrid-slot {
+  height: 1.35rem;
+}
+.calendar-notion-shell.cal-slot-15 .fc-timegrid-slot {
+  height: 1.5rem;
+}
+.calendar-notion-shell.cal-slot-20 .fc-timegrid-slot {
+  height: 1.75rem;
+}
+.calendar-notion-shell.cal-slot-30 .fc-timegrid-slot {
+  height: 3rem;
+}
+.calendar-notion-shell.cal-slot-60 .fc-timegrid-slot {
+  height: 3.25rem;
+}
+
+.calendar-notion-shell .fc-timegrid-slot-minor {
+  border-top-style: dotted;
+  border-color: hsl(var(--border) / 0.65);
+}
+
+.calendar-notion-shell .fc-timegrid-divider {
+  padding: 0;
+  border-color: hsl(var(--border));
+}
+
+.calendar-notion-shell .fc-timegrid-col.fc-day-today {
+  background: hsl(var(--accent) / 0.25);
+}
+
+.calendar-notion-shell .fc-v-event {
+  border-radius: 6px;
+  box-shadow: 0 1px 0 hsl(0 0% 0% / 0.12);
+  border: none;
+  padding: 3px 6px 4px;
+}
+
+/* Resize-Grippe Dauer: oben (früher) und unten (später) — Zeitachsen-Ansichten */
+.calendar-notion-shell .fc-timegrid-event .fc-event-resizer-start,
+.calendar-notion-shell .fc-timegrid-event .fc-event-resizer-end {
+  cursor: ns-resize;
+  height: 10px;
+  border-radius: 4px;
+  background: hsl(0 0% 100% / 0.35);
+}
+
+.calendar-notion-shell .fc-timegrid-event .fc-event-resizer-start {
+  margin: 2px 4px 0;
+}
+
+.calendar-notion-shell .fc-timegrid-event .fc-event-resizer-end {
+  margin: 0 4px 2px;
+}
+
+.dark .calendar-notion-shell .fc-timegrid-event .fc-event-resizer-start,
+.dark .calendar-notion-shell .fc-timegrid-event .fc-event-resizer-end {
+  background: hsl(0 0% 100% / 0.22);
+}
+
+.calendar-notion-shell .fc-timegrid-event .fc-event-resizer-start:hover,
+.calendar-notion-shell .fc-timegrid-event .fc-event-resizer-end:hover {
+  background: hsl(0 0% 100% / 0.55);
+}
+
+.dark .calendar-notion-shell .fc-timegrid-event .fc-event-resizer-start:hover,
+.dark .calendar-notion-shell .fc-timegrid-event .fc-event-resizer-end:hover {
+  background: hsl(0 0% 100% / 0.38);
+}
+
+.dark .calendar-notion-shell .fc-v-event {
+  box-shadow: 0 1px 0 hsl(0 0% 0% / 0.35);
+}
+
+.calendar-notion-shell .fc-timegrid-event-harness-inset .fc-v-event,
+.calendar-notion-shell .fc-timegrid-event.fc-v-event {
+  box-shadow: none;
+}
+
+.calendar-notion-shell .fc-event-main {
+  font-size: 11px;
+  line-height: 1.35;
+  font-weight: 500;
+}
+
+.calendar-notion-shell .fc-event-main-frame {
+  padding: 1px 0;
+}
+
+.calendar-notion-shell .fc-daygrid-event {
+  border-radius: 6px;
+  padding: 2px 4px;
+  margin-top: 2px;
+  font-size: 11px;
+}
+
+.calendar-notion-shell .fc-daygrid-day-frame {
+  min-height: 100px;
+}
+
+.calendar-notion-shell .fc-daygrid-day-number {
+  font-size: 11px;
+  padding: 6px 8px;
+  color: hsl(var(--muted-foreground));
+  font-weight: 500;
+}
+
+.calendar-notion-shell .fc-day-today .fc-daygrid-day-number {
+  color: hsl(var(--destructive-foreground));
+  background: var(--cal-today);
+  border-radius: 999px;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.calendar-notion-shell .fc-timegrid-now-indicator-line {
+  border-width: 0 0 0 2px;
+  border-style: dashed;
+  border-color: var(--cal-now-line);
+  opacity: 0.35;
+}
+
+/* Heutige Spalte: deutliche horizontale Linie auf aktueller Uhrzeit */
+.calendar-notion-shell .fc-timegrid-col.fc-day-today .fc-timegrid-now-indicator-line {
+  left: 0 !important;
+  right: 0 !important;
+  width: 100% !important;
+  height: 0 !important;
+  border-left: none !important;
+  border-top: 2px solid var(--cal-now-line);
+  border-bottom: none;
+  border-right: none;
+  border-style: solid;
+  opacity: 1;
+  box-shadow: 0 1px 0 hsl(var(--background) / 0.65);
+}
+
+.calendar-notion-shell .fc-timegrid-col:not(.fc-day-today) .fc-timegrid-now-indicator-line {
+  display: none;
+}
+
+.calendar-notion-shell .fc-timegrid-now-indicator-arrow {
+  border-color: transparent transparent transparent var(--cal-now-line);
+  border-width: 5px 0 5px 6px;
+  margin-top: -5px;
+}
+
+.calendar-notion-shell .fc-all-day {
+  background: hsl(var(--background));
+}
+
+.calendar-notion-shell .fc-daygrid-body-natural .fc-daygrid-day-events {
+  margin-bottom: 4px;
+}
+
+.calendar-notion-shell .fc-scrollgrid-section-body > td {
+  background: hsl(var(--background));
+}
+
+.calendar-notion-shell .fc-list {
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+}
+
+.calendar-notion-shell .fc-list-day-cushion {
+  background: hsl(var(--muted)) !important;
+  color: hsl(var(--foreground));
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.calendar-notion-shell .fc-list-event:hover td {
+  background: hsl(var(--muted));
+}
+
+.calendar-notion-shell .fc-mail-todo-event {
+  box-shadow: inset 0 0 0 1px hsl(var(--foreground) / 0.14);
+  font-weight: 500;
+}
+
+.calendar-notion-shell .fc-mail-todo-allday-bucket {
+  opacity: 0.92;
+}
+
+/* Kopfzeilen: natuerliche Hoehe (Padding/Buttons); kein erzwungenes Mindestmass — vermeidet aufgeblasene Zeile */
+.calendar-shell-workspace .calendar-shell-column-header {
+  box-sizing: border-box;
+  min-height: 0;
+}
+
+/* Kalender-Shell-Header: Layout richtet sich nach Spaltenbreite (Container), nicht Viewport */
+.calendar-shell-header-container {
+  container-type: inline-size;
+  container-name: cal-header;
+  min-width: 0;
+}
+
+/* Baseline (schmale Spalte / 320–480px): zweizeiliges Grid — keine Kollision mit shell-date */
+.calendar-shell-header-responsive {
+  display: grid;
+  column-gap: 0.5rem;
+  row-gap: 0.375rem;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    'shell-side shell-actions'
+    'shell-date shell-date';
+  /* Bei gestreckter Shell-Zeile: Zusatzhoehe unten im Kartenbereich, nicht als neue Rasterzeilen oben */
+  align-content: start;
+  min-height: 0;
+}
+
+.calendar-shell-header-area-side,
+.calendar-shell-header-area-date,
+.calendar-shell-header-area-actions {
+  min-width: 0;
+}
+
+/* „Neuer Termin“-Text nur wenn der Header-Container genug Platz hat */
+.calendar-shell-header-new-event-label {
+  display: none;
+}
+
+@container cal-header (min-width: 720px) {
+  .calendar-shell-header-responsive {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: 'shell-side shell-date shell-actions';
+    align-items: center;
+    column-gap: 0.75rem;
+    row-gap: 0;
+  }
+
+  .calendar-shell-header-area-date {
+    min-height: 0;
+  }
+
+  .calendar-shell-header-area-actions {
+    flex-wrap: nowrap;
+    gap: 0.5rem;
+  }
+
+  .calendar-shell-header-new-event-label {
+    display: inline;
+  }
+}
+
+.calendar-shell-header-area-side {
+  grid-area: shell-side;
+}
+
+.calendar-shell-header-area-date {
+  grid-area: shell-date;
+}
+
+.calendar-shell-header-area-actions {
+  grid-area: shell-actions;
+}

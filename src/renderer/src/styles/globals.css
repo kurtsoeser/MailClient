@@ -1,0 +1,392 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/**
+ * Zentrales Erscheinungsbild (Design-Tokens):
+ * - Semantische Farben: weiter unten in `:root` / `.dark` (Shadcn-HSL-Tripel).
+ * - Interaktion & Chrome: `theme.ts` setzt Akzent (--primary, --ring, …).
+ * - Glass / Oberflaechen: `--glass-*` und Utility-Klassen `.glass-*` unten —
+ *   hier koennen Blur, Transparenz und Schatten global angepasst werden.
+ */
+
+@layer base {
+  :root {
+    /* Light-Palette: warmes, leicht kuehles Off-White wie BOXMAIL / Front /
+       Email-App-Kit. Cards reines Weiss, damit sie aus dem Hintergrund
+       heraustreten. */
+    --background: 220 20% 98%;
+    --foreground: 224 25% 14%;
+    --card: 0 0% 100%;
+    --card-foreground: 224 25% 14%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 25% 14%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 16% 94%;
+    --secondary-foreground: 224 20% 18%;
+    --muted: 220 16% 94%;
+    --muted-foreground: 220 10% 46%;
+    --accent: 220 16% 94%;
+    --accent-foreground: 224 20% 18%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 14% 88%;
+    --input: 220 14% 88%;
+    --ring: 217 91% 60%;
+    --sidebar: 220 22% 96%;
+    --sidebar-foreground: 224 25% 14%;
+    --radius: 0.625rem;
+
+    /* Status-Akzente. Werden vom Tailwind-Plugin als Utility-Klassen
+       (bg-status-unread, text-status-todo, ...) exposed. */
+    --status-unread: 217 91% 60%;
+    --status-todo: 25 95% 53%;
+    --status-waiting: 38 92% 50%;
+    --status-flagged: 45 93% 47%;
+    --status-done: 142 71% 45%;
+
+    /* Glassmorphism / frosted panels (Light) */
+    --glass-blur: 20px;
+    --glass-saturation: 1.35;
+    --glass-surface: 0 0% 100% / 0.78;
+    --glass-surface-muted: 220 20% 98% / 0.65;
+    --glass-border: 0 0% 100% / 0.55;
+    --glass-highlight: 0 0% 100% / 0.35;
+    --glass-shadow: 0 8px 32px hsl(224 25% 14% / 0.08);
+    --glass-shadow-sm: 0 2px 12px hsl(224 25% 14% / 0.06);
+
+    /* Start-Dashboard: staerkeres Frosting, darunter app-chrome sichtbar */
+    --dashboard-glass-blur: 28px;
+    --dashboard-glass-tint: 220 20% 98% / 0.44;
+  }
+
+  .dark {
+    /* Neutralisiertes Dark-Theme: niedrige Saturation und Hue 220 statt
+       240, dadurch wirkt es eher "Graphite" als "Indigo-Blue". Die
+       Akzentfarbe (--primary) wird zusaetzlich vom Theme-Store ueber
+       inline styles auf documentElement gesetzt und kann so frei
+       konfiguriert werden. */
+    --background: 220 6% 8%;
+    --foreground: 220 8% 95%;
+    --card: 220 5% 11%;
+    --card-foreground: 220 8% 95%;
+    --popover: 220 6% 12%;
+    --popover-foreground: 220 8% 95%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 5% 16%;
+    --secondary-foreground: 220 8% 95%;
+    --muted: 220 4% 16%;
+    --muted-foreground: 220 6% 65%;
+    --accent: 220 4% 16%;
+    --accent-foreground: 220 8% 95%;
+    --destructive: 0 62.8% 50%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 220 4% 18%;
+    --input: 220 4% 18%;
+    --ring: 217 91% 60%;
+    --sidebar: 220 6% 10%;
+    --sidebar-foreground: 220 8% 92%;
+    --radius: 0.625rem;
+
+    --status-unread: 217 91% 65%;
+    --status-todo: 25 95% 60%;
+    --status-waiting: 38 92% 60%;
+    --status-flagged: 45 93% 58%;
+    --status-done: 142 65% 55%;
+
+    --glass-surface: 220 8% 14% / 0.72;
+    --glass-surface-muted: 220 6% 10% / 0.55;
+    --glass-border: 220 12% 96% / 0.12;
+    --glass-highlight: 220 15% 100% / 0.08;
+    --glass-shadow: 0 12px 40px hsl(0 0% 0% / 0.42);
+    --glass-shadow-sm: 0 4px 20px hsl(0 0% 0% / 0.28);
+
+    --dashboard-glass-tint: 220 10% 10% / 0.4;
+  }
+
+  .dark.palette-midnight {
+    --background: 230 25% 5%;
+    --card: 230 22% 8%;
+    --sidebar: 230 24% 6%;
+    --border: 230 15% 14%;
+    --glass-surface: 230 22% 10% / 0.78;
+    --glass-border: 230 30% 96% / 0.1;
+  }
+
+  .dark.palette-nord {
+    --background: 220 16% 12%;
+    --card: 220 14% 16%;
+    --sidebar: 220 16% 10%;
+    --border: 220 12% 22%;
+    --muted: 220 12% 18%;
+    --glass-surface: 220 14% 16% / 0.75;
+  }
+
+  .dark.palette-graphite {
+    --background: 0 0% 9%;
+    --card: 0 0% 12%;
+    --sidebar: 0 0% 8%;
+    --border: 0 0% 18%;
+    --glass-surface: 0 0% 14% / 0.78;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings:
+      'rlig' 1,
+      'calt' 1;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 5px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.5);
+  }
+}
+
+@layer utilities {
+  /** App-Hintergrund: dezente Farbverlaeufe, damit Glass-Panels etwas Tiefe zeigen. */
+  .app-chrome-root {
+    background-color: hsl(var(--background));
+    background-image:
+      radial-gradient(1000px 520px at 12% -8%, hsl(var(--primary) / 0.09), transparent 58%),
+      radial-gradient(800px 420px at 92% 0%, hsl(var(--primary) / 0.06), transparent 52%),
+      linear-gradient(180deg, hsl(var(--background)) 0%, hsl(var(--muted) / 0.35) 100%);
+  }
+
+  .dark .app-chrome-root {
+    background-image:
+      radial-gradient(900px 480px at 10% -6%, hsl(var(--primary) / 0.14), transparent 55%),
+      radial-gradient(700px 380px at 94% 2%, hsl(var(--primary) / 0.08), transparent 48%),
+      linear-gradient(180deg, hsl(var(--background)) 0%, hsl(var(--muted) / 0.4) 100%);
+  }
+
+  .glass-panel {
+    background: hsl(var(--glass-surface));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+    border: 1px solid hsl(var(--glass-border));
+    box-shadow: var(--glass-shadow-sm);
+    transition:
+      background-color 0.2s ease,
+      box-shadow 0.25s ease,
+      border-color 0.2s ease;
+  }
+
+  .glass-panel-elevated {
+    background: hsl(var(--glass-surface));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+    border: 1px solid hsl(var(--glass-border));
+    box-shadow: var(--glass-shadow);
+    transition:
+      background-color 0.2s ease,
+      box-shadow 0.25s ease,
+      border-color 0.2s ease;
+  }
+
+  /** Linke Spalte: nur rechte Kante, kein „Rahmen“ rundherum. */
+  .glass-sidebar {
+    background: hsl(var(--glass-surface));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+    border: none;
+    border-right: 1px solid hsl(var(--glass-border));
+    box-shadow: var(--glass-shadow-sm);
+    transition:
+      background-color 0.2s ease,
+      box-shadow 0.25s ease,
+      border-color 0.2s ease;
+  }
+
+  /** Volle Flaeche mit Frosting, ohne eigenen Rahmen (Spalten-Trenner bleiben am Layout-Wrapper). */
+  .glass-fill {
+    background: hsl(var(--glass-surface));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+    transition: background-color 0.2s ease;
+  }
+
+  /**
+   * Start-Dashboard: Vollflaechige, mitscrollende Glass-Schicht hinter Kacheln.
+   * Farbverlaeufe liegen auf der Schicht; darunter bleicht app-chrome durch.
+   */
+  .dashboard-glass-canvas {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-color: hsl(var(--dashboard-glass-tint));
+    background-image:
+      radial-gradient(720px 440px at 14% 22%, hsl(var(--primary) / 0.26), transparent 62%),
+      radial-gradient(640px 400px at 92% 14%, hsl(var(--primary) / 0.18), transparent 56%),
+      radial-gradient(560px 360px at 52% 86%, hsl(var(--primary) / 0.12), transparent 58%);
+    -webkit-backdrop-filter: blur(var(--dashboard-glass-blur)) saturate(1.52);
+    backdrop-filter: blur(var(--dashboard-glass-blur)) saturate(1.52);
+  }
+
+  .dark .dashboard-glass-canvas {
+    background-image:
+      radial-gradient(700px 420px at 12% 24%, hsl(var(--primary) / 0.32), transparent 60%),
+      radial-gradient(620px 380px at 90% 16%, hsl(var(--primary) / 0.22), transparent 54%),
+      radial-gradient(540px 340px at 50% 88%, hsl(var(--primary) / 0.16), transparent 56%);
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    .dashboard-glass-canvas {
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+      background-color: hsl(var(--background));
+      background-image: none;
+    }
+  }
+
+  .glass-topbar {
+    background: hsl(var(--glass-surface-muted));
+    -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 4px)) saturate(var(--glass-saturation));
+    backdrop-filter: blur(calc(var(--glass-blur) + 4px)) saturate(var(--glass-saturation));
+    border-bottom: 1px solid hsl(var(--glass-border));
+    box-shadow: 0 1px 0 hsl(var(--glass-highlight)), var(--glass-shadow-sm);
+    transition:
+      background-color 0.2s ease,
+      box-shadow 0.25s ease;
+  }
+
+  .glass-input {
+    background: hsl(var(--glass-surface-muted));
+    -webkit-backdrop-filter: blur(12px) saturate(1.2);
+    backdrop-filter: blur(12px) saturate(1.2);
+    transition:
+      border-color 0.2s ease,
+      box-shadow 0.2s ease,
+      background-color 0.2s ease;
+  }
+
+  @keyframes glass-pop-in {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .glass-animate-in {
+    animation: glass-pop-in 0.18s ease-out both;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .glass-animate-in {
+      animation: none;
+    }
+    .glass-panel,
+    .glass-panel-elevated,
+    .glass-sidebar,
+    .glass-fill,
+    .glass-topbar,
+    .glass-input,
+    .dashboard-glass-canvas {
+      transition: none;
+    }
+  }
+}
+
+@layer components {
+  .markdown-note-editor .w-md-editor {
+    border-color: hsl(var(--border));
+    background-color: hsl(var(--background));
+    box-shadow: none;
+  }
+
+  .markdown-note-editor .w-md-editor-toolbar,
+  .markdown-note-editor .w-md-editor-content,
+  .markdown-note-editor .w-md-editor-text,
+  .markdown-note-editor .w-md-editor-preview {
+    background-color: hsl(var(--background));
+  }
+
+  .markdown-note-editor .w-md-editor-toolbar {
+    border-color: hsl(var(--border));
+  }
+
+  .markdown-note-editor .w-md-editor-text-input,
+  .markdown-note-editor .w-md-editor-text-pre > code,
+  .markdown-note-editor .wmde-markdown {
+    color: hsl(var(--foreground));
+    font-size: 0.875rem;
+    line-height: 1.5;
+  }
+
+  .markdown-note-editor .w-md-editor-text-input::placeholder {
+    color: hsl(var(--muted-foreground));
+  }
+
+  /** TipTap Composer: Tabellen (Rahmen / Varianten, Ausrichtung) */
+  .ProseMirror table.mail-compose-table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 0.5rem 0;
+    table-layout: auto;
+  }
+
+  .ProseMirror table.mail-compose-table[align='center'] {
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .ProseMirror table.mail-compose-table[align='right'] {
+    margin-left: auto;
+    margin-right: 0;
+  }
+
+  .ProseMirror table.mail-tbl-bordered th,
+  .ProseMirror table.mail-tbl-bordered td {
+    border: 1px solid hsl(var(--border));
+    padding: 0.35rem 0.55rem;
+    vertical-align: top;
+  }
+
+  .ProseMirror table.mail-tbl-bordered th {
+    background-color: hsl(var(--muted) / 0.4);
+    font-weight: 600;
+  }
+
+  .ProseMirror table.mail-tbl-minimal th,
+  .ProseMirror table.mail-tbl-minimal td {
+    border-bottom: 1px solid hsl(var(--border) / 0.65);
+    padding: 0.3rem 0.45rem;
+    vertical-align: top;
+  }
+
+  .ProseMirror table.mail-tbl-minimal th {
+    font-weight: 600;
+  }
+
+  .ProseMirror table.mail-tbl-shadow {
+    box-shadow: 0 2px 14px hsl(0 0% 0% / 0.2);
+  }
+}

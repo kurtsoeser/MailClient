@@ -1,0 +1,552 @@
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import {
+  IPC,
+  type AppConfig,
+  type AttachmentMeta,
+  type ConnectedAccount,
+  type MailFolder,
+  type MailListItem,
+  type MailFull,
+  type SearchHit,
+  type SnoozedMessageItem,
+  type SyncStatus,
+  type ComposeSendInput,
+  type UndoableActionSummary,
+  type ComposeRecipientSuggestion,
+  type ComposeListDriveItemsInput,
+  type ComposeDriveItemRow,
+  type UndoResult,
+  type TodoDueKindOpen,
+  type TodoDueKindList,
+  type TodoCountsAll,
+  type MailTemplate,
+  type MailQuickStep,
+  type CalendarEventView,
+  type CalendarSuggestionFromMail,
+  type CalendarSaveEventInput,
+  type CalendarSaveEventResult,
+  type CalendarUpdateEventInput,
+  type CalendarGetEventInput,
+  type CalendarGetEventResult,
+  type CalendarDeleteEventInput,
+  type CalendarGraphCalendarRow,
+  type CalendarM365GroupCalendarsPage,
+  type CalendarListEventsInput,
+  type CalendarPatchScheduleInput,
+  type CalendarPatchCalendarColorInput,
+  type PatchAccountInput,
+  type TaskItemRow,
+  type TaskListRow,
+  type TasksCreateTaskInput,
+  type TasksDeleteTaskInput,
+  type TasksListListsInput,
+  type TasksListTasksInput,
+  type TasksPatchTaskInput,
+  type TasksUpdateTaskInput,
+  type WorkflowBoard,
+  type WorkflowColumn,
+  type MailMasterCategory,
+  type WorkflowMailFolderUiState,
+  type EnsureWorkflowMailFoldersResult,
+  type MetaFolderSummary,
+  type MetaFolderCreateInput,
+  type MetaFolderUpdateInput,
+  type TeamsChatSummary,
+  type TeamsChatMessageView,
+  type SettingsBackupExportResult,
+  type SettingsBackupPickResult,
+  type SettingsBackupPayload,
+  type AppConfigWeatherLocation,
+  type OpenMeteoForecast,
+  type OpenMeteoGeocodeHit,
+  type UserNote,
+  type UserNoteCalendarKey,
+  type UserNoteCalendarUpsertInput,
+  type UserNoteKind,
+  type UserNoteListFilters,
+  type UserNoteListItem,
+  type UserNoteMailUpsertInput,
+  type UserNoteStandaloneCreateInput,
+  type UserNoteStandaloneUpdateInput,
+  type PeopleContactView,
+  type PeopleCreateContactInput,
+  type PeopleListInput,
+  type PeopleNavCounts,
+  type PeopleSetContactPhotoInput,
+  type PeopleSetFavoriteInput,
+  type PeopleSyncAccountResult,
+  type PeopleUpdateContactInput
+} from '@shared/types'
+import type {
+  MailRuleDefinition,
+  MailRuleTrigger,
+  MailRuleDto,
+  MailRuleDryRunResult,
+  AutomationInboxEntry
+} from '@shared/mail-rules'
+
+const api = {
+  app: {
+    getVersion: (): Promise<string> => ipcRenderer.invoke(IPC.app.getVersion),
+    getPlatform: (): Promise<NodeJS.Platform> => ipcRenderer.invoke(IPC.app.getPlatform),
+    setLaunchOnLogin: (enabled: boolean): Promise<void> =>
+      ipcRenderer.invoke(IPC.app.setLaunchOnLogin, enabled),
+    showTestNotification: (): Promise<void> =>
+      ipcRenderer.invoke(IPC.app.showTestNotification),
+    openExternal: (url: string): Promise<void> => ipcRenderer.invoke(IPC.app.openExternal, url)
+  },
+  config: {
+    get: (): Promise<AppConfig> => ipcRenderer.invoke(IPC.config.get),
+    setMicrosoftClientId: (clientId: string): Promise<AppConfig> =>
+      ipcRenderer.invoke(IPC.config.setMicrosoftClientId, clientId),
+    setGoogleClientId: (clientId: string, clientSecret?: string | null): Promise<AppConfig> =>
+      ipcRenderer.invoke(IPC.config.setGoogleClientId, clientId, clientSecret),
+    setSyncWindowDays: (days: number | null): Promise<AppConfig> =>
+      ipcRenderer.invoke(IPC.config.setSyncWindowDays, days),
+    setAutoLoadImages: (value: boolean): Promise<AppConfig> =>
+      ipcRenderer.invoke(IPC.config.setAutoLoadImages, value),
+    setCalendarTimeZone: (iana: string | null): Promise<AppConfig> =>
+      ipcRenderer.invoke(IPC.config.setCalendarTimeZone, iana),
+    setWeatherLocation: (loc: AppConfigWeatherLocation | null): Promise<AppConfig> =>
+      ipcRenderer.invoke(IPC.config.setWeatherLocation, loc),
+    setWorkflowMailFoldersIntroDismissed: (value: boolean): Promise<AppConfig> =>
+      ipcRenderer.invoke(IPC.config.setWorkflowMailFoldersIntroDismissed, value),
+    setFirstRunSetupCompleted: (value: boolean): Promise<AppConfig> =>
+      ipcRenderer.invoke(IPC.config.setFirstRunSetupCompleted, value)
+  },
+  settingsBackup: {
+    exportToFile: (localStorage: Record<string, string>): Promise<SettingsBackupExportResult> =>
+      ipcRenderer.invoke(IPC.settingsBackup.exportToFile, localStorage),
+    pickAndRead: (): Promise<SettingsBackupPickResult> =>
+      ipcRenderer.invoke(IPC.settingsBackup.pickAndRead),
+    applyFull: (backup: SettingsBackupPayload): Promise<void> =>
+      ipcRenderer.invoke(IPC.settingsBackup.applyFull, backup)
+  },
+  weather: {
+    geocode: (query: string, language: 'de' | 'en'): Promise<OpenMeteoGeocodeHit | null> =>
+      ipcRenderer.invoke(IPC.weather.geocode, { query, language }),
+    forecast: (
+      latitude: number,
+      longitude: number,
+      timeZone: string | null
+    ): Promise<OpenMeteoForecast | null> =>
+      ipcRenderer.invoke(IPC.weather.forecast, { latitude, longitude, timeZone })
+  },
+  auth: {
+    listAccounts: (): Promise<ConnectedAccount[]> => ipcRenderer.invoke(IPC.auth.listAccounts),
+    addMicrosoft: (): Promise<ConnectedAccount> => ipcRenderer.invoke(IPC.auth.addMicrosoft),
+    addGoogle: (): Promise<ConnectedAccount> => ipcRenderer.invoke(IPC.auth.addGoogle),
+    refreshMicrosoft: (accountId: string): Promise<ConnectedAccount> =>
+      ipcRenderer.invoke(IPC.auth.refreshMicrosoft, accountId),
+    refreshGoogle: (accountId: string): Promise<ConnectedAccount> =>
+      ipcRenderer.invoke(IPC.auth.refreshGoogle, accountId),
+    remove: (id: string): Promise<ConnectedAccount[]> =>
+      ipcRenderer.invoke(IPC.auth.remove, id),
+    reorderAccounts: (accountIds: string[]): Promise<ConnectedAccount[]> =>
+      ipcRenderer.invoke(IPC.auth.reorderAccounts, accountIds),
+    getProfilePhotoDataUrl: (accountId: string): Promise<string | null> =>
+      ipcRenderer.invoke(IPC.auth.getProfilePhotoDataUrl, accountId),
+    patchAccount: (args: PatchAccountInput): Promise<ConnectedAccount> =>
+      ipcRenderer.invoke(IPC.auth.patchAccount, args)
+  },
+  graph: {
+    getMe: (id: string): Promise<unknown> => ipcRenderer.invoke(IPC.graph.getMe, id),
+    listTeamsChats: (accountId: string): Promise<TeamsChatSummary[]> =>
+      ipcRenderer.invoke(IPC.graph.listTeamsChats, accountId),
+    listTeamsChatMessages: (args: {
+      accountId: string
+      chatId: string
+      limit?: number
+    }): Promise<TeamsChatMessageView[]> =>
+      ipcRenderer.invoke(IPC.graph.listTeamsChatMessages, args),
+    sendTeamsChatMessage: (args: {
+      accountId: string
+      chatId: string
+      text: string
+    }): Promise<void> => ipcRenderer.invoke(IPC.graph.sendTeamsChatMessage, args)
+  },
+  notes: {
+    getMail: (messageId: number): Promise<UserNote | null> =>
+      ipcRenderer.invoke(IPC.notes.getMail, messageId),
+    upsertMail: (input: UserNoteMailUpsertInput): Promise<UserNote> =>
+      ipcRenderer.invoke(IPC.notes.upsertMail, input),
+    getCalendar: (key: UserNoteCalendarKey): Promise<UserNote | null> =>
+      ipcRenderer.invoke(IPC.notes.getCalendar, key),
+    upsertCalendar: (input: UserNoteCalendarUpsertInput): Promise<UserNote> =>
+      ipcRenderer.invoke(IPC.notes.upsertCalendar, input),
+    createStandalone: (input: UserNoteStandaloneCreateInput): Promise<UserNote> =>
+      ipcRenderer.invoke(IPC.notes.createStandalone, input),
+    updateStandalone: (input: UserNoteStandaloneUpdateInput): Promise<UserNote> =>
+      ipcRenderer.invoke(IPC.notes.updateStandalone, input),
+    delete: (id: number): Promise<void> => ipcRenderer.invoke(IPC.notes.delete, id),
+    list: (filters?: UserNoteListFilters): Promise<UserNoteListItem[]> =>
+      ipcRenderer.invoke(IPC.notes.list, filters ?? {})
+  },
+  mail: {
+    listFolders: (accountId: string): Promise<MailFolder[]> =>
+      ipcRenderer.invoke(IPC.mail.listFolders, accountId),
+    listMessages: (options: {
+      folderId?: number
+      accountId?: string
+      limit?: number
+    }): Promise<MailListItem[]> => ipcRenderer.invoke(IPC.mail.listMessages, options),
+    listInboxTriage: (limit?: number | null): Promise<MailListItem[]> =>
+      limit === undefined
+        ? ipcRenderer.invoke(IPC.mail.listInboxTriage, {})
+        : ipcRenderer.invoke(IPC.mail.listInboxTriage, { limit }),
+    listUnifiedInbox: (): Promise<MailListItem[]> =>
+      ipcRenderer.invoke(IPC.mail.listUnifiedInbox),
+    listMetaFolders: (): Promise<MetaFolderSummary[]> =>
+      ipcRenderer.invoke(IPC.mail.listMetaFolders),
+    getMetaFolder: (id: number): Promise<MetaFolderSummary | null> =>
+      ipcRenderer.invoke(IPC.mail.getMetaFolder, id),
+    createMetaFolder: (input: MetaFolderCreateInput): Promise<MetaFolderSummary> =>
+      ipcRenderer.invoke(IPC.mail.createMetaFolder, input),
+    updateMetaFolder: (input: MetaFolderUpdateInput): Promise<MetaFolderSummary> =>
+      ipcRenderer.invoke(IPC.mail.updateMetaFolder, input),
+    deleteMetaFolder: (id: number): Promise<void> => ipcRenderer.invoke(IPC.mail.deleteMetaFolder, id),
+    reorderMetaFolders: (orderedIds: number[]): Promise<void> =>
+      ipcRenderer.invoke(IPC.mail.reorderMetaFolders, orderedIds),
+    listMetaFolderMessages: (metaFolderId: number): Promise<MailListItem[]> =>
+      ipcRenderer.invoke(IPC.mail.listMetaFolderMessages, metaFolderId),
+    getMessage: (id: number): Promise<MailFull | null> =>
+      ipcRenderer.invoke(IPC.mail.getMessage, id),
+    listThreadMessages: (args: { accountId: string; threadKey: string }): Promise<MailFull[]> =>
+      ipcRenderer.invoke(IPC.mail.listThreadMessages, args),
+    listMessagesByThreads: (args: {
+      accountId: string
+      threadKeys: string[]
+    }): Promise<MailListItem[]> =>
+      ipcRenderer.invoke(IPC.mail.listMessagesByThreads, args),
+    fetchInlineImages: (messageId: number): Promise<Record<string, string>> =>
+      ipcRenderer.invoke(IPC.mail.fetchInlineImages, { messageId }),
+    listAttachments: (messageId: number): Promise<AttachmentMeta[]> =>
+      ipcRenderer.invoke(IPC.mail.listAttachments, { messageId }),
+    openAttachment: (
+      messageId: number,
+      attachmentId: string
+    ): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC.mail.openAttachment, { messageId, attachmentId }),
+    saveAttachmentAs: (
+      messageId: number,
+      attachmentId: string,
+      suggestedName?: string
+    ): Promise<{ ok: boolean; path?: string; error?: string; cancelled?: boolean }> =>
+      ipcRenderer.invoke(IPC.mail.saveAttachmentAs, {
+        messageId,
+        attachmentId,
+        suggestedName
+      }),
+    syncAttachmentsFlag: (messageId: number, value: boolean): Promise<void> =>
+      ipcRenderer.invoke(IPC.mail.syncAttachmentsFlag, { messageId, value }),
+    refreshNow: (folderId: number | null): Promise<void> =>
+      ipcRenderer.invoke(IPC.mail.refreshNow, { folderId }),
+    setActiveFolder: (folderId: number | null): Promise<void> =>
+      ipcRenderer.invoke(IPC.mail.setActiveFolder, { folderId }),
+    search: (query: string, limit?: number): Promise<SearchHit[]> =>
+      ipcRenderer.invoke(IPC.mail.search, { query, limit }),
+    syncAccount: (accountId: string): Promise<{ folders: number; inboxMessages: number }> =>
+      ipcRenderer.invoke(IPC.mail.syncAccount, accountId),
+    syncFolder: (folderId: number): Promise<number> =>
+      ipcRenderer.invoke(IPC.mail.syncFolder, folderId),
+    setRead: (messageId: number, isRead: boolean): Promise<void> =>
+      ipcRenderer.invoke(IPC.mail.setRead, { messageId, isRead }),
+    setFlagged: (messageId: number, flagged: boolean): Promise<void> =>
+      ipcRenderer.invoke(IPC.mail.setFlagged, { messageId, flagged }),
+    archive: (messageId: number): Promise<void> =>
+      ipcRenderer.invoke(IPC.mail.archive, messageId),
+    moveToTrash: (messageId: number): Promise<void> =>
+      ipcRenderer.invoke(IPC.mail.moveToTrash, messageId),
+    moveToFolder: (args: { messageId: number; targetFolderId: number }): Promise<void> =>
+      ipcRenderer.invoke(IPC.mail.moveToFolder, args),
+    permanentDeleteMessage: (messageId: number): Promise<void> =>
+      ipcRenderer.invoke(IPC.mail.permanentDeleteMessage, messageId),
+    emptyTrashFolder: (folderId: number): Promise<{ deletedRemote: number }> =>
+      ipcRenderer.invoke(IPC.mail.emptyTrashFolder, folderId),
+    snooze: (messageId: number, wakeAt: string, preset?: string): Promise<void> =>
+      ipcRenderer.invoke(IPC.mail.snooze, { messageId, wakeAt, preset }),
+    unsnooze: (messageId: number): Promise<void> =>
+      ipcRenderer.invoke(IPC.mail.unsnooze, messageId),
+    listSnoozed: (limit?: number): Promise<SnoozedMessageItem[]> =>
+      ipcRenderer.invoke(IPC.mail.listSnoozed, { limit }),
+    listTodoMessages: (args: {
+      accountId: string | null
+      dueKind: TodoDueKindList
+      limit?: number
+    }): Promise<MailListItem[]> => ipcRenderer.invoke(IPC.mail.listTodoMessages, args),
+    listTodoMessagesInRange: (args: {
+      accountId: string | null
+      rangeStartIso: string
+      rangeEndIso: string
+      limit?: number
+    }): Promise<MailListItem[]> => ipcRenderer.invoke(IPC.mail.listTodoMessagesInRange, args),
+    listTodoCounts: (): Promise<TodoCountsAll> => ipcRenderer.invoke(IPC.mail.listTodoCounts),
+    listTemplates: (): Promise<MailTemplate[]> => ipcRenderer.invoke(IPC.mail.listTemplates),
+    listQuickSteps: (): Promise<MailQuickStep[]> => ipcRenderer.invoke(IPC.mail.listQuickSteps),
+    runQuickStep: (args: { quickStepId: number; messageId: number }): Promise<void> =>
+      ipcRenderer.invoke(IPC.mail.runQuickStep, args),
+    setTodoForMessage: (args: {
+      messageId: number
+      dueKind: TodoDueKindOpen
+    }): Promise<void> => ipcRenderer.invoke(IPC.mail.setTodoForMessage, args),
+    setTodoScheduleForMessage: (args: {
+      messageId: number
+      startIso: string
+      endIso: string
+    }): Promise<void> => ipcRenderer.invoke(IPC.mail.setTodoScheduleForMessage, args),
+    completeTodoForMessage: (messageId: number): Promise<void> =>
+      ipcRenderer.invoke(IPC.mail.completeTodoForMessage, messageId),
+    listWaitingMessages: (args?: { limit?: number }): Promise<MailListItem[]> =>
+      ipcRenderer.invoke(IPC.mail.listWaitingMessages, args ?? {}),
+    setWaitingForMessage: (args: {
+      messageId: number
+      days?: number
+    }): Promise<void> => ipcRenderer.invoke(IPC.mail.setWaitingForMessage, args),
+    clearWaitingForMessage: (messageId: number): Promise<void> =>
+      ipcRenderer.invoke(IPC.mail.clearWaitingForMessage, messageId),
+    undoLast: (): Promise<UndoResult> => ipcRenderer.invoke(IPC.mail.undoLast),
+    peekUndo: (): Promise<UndoableActionSummary | null> =>
+      ipcRenderer.invoke(IPC.mail.peekUndo),
+    unsubscribeOneClick: (messageId: number): Promise<void> =>
+      ipcRenderer.invoke(IPC.mail.unsubscribeOneClick, messageId),
+    setMessageCategories: (args: {
+      messageId: number
+      categories: string[]
+    }): Promise<void> => ipcRenderer.invoke(IPC.mail.setMessageCategories, args),
+    listMasterCategories: (accountId: string): Promise<MailMasterCategory[]> =>
+      ipcRenderer.invoke(IPC.mail.listMasterCategories, accountId),
+    createMasterCategory: (args: {
+      accountId: string
+      displayName: string
+      color: string
+    }): Promise<MailMasterCategory> =>
+      ipcRenderer.invoke(IPC.mail.createMasterCategory, args),
+    updateMasterCategory: (args: {
+      accountId: string
+      categoryId: string
+      displayName?: string
+      color?: string
+    }): Promise<void> => ipcRenderer.invoke(IPC.mail.updateMasterCategory, args),
+    deleteMasterCategory: (args: { accountId: string; categoryId: string }): Promise<void> =>
+      ipcRenderer.invoke(IPC.mail.deleteMasterCategory, args),
+    listDistinctMessageTags: (accountId: string): Promise<string[]> =>
+      ipcRenderer.invoke(IPC.mail.listDistinctMessageTags, accountId),
+    getWorkflowMailFolderState: (accountId: string): Promise<WorkflowMailFolderUiState> =>
+      ipcRenderer.invoke(IPC.mail.getWorkflowMailFolderState, accountId),
+    ensureWorkflowMailFolders: (accountId: string): Promise<EnsureWorkflowMailFoldersResult> =>
+      ipcRenderer.invoke(IPC.mail.ensureWorkflowMailFolders, accountId),
+    setWorkflowMailFolderMapping: (args: {
+      accountId: string
+      wipFolderId: number | null
+      doneFolderId: number | null
+    }): Promise<void> => ipcRenderer.invoke(IPC.mail.setWorkflowMailFolderMapping, args)
+  },
+  folder: {
+    create: (args: {
+      accountId: string
+      parentFolderId: number | null
+      name: string
+    }): Promise<MailFolder> => ipcRenderer.invoke(IPC.folder.create, args),
+    rename: (folderId: number, name: string): Promise<void> =>
+      ipcRenderer.invoke(IPC.folder.rename, { folderId, name }),
+    delete: (folderId: number): Promise<void> =>
+      ipcRenderer.invoke(IPC.folder.delete, folderId),
+    move: (folderId: number, destinationFolderId: number | null): Promise<void> =>
+      ipcRenderer.invoke(IPC.folder.move, { folderId, destinationFolderId }),
+    toggleFavorite: (folderId: number, value: boolean): Promise<MailFolder> =>
+      ipcRenderer.invoke(IPC.folder.toggleFavorite, { folderId, value })
+  },
+  compose: {
+    send: (input: ComposeSendInput): Promise<void> =>
+      ipcRenderer.invoke(IPC.compose.send, input),
+    recipientSuggestions: (args: {
+      accountId: string
+      query: string
+    }): Promise<ComposeRecipientSuggestion[]> =>
+      ipcRenderer.invoke(IPC.compose.recipientSuggestions, args),
+    listDriveItems: (args: ComposeListDriveItemsInput): Promise<ComposeDriveItemRow[]> =>
+      ipcRenderer.invoke(IPC.compose.listDriveItems, args)
+  },
+  calendar: {
+    listEvents: (args: CalendarListEventsInput): Promise<CalendarEventView[]> =>
+      ipcRenderer.invoke(IPC.calendar.listEvents, args),
+    listCalendars: (args: { accountId: string }): Promise<CalendarGraphCalendarRow[]> =>
+      ipcRenderer.invoke(IPC.calendar.listCalendars, args),
+    listMicrosoft365GroupCalendars: (args: {
+      accountId: string
+      offset?: number
+      limit?: number
+    }): Promise<CalendarM365GroupCalendarsPage> =>
+      ipcRenderer.invoke(IPC.calendar.listMicrosoft365GroupCalendars, args),
+    patchCalendarColor: (args: CalendarPatchCalendarColorInput): Promise<void> =>
+      ipcRenderer.invoke(IPC.calendar.patchCalendarColor, args),
+    createTeamsMeeting: (args: {
+      accountId: string
+      subject: string
+      startIso: string
+      endIso: string
+      bodyHtml?: string
+      graphCalendarId?: string | null
+      attendeeEmails?: string[] | null
+    }): Promise<{ id: string; webLink: string | null; joinUrl: string | null }> =>
+      ipcRenderer.invoke(IPC.calendar.createTeamsMeeting, args),
+    suggestFromMessage: (messageId: number): Promise<CalendarSuggestionFromMail> =>
+      ipcRenderer.invoke(IPC.calendar.suggestFromMessage, messageId),
+    createEvent: (input: CalendarSaveEventInput): Promise<CalendarSaveEventResult> =>
+      ipcRenderer.invoke(IPC.calendar.createEvent, input),
+    updateEvent: (input: CalendarUpdateEventInput): Promise<void> =>
+      ipcRenderer.invoke(IPC.calendar.updateEvent, input),
+    getEvent: (input: CalendarGetEventInput): Promise<CalendarGetEventResult> =>
+      ipcRenderer.invoke(IPC.calendar.getEvent, input),
+    deleteEvent: (input: CalendarDeleteEventInput): Promise<void> =>
+      ipcRenderer.invoke(IPC.calendar.deleteEvent, input),
+    patchEventSchedule: (input: CalendarPatchScheduleInput): Promise<void> =>
+      ipcRenderer.invoke(IPC.calendar.patchEventSchedule, input),
+    patchEventCategories: (args: {
+      accountId: string
+      graphEventId: string
+      categories: string[]
+      graphCalendarId?: string | null
+    }): Promise<void> => ipcRenderer.invoke(IPC.calendar.patchEventCategories, args)
+  },
+  tasks: {
+    listLists: (args: TasksListListsInput): Promise<TaskListRow[]> =>
+      ipcRenderer.invoke(IPC.tasks.listLists, args),
+    listTasks: (args: TasksListTasksInput): Promise<TaskItemRow[]> =>
+      ipcRenderer.invoke(IPC.tasks.listTasks, args),
+    createTask: (input: TasksCreateTaskInput): Promise<TaskItemRow> =>
+      ipcRenderer.invoke(IPC.tasks.createTask, input),
+    updateTask: (input: TasksUpdateTaskInput): Promise<TaskItemRow> =>
+      ipcRenderer.invoke(IPC.tasks.updateTask, input),
+    patchTask: (input: TasksPatchTaskInput): Promise<TaskItemRow> =>
+      ipcRenderer.invoke(IPC.tasks.patchTask, input),
+    deleteTask: (input: TasksDeleteTaskInput): Promise<void> =>
+      ipcRenderer.invoke(IPC.tasks.deleteTask, input)
+  },
+  people: {
+    list: (input: PeopleListInput): Promise<PeopleContactView[]> =>
+      ipcRenderer.invoke(IPC.people.list, input),
+    getNavCounts: (): Promise<PeopleNavCounts> => ipcRenderer.invoke(IPC.people.getNavCounts),
+    syncAccount: (accountId: string): Promise<PeopleSyncAccountResult> =>
+      ipcRenderer.invoke(IPC.people.syncAccount, accountId),
+    syncAll: (): Promise<PeopleSyncAccountResult[]> => ipcRenderer.invoke(IPC.people.syncAll),
+    setFavorite: (input: PeopleSetFavoriteInput): Promise<void> =>
+      ipcRenderer.invoke(IPC.people.setFavorite, input),
+    getPhotoDataUrl: (contactId: number): Promise<string | null> =>
+      ipcRenderer.invoke(IPC.people.getPhotoDataUrl, contactId),
+    updateContact: (input: PeopleUpdateContactInput): Promise<void> =>
+      ipcRenderer.invoke(IPC.people.updateContact, input),
+    setContactPhoto: (input: PeopleSetContactPhotoInput): Promise<PeopleContactView> =>
+      ipcRenderer.invoke(IPC.people.setContactPhoto, input),
+    createContact: (input: PeopleCreateContactInput): Promise<PeopleContactView> =>
+      ipcRenderer.invoke(IPC.people.createContact, input),
+    deleteContact: (contactId: number): Promise<void> => ipcRenderer.invoke(IPC.people.deleteContact, contactId)
+  },
+  workflow: {
+    listBoards: (): Promise<WorkflowBoard[]> => ipcRenderer.invoke(IPC.workflow.listBoards),
+    updateBoardColumns: (args: {
+      boardId: number
+      columns: WorkflowColumn[]
+    }): Promise<void> => ipcRenderer.invoke(IPC.workflow.updateBoardColumns, args)
+  },
+  vip: {
+    list: (accountId: string): Promise<string[]> => ipcRenderer.invoke(IPC.vip.list, accountId),
+    add: (args: { accountId: string; email: string }): Promise<void> =>
+      ipcRenderer.invoke(IPC.vip.add, args),
+    remove: (args: { accountId: string; email: string }): Promise<void> =>
+      ipcRenderer.invoke(IPC.vip.remove, args)
+  },
+  rules: {
+    list: (): Promise<MailRuleDto[]> => ipcRenderer.invoke(IPC.rules.list),
+    get: (id: number): Promise<MailRuleDto | null> => ipcRenderer.invoke(IPC.rules.get, id),
+    create: (input: {
+      name: string
+      enabled: boolean
+      trigger: MailRuleTrigger
+      definition: MailRuleDefinition
+    }): Promise<MailRuleDto> => ipcRenderer.invoke(IPC.rules.create, input),
+    update: (args: {
+      id: number
+      patch: Partial<{
+        name: string
+        enabled: boolean
+        trigger: MailRuleTrigger
+        sortOrder: number
+        definition: MailRuleDefinition
+      }>
+    }): Promise<MailRuleDto> => ipcRenderer.invoke(IPC.rules.update, args),
+    delete: (id: number): Promise<void> => ipcRenderer.invoke(IPC.rules.delete, id),
+    dryRun: (args: {
+      ruleId: number
+      accountId: string | null
+      limit?: number
+    }): Promise<MailRuleDryRunResult> => ipcRenderer.invoke(IPC.rules.dryRun, args),
+    applyManual: (args: {
+      ruleId: number
+      accountId: string | null
+      limit?: number
+    }): Promise<{ applied: number }> => ipcRenderer.invoke(IPC.rules.applyManual, args),
+    listAutomation: (limit?: number): Promise<AutomationInboxEntry[]> =>
+      ipcRenderer.invoke(IPC.rules.listAutomation, limit),
+    undoAutomation: (actionId: number): Promise<UndoResult> =>
+      ipcRenderer.invoke(IPC.rules.undoAutomation, actionId)
+  },
+  events: {
+    onAccountsChanged: (handler: (accounts: ConnectedAccount[]) => void): (() => void) => {
+      const listener = (_e: IpcRendererEvent, accounts: ConnectedAccount[]): void =>
+        handler(accounts)
+      ipcRenderer.on('accounts:changed', listener)
+      return (): void => {
+        ipcRenderer.off('accounts:changed', listener)
+      }
+    },
+    onSyncStatus: (handler: (status: SyncStatus) => void): (() => void) => {
+      const listener = (_e: IpcRendererEvent, status: SyncStatus): void => handler(status)
+      ipcRenderer.on('sync:status', listener)
+      return (): void => {
+        ipcRenderer.off('sync:status', listener)
+      }
+    },
+    onMailChanged: (handler: (payload: { accountId: string }) => void): (() => void) => {
+      const listener = (_e: IpcRendererEvent, payload: { accountId: string }): void =>
+        handler(payload)
+      ipcRenderer.on('mail:changed', listener)
+      return (): void => {
+        ipcRenderer.off('mail:changed', listener)
+      }
+    },
+    onNotesChanged: (
+      handler: (payload: {
+        kind?: UserNoteKind
+        noteId?: number
+        messageId?: number | null
+        accountId?: string | null
+      }) => void
+    ): (() => void) => {
+      const listener = (
+        _e: IpcRendererEvent,
+        payload: {
+          kind?: UserNoteKind
+          noteId?: number
+          messageId?: number | null
+          accountId?: string | null
+        }
+      ): void => handler(payload)
+      ipcRenderer.on('notes:changed', listener)
+      return (): void => {
+        ipcRenderer.off('notes:changed', listener)
+      }
+    }
+  },
+  /**
+   * Generischer `ipcRenderer.invoke`-Aufruf.
+   * Hilft, wenn der Renderer (z. B. nach Vite-HMR) neue APIs nutzt, das Preload aber noch
+   * vom Fensterstart stammt — dann kann z. B. `invoke(IPC.calendar.deleteEvent, …)` trotzdem funktionieren.
+   */
+  invoke: (channel: string, payload?: unknown): Promise<unknown> =>
+    ipcRenderer.invoke(channel, payload)
+}
+
+contextBridge.exposeInMainWorld('mailClient', api)
+
+export type MailClientApi = typeof api

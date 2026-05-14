@@ -1,0 +1,37 @@
+appId: at.kurtsoeser.mailclient
+productName: MailClient
+copyright: Copyright (c) 2026 Kurt Soeser
+
+directories:
+  buildResources: resources
+  output: release/${version}
+
+files:
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!{.eslintignore,.eslintrc.cjs,.prettierignore,.prettierrc.json,tsconfig.*,electron-builder.yml}'
+  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
+  - '!{tailwind.config.js,postcss.config.js,eslint.config.js}'
+  - '!npm-install.log'
+
+asarUnpack:
+  - resources/**
+
+# Ohne Codesigning: vermeidet winCodeSign-Extraktion mit Symlinks (fehlt oft ohne
+# Admin/Entwicklermodus auf Windows). Für Store/verteilbare EXE später Zertifikat + sign:true.
+win:
+  signAndEditExecutable: false
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-setup.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+
+publish: null

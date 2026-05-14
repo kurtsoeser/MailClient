@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https: cid:; connect-src 'self' ws: http://localhost:5173 http://localhost:5174;"
+    />
+    <title>MailClient</title>
+  </head>
+  <body class="bg-background text-foreground antialiased">
+    <div id="root" class="h-full min-h-0 bg-background text-foreground"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
