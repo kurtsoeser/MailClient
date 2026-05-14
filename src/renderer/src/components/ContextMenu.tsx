@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { ChevronRight, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
+
+/** Ueber Glass-Spalten (backdrop-filter = eigener Stacking Context), unter App-Modals (z-[300]). */
+const CONTEXT_MENU_Z = 'z-[280]'
+const CONTEXT_SUBMENU_Z = 'z-[290]'
 
 export interface ContextMenuItem {
   id: string
@@ -108,10 +113,13 @@ export function ContextMenu({ x, y, items, onClose }: Props): JSX.Element {
     )
   }
 
-  return (
+  const menu = (
     <div
       ref={ref}
-      className="fixed z-[160] min-w-[200px] rounded-md border border-border bg-popover py-1 text-popover-foreground shadow-lg"
+      className={cn(
+        'fixed min-w-[200px] rounded-md border border-border bg-popover py-1 text-popover-foreground shadow-lg',
+        CONTEXT_MENU_Z
+      )}
       style={{ left: adjustedX, top: adjustedY }}
       role="menu"
     >
@@ -143,7 +151,8 @@ export function ContextMenu({ x, y, items, onClose }: Props): JSX.Element {
             {openSubmenuId === item.id && (
               <div
                 className={cn(
-                  'absolute left-full top-0 z-[170] ml-0.5 min-w-[min(240px,calc(100vw-2rem))] max-w-[min(320px,calc(100vw-2rem))] max-h-[min(340px,70vh)] rounded-md border border-border bg-popover text-popover-foreground shadow-xl',
+                  'absolute left-full top-0 ml-0.5 min-w-[min(240px,calc(100vw-2rem))] max-w-[min(320px,calc(100vw-2rem))] max-h-[min(340px,70vh)] rounded-md border border-border bg-popover text-popover-foreground shadow-xl',
+                  CONTEXT_SUBMENU_Z,
                   item.submenuContent == null && 'overflow-y-auto py-1'
                 )}
                 role="menu"
@@ -183,4 +192,6 @@ export function ContextMenu({ x, y, items, onClose }: Props): JSX.Element {
       )}
     </div>
   )
+
+  return createPortal(menu, document.body)
 }

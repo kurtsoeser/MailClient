@@ -67,3 +67,21 @@ export function readSidebarHiddenCalendarKeysFromStorage(): Set<string> {
 export function dispatchCalendarVisibilityChanged(): void {
   window.dispatchEvent(new CustomEvent(CALENDAR_VISIBILITY_CHANGED_EVENT))
 }
+
+export function writeHiddenCalendarKeysToStorage(keys: Set<string>): void {
+  try {
+    window.localStorage.setItem(HIDDEN_CALENDARS_STORAGE_KEY, JSON.stringify(Array.from(keys)))
+  } catch {
+    // ignore
+  }
+  dispatchCalendarVisibilityChanged()
+}
+
+export function writeSidebarHiddenCalendarKeysToStorage(keys: Set<string>): void {
+  try {
+    window.localStorage.setItem(SIDEBAR_HIDDEN_CALENDARS_STORAGE_KEY, JSON.stringify(Array.from(keys)))
+  } catch {
+    // ignore
+  }
+  dispatchCalendarVisibilityChanged()
+}

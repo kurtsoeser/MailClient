@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type {
   ComposeAttachment,
+  ComposeRecipient,
   ComposeReferenceAttachment,
   MailFull,
   MailImportance
@@ -82,6 +83,11 @@ export interface ComposeDraft {
   error?: string | null
   /** Wenn true: nur in der Startseiten-Kachel, nicht als schwebendes Composer-Fenster. */
   embedInDashboard?: boolean
+  /**
+   * Nach erfolgreichem Speichern in «Entwürfe» am Server (Graph: Message-Id,
+   * Gmail: Draft-Ressourcen-ID). Bei Konto-Wechsel im Composer zuruecksetzen.
+   */
+  savedRemoteDraftId?: string | null
 }
 
 interface ComposeState {
@@ -99,6 +105,8 @@ interface ComposeState {
   addAttachments: (id: string, files: ComposeAttachmentFile[]) => void
   removeAttachment: (id: string, attachmentId: string) => void
   send: (id: string) => Promise<void>
+  /** Entwurf in den Server-Ordner «Entwürfe» schreiben (oder aktualisieren). */
+  saveRemoteDraft: (id: string) => Promise<void>
   /** Ein eingebetteter Entwurf fuer die Startseite (hoechstens einer). */
   ensureDashboardEmbedDraft: (accountId: string) => string
 }
@@ -134,6 +142,81 @@ function defaultComposeFields(accountId: string): Pick<
     isDeliveryReceiptRequested: false,
     isReadReceiptRequested: false,
     scheduledSendAt: null
+  }
+}
+
+interface ComposeOutgoingBundle {
+  bodyHtml: string
+  to: ComposeRecipient[]
+  cc: ComposeRecipient[]
+  bcc: ComposeRecipient[]
+  allAttachments: ComposeAttachment[]
+  referenceAttachments: ComposeReferenceAttachment[] | undefined
+}
+
+function buildComposeOutgoingBundle(draft: ComposeDraft): ComposeOutgoingBundle {
+  const to = parseRecipients(draft.to)
+  const cc = parseRecipients(draft.cc)
+  const bcc = parseRecipients(draft.bcc)
+
+  const userHtml = draft.prependRichHtml.trim()
+    ? draft.prependRichHtml
+    : draft.prependPlain
+      ? `<p>${draft.prependPlain
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/\n/g, '<br>')}</p>`
+      : ''
+  const sigRaw = draft.signatureRichHtml.trim()
+  const sigHtml = sigRaw ? sanitizeComposeHtmlFragment(sigRaw) : ''
+  const sigBlock = sigHtml ? `<p></p>${sigHtml}` : ''
+  const rawBodyHtml = userHtml + sigBlock + draft.quotedHtml
+
+  const inline: ComposeAttachment[] = []
+  const bodyHtml = rawBodyHtml.replace(
+    /<img\b([^>]*?)\bsrc\s*=\s*"data:([^;"]+);base64,([A-Za-z0-9+/=]+)"([^>]*)>/gi,
+    (_match, pre: string, mime: string, b64: string, post: string) => {
+      const cid = `inline-${Date.now().toString(36)}-${inline.length}@mailclient.local`
+      const name = guessFileName(mime, inline.length)
+      inline.push({
+        name,
+        contentType: mime,
+        size: Math.round((b64.length * 3) / 4),
+        dataBase64: b64,
+        isInline: true,
+        contentId: cid
+      })
+      return `<img${pre}src="cid:${cid}"${post}>`
+    }
+  )
+
+  const fileAttachments: ComposeAttachment[] = draft.attachments.map((a) => ({
+    name: a.name,
+    contentType: a.contentType,
+    size: a.size,
+    dataBase64: a.dataBase64,
+    isInline: false
+  }))
+
+  const allAttachments = [...inline, ...fileAttachments]
+
+  const referenceAttachments: ComposeReferenceAttachment[] | undefined =
+    draft.referenceAttachments.length > 0
+      ? draft.referenceAttachments.map((r) => ({
+          name: r.name,
+          sourceUrl: r.webUrl,
+          providerType: 'oneDriveBusiness'
+        }))
+      : undefined
+
+  return {
+    bodyHtml,
+    to,
+    cc,
+    bcc,
+    allAttachments,
+    referenceAttachments
   }
 }
 
@@ -297,72 +380,57 @@ export const useComposeStore = create<ComposeState>((set, get) => ({
     }))
   },
 
+  async saveRemoteDraft(id: string): Promise<void> {
+    const draft = get().drafts.find((d) => d.id === id)
+    if (!draft) return
+
+    const bundle = buildComposeOutgoingBundle(draft)
+
+    const acc = useAccountsStore.getState().accounts.find((a) => a.id === draft.accountId)
+    if (acc?.provider === 'google' && (draft.referenceAttachments?.length ?? 0) > 0) {
+      get().update(id, {
+        error: 'Cloud-Anhaenge (OneDrive) sind nur fuer Microsoft 365 verfuegbar.'
+      })
+      return
+    }
+
+    get().update(id, { busy: true, error: null })
+    try {
+      const result = await window.mailClient.compose.saveDraft({
+        accountId: draft.accountId,
+        subject: draft.subject || '(Kein Betreff)',
+        bodyHtml: bundle.bodyHtml,
+        to: bundle.to,
+        cc: bundle.cc.length ? bundle.cc : undefined,
+        bcc: bundle.bcc.length ? bundle.bcc : undefined,
+        attachments: bundle.allAttachments.length ? bundle.allAttachments : undefined,
+        referenceAttachments: bundle.referenceAttachments,
+        replyToRemoteId: draft.replyToRemoteId,
+        replyMode: draft.mode === 'new' ? undefined : draft.mode,
+        remoteDraftId: draft.savedRemoteDraftId ?? undefined,
+        importance: draft.importance,
+        isDeliveryReceiptRequested: draft.isDeliveryReceiptRequested,
+        isReadReceiptRequested: draft.isReadReceiptRequested
+      })
+      get().update(id, { busy: false, savedRemoteDraftId: result.remoteDraftId, error: null })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      get().update(id, { busy: false, error: msg })
+    }
+  },
+
   async send(id: string): Promise<void> {
     const state = get()
     const draft = state.drafts.find((d) => d.id === id)
     if (!draft) return
 
-    const to = parseRecipients(draft.to)
+    const bundle = buildComposeOutgoingBundle(draft)
+    const { bodyHtml, to, cc, bcc, allAttachments, referenceAttachments } = bundle
+
     if (to.length === 0) {
       get().update(id, { error: 'Bitte mindestens einen Empfaenger angeben.' })
       return
     }
-
-    const cc = parseRecipients(draft.cc)
-    const bcc = parseRecipients(draft.bcc)
-
-    const userHtml = draft.prependRichHtml.trim()
-      ? draft.prependRichHtml
-      : draft.prependPlain
-        ? `<p>${draft.prependPlain
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/\n/g, '<br>')}</p>`
-        : ''
-    const sigRaw = draft.signatureRichHtml.trim()
-    const sigHtml = sigRaw ? sanitizeComposeHtmlFragment(sigRaw) : ''
-    const sigBlock = sigHtml ? `<p></p>${sigHtml}` : ''
-    const rawBodyHtml = userHtml + sigBlock + draft.quotedHtml
-
-    // Inline-Bilder (data:-URLs) aus dem HTML extrahieren und in
-    // CID-Referenzen umwandeln, damit Mail-Clients sie korrekt darstellen.
-    const inline: ComposeAttachment[] = []
-    const bodyHtml = rawBodyHtml.replace(
-      /<img\b([^>]*?)\bsrc\s*=\s*"data:([^;"]+);base64,([A-Za-z0-9+/=]+)"([^>]*)>/gi,
-      (_match, pre: string, mime: string, b64: string, post: string) => {
-        const cid = `inline-${Date.now().toString(36)}-${inline.length}@mailclient.local`
-        const name = guessFileName(mime, inline.length)
-        inline.push({
-          name,
-          contentType: mime,
-          size: Math.round((b64.length * 3) / 4),
-          dataBase64: b64,
-          isInline: true,
-          contentId: cid
-        })
-        return `<img${pre}src="cid:${cid}"${post}>`
-      }
-    )
-
-    const fileAttachments: ComposeAttachment[] = draft.attachments.map((a) => ({
-      name: a.name,
-      contentType: a.contentType,
-      size: a.size,
-      dataBase64: a.dataBase64,
-      isInline: false
-    }))
-
-    const allAttachments = [...inline, ...fileAttachments]
-
-    const referenceAttachments: ComposeReferenceAttachment[] | undefined =
-      draft.referenceAttachments.length > 0
-        ? draft.referenceAttachments.map((r) => ({
-            name: r.name,
-            sourceUrl: r.webUrl,
-            providerType: 'oneDriveBusiness'
-          }))
-        : undefined
 
     const scheduledRaw = draft.scheduledSendAt?.trim()
     let scheduledSendAt: string | null | undefined

@@ -231,3 +231,93 @@ export async function sendMail(input: ComposeMessageInput): Promise<void> {
 
   await client.api(`/me/messages/${draftId}/send`).post({})
 }
+
+export interface SaveMailDraftInput extends ComposeMessageInput {
+  remoteDraftId?: string | null
+}
+
+async function graphDeleteDraftFileAndReferenceAttachments(
+  client: ReturnType<typeof createGraphClient>,
+  messageId: string
+): Promise<void> {
+  type AttRow = { id: string; ['@odata.type']: string }
+  type Page = { value: AttRow[]; ['@odata.nextLink']?: string }
+  let url: string | null = `/me/messages/${messageId}/attachments?$top=100`
+  while (url) {
+    const page = (await client.api(url).get()) as Page
+    for (const a of page.value) {
+      const t = a['@odata.type']
+      if (
+        t === '#microsoft.graph.fileAttachment' ||
+        t === '#microsoft.graph.referenceAttachment'
+      ) {
+        await client.api(`/me/messages/${messageId}/attachments/${a.id}`).delete()
+      }
+    }
+    const next = page['@odata.nextLink'] ?? null
+    url = next ? next.replace(/^https?:\/\/[^/]+\/v[0-9.]+/, '') : null
+  }
+}
+
+async function graphApplyDraftAttachments(
+  client: ReturnType<typeof createGraphClient>,
+  draftId: string,
+  inline: AttachmentInput[],
+  large: AttachmentInput[],
+  refAtts: GraphReferenceAttachment[]
+): Promise<void> {
+  for (const att of inline) {
+    await client.api(`/me/messages/${draftId}/attachments`).post(toGraphAttachments([att])[0])
+  }
+  for (const att of large) {
+    await uploadLargeAttachment(client, draftId, att)
+  }
+  for (const ref of refAtts) {
+    await client.api(`/me/messages/${draftId}/attachments`).post(ref)
+  }
+}
+
+/**
+ * Legt einen Entwurf in «Entwürfe» an oder aktualisiert ihn (PATCH + Anhänge neu setzen).
+ * Kein Senden.
+ */
+export async function saveMailDraft(input: SaveMailDraftInput): Promise<{ remoteDraftId: string }> {
+  const client = await getClientFor(input.accountId)
+  const { inline, large } = partitionAttachments(input.attachments)
+  const refAtts = toGraphReferenceAttachments(input.referenceAttachments)
+  const baseMessage = {
+    subject: input.subject,
+    body: { contentType: 'HTML' as const, content: input.bodyHtml },
+    toRecipients: toGraphRecipients(input.to),
+    ccRecipients: toGraphRecipients(input.cc ?? []),
+    bccRecipients: toGraphRecipients(input.bcc ?? []),
+    ...messageFlagPatch(input)
+  }
+
+  const rem = input.remoteDraftId?.trim()
+  if (rem) {
+    await client.api(`/me/messages/${rem}`).patch(baseMessage)
+    await graphDeleteDraftFileAndReferenceAttachments(client, rem)
+    await graphApplyDraftAttachments(client, rem, inline, large, refAtts)
+    return { remoteDraftId: rem }
+  }
+
+  let draftId: string
+  if (input.replyToRemoteId && input.replyMode) {
+    const endpoint =
+      input.replyMode === 'forward'
+        ? `/me/messages/${input.replyToRemoteId}/createForward`
+        : input.replyMode === 'replyAll'
+          ? `/me/messages/${input.replyToRemoteId}/createReplyAll`
+          : `/me/messages/${input.replyToRemoteId}/createReply`
+    const draft = (await client.api(endpoint).post({})) as { id: string }
+    draftId = draft.id
+    await client.api(`/me/messages/${draftId}`).patch(baseMessage)
+  } else {
+    const draft = (await client.api('/me/messages').post(baseMessage)) as { id: string }
+    draftId = draft.id
+  }
+
+  await graphApplyDraftAttachments(client, draftId, inline, large, refAtts)
+  return { remoteDraftId: draftId }
+}

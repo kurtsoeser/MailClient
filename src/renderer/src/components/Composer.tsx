@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Send,
+  Save,
   X,
   Minus,
   Paperclip,
@@ -72,6 +73,7 @@ function ComposerWindow({
   const close = useComposeStore((s) => s.close)
   const focus = useComposeStore((s) => s.focus)
   const send = useComposeStore((s) => s.send)
+  const saveRemoteDraft = useComposeStore((s) => s.saveRemoteDraft)
   const addAttachments = useComposeStore((s) => s.addAttachments)
   const removeAttachment = useComposeStore((s) => s.removeAttachment)
   const accounts = useAccountsStore((s) => s.accounts)
@@ -443,7 +445,9 @@ function ComposerWindow({
         {accounts.length > 1 ? (
           <AccountPicker
             currentAccountId={draft.accountId}
-            onChange={(id): void => update(draft.id, { accountId: id })}
+            onChange={(id): void =>
+              update(draft.id, { accountId: id, savedRemoteDraftId: undefined })
+            }
           />
         ) : (
           <span className="font-medium">{account?.email ?? '(kein Konto)'}</span>
@@ -606,6 +610,27 @@ function ComposerWindow({
       )}
 
       <div className="flex shrink-0 items-center gap-2 border-t border-border px-4 py-2">
+        <button
+          type="button"
+          onClick={(): void => {
+            void saveRemoteDraft(draft.id)
+          }}
+          disabled={draft.busy}
+          title={
+            draft.savedRemoteDraftId
+              ? 'Entwurf am Server aktualisieren (Ordner Entwürfe)'
+              : 'Entwurf im Server-Ordner «Entwürfe» speichern'
+          }
+          className={cn(
+            'flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium transition-colors',
+            draft.busy
+              ? 'text-muted-foreground opacity-50'
+              : 'text-foreground hover:bg-secondary'
+          )}
+        >
+          <Save className="h-3.5 w-3.5" />
+          Entwurf speichern
+        </button>
         <button
           type="button"
           onClick={(): void => {

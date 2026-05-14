@@ -986,6 +986,7 @@ export const IPC = {
   },
   compose: {
     send: 'compose:send',
+    saveDraft: 'compose:save-draft',
     recipientSuggestions: 'compose:recipient-suggestions',
     listDriveExplorer: 'compose:list-drive-explorer'
   },
@@ -1117,6 +1118,32 @@ export interface ComposeSendInput {
    * statt sofort gesendet (Anhaenge-Groesse beachten).
    */
   scheduledSendAt?: string | null
+}
+
+/** Server-Entwurf speichern (Ordner «Entwürfe» / Gmail-Drafts). */
+export interface ComposeSaveDraftInput {
+  accountId: string
+  subject: string
+  bodyHtml: string
+  to: ComposeRecipient[]
+  cc?: ComposeRecipient[]
+  bcc?: ComposeRecipient[]
+  attachments?: ComposeAttachment[]
+  referenceAttachments?: ComposeReferenceAttachment[]
+  replyToRemoteId?: string
+  replyMode?: 'reply' | 'replyAll' | 'forward'
+  /**
+   * Bereits angelegter Server-Entwurf: PATCH/Update statt neu anlegen.
+   * Microsoft: `message.id`; Gmail: Draft-Ressourcen-ID von `drafts.create`.
+   */
+  remoteDraftId?: string | null
+  importance?: MailImportance
+  isDeliveryReceiptRequested?: boolean
+  isReadReceiptRequested?: boolean
+}
+
+export interface ComposeSaveDraftResult {
+  remoteDraftId: string
 }
 
 /** Vorschlag fuer Empfaenger-Autocomplete (Compose). */

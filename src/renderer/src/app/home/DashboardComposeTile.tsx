@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertCircle, Loader2, Paperclip, Send, X } from 'lucide-react'
+import { AlertCircle, Loader2, Paperclip, Save, Send, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { TipTapBody } from '@/components/TipTapBody'
 import { SignatureTemplateControls } from '@/components/SignatureTemplateControls'
@@ -33,6 +33,7 @@ export function DashboardComposeTile(): JSX.Element {
   const ensureDashboardEmbedDraft = useComposeStore((s) => s.ensureDashboardEmbedDraft)
   const update = useComposeStore((s) => s.update)
   const send = useComposeStore((s) => s.send)
+  const saveRemoteDraft = useComposeStore((s) => s.saveRemoteDraft)
   const close = useComposeStore((s) => s.close)
   const addAttachments = useComposeStore((s) => s.addAttachments)
   const removeAttachment = useComposeStore((s) => s.removeAttachment)
@@ -115,7 +116,9 @@ export function DashboardComposeTile(): JSX.Element {
         {accounts.length > 1 ? (
           <select
             value={draft.accountId}
-            onChange={(e): void => update(draft.id, { accountId: e.target.value })}
+            onChange={(e): void =>
+              update(draft.id, { accountId: e.target.value, savedRemoteDraftId: undefined })
+            }
             className="min-w-0 flex-1 truncate rounded border border-border bg-background px-1.5 py-0.5 text-[11px]"
           >
             {accounts.map((a) => (
@@ -254,6 +257,19 @@ export function DashboardComposeTile(): JSX.Element {
       )}
 
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-border px-2 py-1.5">
+        <button
+          type="button"
+          disabled={draft.busy}
+          title={t('mail.composeTile.saveDraft')}
+          onClick={(): void => void saveRemoteDraft(draft.id)}
+          className={cn(
+            'inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] font-medium text-foreground hover:bg-secondary',
+            draft.busy && 'pointer-events-none opacity-50'
+          )}
+        >
+          <Save className="h-3.5 w-3.5" />
+          {t('mail.composeTile.saveDraft')}
+        </button>
         <button
           type="button"
           disabled={draft.busy}

@@ -1,3 +1,4 @@
+import { GraphError } from '@microsoft/microsoft-graph-client'
 import { createGraphClient } from './client'
 import { loadConfig } from '../config'
 import type { ComposeDriveExplorerEntry, ComposeRecipientSuggestion } from '@shared/types'
@@ -50,6 +51,47 @@ function sortExplorerEntries(a: ComposeDriveExplorerEntry, b: ComposeDriveExplor
   return a.name.localeCompare(b.name, 'de', { sensitivity: 'base' })
 }
 
+function normalizeExplorerFolderId(folderId: string | null | undefined): string | undefined {
+  if (folderId == null) return undefined
+  const t = typeof folderId === 'string' ? folderId.trim() : ''
+  if (!t || t === 'null' || t === 'undefined') return undefined
+  return t
+}
+
+function formatDriveExplorerGraphError(e: unknown): string {
+  if (e instanceof GraphError) {
+    const c = e.statusCode
+    const m = (e.message ?? '').trim() || 'Unbekannter Graph-Fehler'
+    if (c === 404) {
+      return `OneDrive nicht gefunden oder nicht bereitgestellt (${m}). Pruefen Sie, ob fuer dieses Konto OneDrive aktiviert ist.`
+    }
+    if (c === 403 || c === 401) {
+      return `Kein Zugriff auf OneDrive (${m}). Melden Sie sich unter Konten erneut bei Microsoft an (Berechtigung «Files.Read.All» / Dateien).`
+    }
+    return m
+  }
+  return e instanceof Error ? e.message : String(e)
+}
+
+async function listDriveItemChildrenPage(
+  client: ReturnType<typeof createGraphClient>,
+  resourcePath: string
+): Promise<GraphDriveItem[]> {
+  const select = 'id,name,size,webUrl,file,folder'
+  try {
+    const res = (await client.api(resourcePath).select(select).top(120).get()) as {
+      value?: GraphDriveItem[]
+    }
+    return Array.isArray(res.value) ? res.value : []
+  } catch (e) {
+    if (e instanceof GraphError && (e.statusCode === 400 || e.statusCode === 501)) {
+      const res = (await client.api(resourcePath).top(120).get()) as { value?: GraphDriveItem[] }
+      return Array.isArray(res.value) ? res.value : []
+    }
+    throw e
+  }
+}
+
 /** OneDrive/SharePoint: Zuletzt, eigene Ordnerhierarchie, Mit mir geteilt (Graph). */
 export async function graphListDriveExplorer(
   accountId: string,
@@ -57,7 +99,8 @@ export async function graphListDriveExplorer(
   folderId: string | null | undefined,
   folderDriveId: string | null | undefined
 ): Promise<ComposeDriveExplorerEntry[]> {
-  const client = await getClientFor(accountId)
+  try {
+    const client = await getClientFor(accountId)
 
   if (scope === 'recent') {
     const res = (await client.api('/me/drive/recent').top(80).get()) as { value?: GraphDriveItem[] }
@@ -75,12 +118,21 @@ export async function graphListDriveExplorer(
   }
 
   if (scope === 'myfiles') {
-    const fid = folderId?.trim()
-    const path = fid
-      ? `/me/drive/items/${encodeURIComponent(fid)}/children`
-      : '/me/drive/root/children'
-    const res = (await client.api(path).top(120).get()) as { value?: GraphDriveItem[] }
-    const values = Array.isArray(res.value) ? res.value : []
+    const fid = normalizeExplorerFolderId(folderId)
+    let values: GraphDriveItem[]
+    if (fid) {
+      values = await listDriveItemChildrenPage(client, `/me/drive/items/${encodeURIComponent(fid)}/children`)
+    } else {
+      try {
+        values = await listDriveItemChildrenPage(client, '/me/drive/items/root/children')
+      } catch (e) {
+        if (e instanceof GraphError && e.statusCode === 404) {
+          values = await listDriveItemChildrenPage(client, '/me/drive/root/children')
+        } else {
+          throw e
+        }
+      }
+    }
     const out: ComposeDriveExplorerEntry[] = []
     for (const v of values) {
       const e = mapDriveItemToEntry(v, null)
@@ -91,7 +143,7 @@ export async function graphListDriveExplorer(
   }
 
   if (scope === 'shared') {
-    const fid = folderId?.trim()
+    const fid = normalizeExplorerFolderId(folderId)
     const did = folderDriveId?.trim()
     if (!fid && !did) {
       const res = (await client.api('/me/drive/sharedWithMe').top(80).get()) as { value?: GraphSharedWrapper[] }
@@ -119,14 +171,13 @@ export async function graphListDriveExplorer(
     }
 
     if (!fid || !did) {
-      return []
+      throw new Error('Navigation zu geteilten Ordnern: Drive-Information fehlt. Bitte erneut unter «Geteilt» oeffnen.')
     }
 
-    const res = (await client
-      .api(`/drives/${encodeURIComponent(did)}/items/${encodeURIComponent(fid)}/children`)
-      .top(120)
-      .get()) as { value?: GraphDriveItem[] }
-    const values = Array.isArray(res.value) ? res.value : []
+    const values = await listDriveItemChildrenPage(
+      client,
+      `/drives/${encodeURIComponent(did)}/items/${encodeURIComponent(fid)}/children`
+    )
     const out: ComposeDriveExplorerEntry[] = []
     for (const v of values) {
       const e = mapDriveItemToEntry(v, did)
@@ -137,6 +188,12 @@ export async function graphListDriveExplorer(
   }
 
   return []
+  } catch (e) {
+    if (e instanceof GraphError) {
+      throw new Error(formatDriveExplorerGraphError(e))
+    }
+    throw e instanceof Error ? e : new Error(String(e))
+  }
 }
 
 interface GraphPerson {

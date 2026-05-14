@@ -12,6 +12,22 @@ import { FilterTabs } from '@/components/FilterTabs'
 import { CALENDAR_TIMEZONE_UI_OPTIONS } from '@shared/microsoft-timezones'
 import { OUTLOOK_COLOR_PRESET_OPTIONS, outlookCategoryDotClass } from '@/lib/outlook-category-colors'
 import { geocodeOpenMeteoPlace } from '@/lib/open-meteo-weather'
+import { buildFolderTree, type FolderNode } from '@/lib/folder-tree'
+import {
+  mailFolderSidebarVisibilityKey,
+  readSidebarHiddenMailFolderKeysFromStorage,
+  writeSidebarHiddenMailFolderKeysAndNotify,
+  MAIL_SIDEBAR_FOLDER_VISIBILITY_CHANGED_EVENT
+} from '@/lib/mail-sidebar-folder-visibility-storage'
+import {
+  CALENDAR_VISIBILITY_CHANGED_EVENT,
+  calendarVisibilityKey,
+  readHiddenCalendarKeysFromStorage,
+  readSidebarHiddenCalendarKeysFromStorage,
+  writeHiddenCalendarKeysToStorage,
+  writeSidebarHiddenCalendarKeysToStorage
+} from '@/lib/calendar-visibility-storage'
+import { SIDEBAR_DEFAULT_CAL_ID } from '@/app/calendar/calendar-shell-storage'
 import { AccountPropertiesMenu } from '@/components/AccountPropertiesMenu'
 import { accountColorToCssBackground } from '@/lib/avatar-color'
 import {
@@ -21,7 +37,7 @@ import {
   readDashboardAlignStepPx,
   writeDashboardAlignStepPx
 } from '@/app/home/dashboard-layout'
-import type { ConnectedAccount, MailMasterCategory, MailFolder } from '@shared/types'
+import type { ConnectedAccount, MailMasterCategory, MailFolder, CalendarGraphCalendarRow } from '@shared/types'
 import {
   Cloud,
   Contact,
@@ -37,10 +53,25 @@ import {
   ListChecks,
   RefreshCw,
   Download,
-  Upload
+  Upload,
+  PanelLeft
 } from 'lucide-react'
 
 type SettingsTab = 'general' | 'accounts' | 'mail' | 'calendar' | 'contacts'
+
+const SETTINGS_SUB_DEFAULT: Record<SettingsTab, string> = {
+  general: 'language',
+  accounts: 'connected',
+  mail: 'sync',
+  calendar: 'timezone',
+  contacts: 'workspace'
+}
+
+type CalSidebarAccountLoad = {
+  calendars: CalendarGraphCalendarRow[]
+  loading: boolean
+  error: string | null
+}
 
 function snapshotLocalStorage(): Record<string, string> {
   const out: Record<string, string> = {}
@@ -56,6 +87,26 @@ function replaceLocalStorageFromBackup(entries: Record<string, string>): void {
   for (const [k, v] of Object.entries(entries)) {
     window.localStorage.setItem(k, v)
   }
+}
+
+function flattenFolderNodesDepthFirst(nodes: FolderNode[]): FolderNode[] {
+  const out: FolderNode[] = []
+  const walk = (list: FolderNode[]): void => {
+    for (const n of list) {
+      out.push(n)
+      walk(n.children)
+    }
+  }
+  walk(nodes)
+  return out
+}
+
+function sameStringSet(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) return false
+  for (const x of a) {
+    if (!b.has(x)) return false
+  }
+  return true
 }
 
 interface Props {
@@ -86,6 +137,7 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
   } = useAccountsStore()
   const refreshAccounts = useMailStore((s) => s.refreshAccounts)
   const triggerSync = useMailStore((s) => s.triggerSync)
+  const foldersByAccount = useMailStore((s) => s.foldersByAccount)
   const { t } = useTranslation()
   const setAppMode = useAppModeStore((s) => s.setMode)
   const locale = useLocaleStore((s) => s.locale)
@@ -136,6 +188,7 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
   const [busy, setBusy] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<SettingsTab>('general')
+  const [subNavId, setSubNavId] = useState<Record<SettingsTab, string>>(() => ({ ...SETTINGS_SUB_DEFAULT }))
   const [categoryAccountId, setCategoryAccountId] = useState<string>('')
   const [masterCats, setMasterCats] = useState<MailMasterCategory[]>([])
   const [catBusy, setCatBusy] = useState(false)
@@ -159,6 +212,14 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
   const [wfWipPick, setWfWipPick] = useState<string>('')
   const [wfDonePick, setWfDonePick] = useState<string>('')
   const [calendarAheadAccountId, setCalendarAheadAccountId] = useState<string>('')
+  const [mailSidebarVisAccountId, setMailSidebarVisAccountId] = useState<string>('')
+  const [mailSidebarHiddenKeys, setMailSidebarHiddenKeys] = useState<Set<string>>(() =>
+    readSidebarHiddenMailFolderKeysFromStorage()
+  )
+  const [calSidebarHiddenKeysForSettings, setCalSidebarHiddenKeysForSettings] = useState<Set<string>>(() =>
+    readSidebarHiddenCalendarKeysFromStorage()
+  )
+  const [calSidebarPerAccount, setCalSidebarPerAccount] = useState<Record<string, CalSidebarAccountLoad>>({})
   const [dashGridStepDraft, setDashGridStepDraft] = useState(String(DASHBOARD_GRID_STEP_DEFAULT_PX))
   const [weatherSearchDraft, setWeatherSearchDraft] = useState('')
   const [weatherBusy, setWeatherBusy] = useState(false)
@@ -206,6 +267,59 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
     [accounts]
   )
 
+  const settingsSubNavItems = useMemo((): Array<{ id: string; label: string }> => {
+    switch (activeTab) {
+      case 'general':
+        return [
+          { id: 'language', label: t('settings.languageSection') },
+          { id: 'dashboard', label: t('settings.dashboardGridHeading') },
+          { id: 'weather', label: t('settings.weatherHeading') },
+          { id: 'oauth', label: t('settings.oauthSummary') },
+          { id: 'backup', label: t('settings.backupHeading') }
+        ]
+      case 'accounts':
+        return [{ id: 'connected', label: t('settings.connectedAccounts') }]
+      case 'mail':
+        return [
+          { id: 'sync', label: t('settings.syncWindowHeading') },
+          { id: 'display', label: t('settings.mailDisplayHeading') },
+          { id: 'sidebarFolders', label: t('settings.mailSidebarFoldersHeading') },
+          { id: 'triage', label: t('settings.triageHeading') },
+          { id: 'categories', label: t('settings.categoriesHeading') }
+        ]
+      case 'calendar':
+        return [
+          { id: 'timezone', label: t('settings.calendarTzHeading') },
+          { id: 'api', label: t('settings.calendarApiHeading') },
+          { id: 'sidebar', label: t('settings.calendarSidebarHeading') }
+        ]
+      case 'contacts':
+        return [
+          { id: 'workspace', label: t('settings.contactsWorkspaceHeading') },
+          { id: 'google', label: t('settings.contactsGoogleHeading') },
+          { id: 'microsoft', label: t('settings.contactsMicrosoftHeading') },
+          { id: 'accountsLink', label: t('settings.contactsGoAccounts') }
+        ]
+      default:
+        return []
+    }
+  }, [activeTab, t])
+
+  useEffect(() => {
+    const ids = settingsSubNavItems.map((x) => x.id)
+    setSubNavId((prev) => {
+      const cur = prev[activeTab]
+      if (ids.includes(cur)) return prev
+      return { ...prev, [activeTab]: ids[0] ?? cur }
+    })
+  }, [activeTab, settingsSubNavItems])
+
+  const mailSidebarFolderRows = useMemo(() => {
+    if (!mailSidebarVisAccountId) return [] as FolderNode[]
+    const folders = foldersByAccount[mailSidebarVisAccountId] ?? []
+    return flattenFolderNodesDepthFirst(buildFolderTree(folders))
+  }, [foldersByAccount, mailSidebarVisAccountId])
+
   useEffect(() => {
     if (!open || activeTab !== 'mail') return
     setCategoryAccountId((prev) => {
@@ -252,6 +366,84 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
       return calendarLinkedAccounts[0]?.id ?? ''
     })
   }, [open, activeTab, calendarLinkedAccounts])
+
+  useEffect(() => {
+    if (!open || activeTab !== 'mail') return
+    setMailSidebarVisAccountId((prev) => {
+      if (prev && triageMailAccounts.some((a) => a.id === prev)) return prev
+      return triageMailAccounts[0]?.id ?? ''
+    })
+  }, [open, activeTab, triageMailAccounts])
+
+  useEffect(() => {
+    if (!open) return
+    setMailSidebarHiddenKeys(readSidebarHiddenMailFolderKeysFromStorage())
+    setCalSidebarHiddenKeysForSettings(readSidebarHiddenCalendarKeysFromStorage())
+  }, [open])
+
+  useEffect(() => {
+    const onMailVis = (): void => {
+      setMailSidebarHiddenKeys((prev) => {
+        const next = readSidebarHiddenMailFolderKeysFromStorage()
+        return sameStringSet(prev, next) ? prev : next
+      })
+    }
+    const onCalVis = (): void => {
+      setCalSidebarHiddenKeysForSettings((prev) => {
+        const next = readSidebarHiddenCalendarKeysFromStorage()
+        return sameStringSet(prev, next) ? prev : next
+      })
+    }
+    window.addEventListener(MAIL_SIDEBAR_FOLDER_VISIBILITY_CHANGED_EVENT, onMailVis)
+    window.addEventListener(CALENDAR_VISIBILITY_CHANGED_EVENT, onCalVis)
+    return (): void => {
+      window.removeEventListener(MAIL_SIDEBAR_FOLDER_VISIBILITY_CHANGED_EVENT, onMailVis)
+      window.removeEventListener(CALENDAR_VISIBILITY_CHANGED_EVENT, onCalVis)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!open || activeTab !== 'calendar' || subNavId.calendar !== 'sidebar') {
+      setCalSidebarPerAccount({})
+      return
+    }
+    const accounts = calendarLinkedAccounts
+    if (accounts.length === 0) {
+      setCalSidebarPerAccount({})
+      return
+    }
+    let cancelled = false
+    const nextInit: Record<string, CalSidebarAccountLoad> = {}
+    for (const a of accounts) {
+      nextInit[a.id] = { calendars: [], loading: true, error: null }
+    }
+    setCalSidebarPerAccount(nextInit)
+    for (const a of accounts) {
+      void window.mailClient.calendar
+        .listCalendars({ accountId: a.id })
+        .then((rows) => {
+          if (cancelled) return
+          setCalSidebarPerAccount((prev) => ({
+            ...prev,
+            [a.id]: { calendars: rows, loading: false, error: null }
+          }))
+        })
+        .catch((e: unknown) => {
+          if (cancelled) return
+          setCalSidebarPerAccount((prev) => ({
+            ...prev,
+            [a.id]: {
+              calendars: prev[a.id]?.calendars ?? [],
+              loading: false,
+              error: e instanceof Error ? e.message : String(e)
+            }
+          }))
+        })
+    }
+    return (): void => {
+      cancelled = true
+    }
+  }, [open, activeTab, subNavId.calendar, calendarLinkedAccounts])
 
   const loadWorkflowFolderUi = useCallback(async (): Promise<void> => {
     if (!wfAccountId) {
@@ -476,6 +668,31 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
     }
   }
 
+  function handleMailFolderSidebarCheckbox(accountId: string, folder: MailFolder, visible: boolean): void {
+    if (folder.wellKnown === 'inbox' && !visible) return
+    const vk = mailFolderSidebarVisibilityKey(accountId, folder.remoteId)
+    const next = new Set(readSidebarHiddenMailFolderKeysFromStorage())
+    if (visible) next.delete(vk)
+    else next.add(vk)
+    writeSidebarHiddenMailFolderKeysAndNotify(next)
+  }
+
+  function handleCalendarSidebarRowToggle(accountId: string, calId: string, visibleInSidebar: boolean): void {
+    if (calId === SIDEBAR_DEFAULT_CAL_ID) return
+    const vk = calendarVisibilityKey(accountId, calId)
+    const nextSidebar = new Set(readSidebarHiddenCalendarKeysFromStorage())
+    const nextHidden = new Set(readHiddenCalendarKeysFromStorage())
+    if (visibleInSidebar) {
+      nextSidebar.delete(vk)
+      nextHidden.delete(vk)
+    } else {
+      nextSidebar.add(vk)
+      nextHidden.add(vk)
+    }
+    writeSidebarHiddenCalendarKeysToStorage(nextSidebar)
+    writeHiddenCalendarKeysToStorage(nextHidden)
+  }
+
   async function handleRemove(id: string): Promise<void> {
     setBusy(true)
     setLocalError(null)
@@ -662,7 +879,7 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-dialog-title"
-        className="w-[min(640px,92vw)] max-w-[92vw] rounded-xl border border-border bg-card text-foreground shadow-2xl"
+        className="flex max-h-[92vh] w-[min(960px,96vw)] max-w-[96vw] flex-col overflow-hidden rounded-xl border border-border bg-card text-foreground shadow-2xl"
         onClick={(e): void => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
@@ -689,9 +906,34 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
           />
         </div>
 
-        <div className="min-h-[280px] space-y-5 p-5">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="flex min-h-0 flex-1 divide-x divide-border">
+            <nav
+              className="flex w-[13rem] shrink-0 flex-col gap-0.5 overflow-y-auto bg-muted/15 py-3 pl-2.5 pr-1.5"
+              aria-label={t('settings.subNavAria')}
+            >
+              {settingsSubNavItems.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={(): void => {
+                    setSubNavId((prev) => ({ ...prev, [activeTab]: item.id }))
+                  }}
+                  className={cn(
+                    'w-full rounded-md px-2 py-2 text-left text-[11px] font-medium leading-snug transition-colors',
+                    subNavId[activeTab] === item.id
+                      ? 'bg-secondary text-foreground shadow-sm'
+                      : 'text-muted-foreground hover:bg-muted/70 hover:text-foreground'
+                  )}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </nav>
+            <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-5">
           {activeTab === 'general' && (
             <div role="tabpanel" aria-label={t('settings.generalPanelAria')} className="space-y-5">
+              {subNavId.general === 'language' && (
               <section className="space-y-2 rounded-md border border-border/60 bg-muted/20 p-3">
                 <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   {t('settings.languageSection')}
@@ -712,7 +954,9 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
                   <option value="en">{t('settings.languageEn')}</option>
                 </select>
               </section>
+              )}
 
+              {subNavId.general === 'dashboard' && (
               <section className="space-y-2 rounded-md border border-border/60 bg-muted/20 p-3">
                 <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   {t('settings.dashboardGridHeading')}
@@ -746,7 +990,9 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
                   })}
                 </p>
               </section>
+              )}
 
+              {subNavId.general === 'weather' && (
               <section className="space-y-2 rounded-md border border-border/60 bg-muted/20 p-3">
                 <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   <Cloud className="h-3.5 w-3.5" aria-hidden />
@@ -804,7 +1050,10 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
                 ) : null}
                 {weatherMsg ? <p className="text-[10px] text-emerald-600 dark:text-emerald-500">{weatherMsg}</p> : null}
               </section>
+              )}
 
+              {subNavId.general === 'oauth' && (
+              <>
               <section className="space-y-2 rounded-md border border-border/60 bg-muted/20 p-3">
                 <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   {t('settings.loginHeading')}
@@ -903,7 +1152,10 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
                   </section>
                 </div>
               </details>
+              </>
+              )}
 
+              {subNavId.general === 'backup' && (
               <section className="space-y-2 border-t border-border pt-4">
                 <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   {t('settings.backupHeading')}
@@ -951,11 +1203,13 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
                   <p className="text-[10px] text-emerald-600 dark:text-emerald-500">{backupNotice}</p>
                 ) : null}
               </section>
+              )}
             </div>
           )}
 
           {activeTab === 'accounts' && (
             <div role="tabpanel" aria-label={t('settings.accountsPanelAria')} className="space-y-5">
+              {subNavId.accounts === 'connected' && (
               <section className="space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -1108,11 +1362,13 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
                   </ul>
                 )}
               </section>
+              )}
             </div>
           )}
 
           {activeTab === 'mail' && (
             <div role="tabpanel" aria-label={t('settings.tabMail')} className="space-y-5">
+              {subNavId.mail === 'sync' && (
               <section className="space-y-2">
                 <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   <Inbox className="h-3.5 w-3.5" />
@@ -1134,7 +1390,9 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
                   ))}
                 </select>
               </section>
+              )}
 
+              {subNavId.mail === 'display' && (
               <section className="space-y-2">
                 <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   <ImageIcon className="h-3.5 w-3.5" />
@@ -1158,7 +1416,79 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
                   </span>
                 </label>
               </section>
+              )}
 
+              {subNavId.mail === 'sidebarFolders' && (
+              <section className="space-y-2">
+                <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  <PanelLeft className="h-3.5 w-3.5" />
+                  {t('settings.mailSidebarFoldersHeading')}
+                </h3>
+                <p className="text-xs leading-relaxed text-muted-foreground">{t('settings.mailSidebarFoldersIntro')}</p>
+                {triageMailAccounts.length === 0 ? (
+                  <p className="rounded-md border border-dashed border-border bg-background/50 p-3 text-xs text-muted-foreground">
+                    {t('settings.triageNeedMailAccount')}
+                  </p>
+                ) : (
+                  <div className="space-y-2 rounded-md border border-border bg-background/40 p-3">
+                    <label htmlFor="mail-sidebar-vis-account" className="sr-only">
+                      {t('settings.mailSidebarFoldersAccountSr')}
+                    </label>
+                    <select
+                      id="mail-sidebar-vis-account"
+                      value={mailSidebarVisAccountId}
+                      onChange={(e): void => setMailSidebarVisAccountId(e.target.value)}
+                      disabled={busy}
+                      className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs outline-none focus:border-ring"
+                    >
+                      {triageMailAccounts.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.provider === 'google'
+                            ? t('settings.triageAccountOptionGoogle', { email: a.email })
+                            : t('settings.triageAccountOptionMicrosoft', { email: a.email })}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="max-h-56 space-y-0.5 overflow-y-auto overscroll-contain pr-0.5">
+                      {mailSidebarFolderRows.map((node) => {
+                        const folder = node.folder
+                        const depth = node.depth
+                        const vk = mailFolderSidebarVisibilityKey(mailSidebarVisAccountId, folder.remoteId)
+                        const hidden = mailSidebarHiddenKeys.has(vk)
+                        const shown = !hidden
+                        const isInbox = folder.wellKnown === 'inbox'
+                        return (
+                          <label
+                            key={folder.id}
+                            className="flex cursor-pointer items-start gap-2 rounded border border-transparent px-1 py-0.5 hover:bg-background/60"
+                            style={{ paddingLeft: `${10 + depth * 14}px` }}
+                          >
+                            <input
+                              type="checkbox"
+                              className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-primary"
+                              checked={shown}
+                              disabled={isInbox || busy}
+                              onChange={(e): void => {
+                                handleMailFolderSidebarCheckbox(
+                                  mailSidebarVisAccountId,
+                                  folder,
+                                  e.target.checked
+                                )
+                              }}
+                            />
+                            <span className="min-w-0 flex-1 text-[11px] leading-snug text-foreground">
+                              {folder.name}
+                            </span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+              </section>
+              )}
+
+              {subNavId.mail === 'triage' && (
               <section className="space-y-2">
                 <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   <ListChecks className="h-3.5 w-3.5" />
@@ -1250,7 +1580,9 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
                   </div>
                 )}
               </section>
+              )}
 
+              {subNavId.mail === 'categories' && (
               <section className="space-y-2">
                 <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   <Tag className="h-3.5 w-3.5" />
@@ -1420,11 +1752,13 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
                   </>
                 )}
               </section>
+              )}
             </div>
           )}
 
           {activeTab === 'calendar' && (
             <div role="tabpanel" aria-label={t('settings.tabCalendar')} className="space-y-5">
+              {subNavId.calendar === 'timezone' && (
               <section className="space-y-2">
                 <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   <CalendarClock className="h-3.5 w-3.5" />
@@ -1447,7 +1781,9 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
                   ))}
                 </select>
               </section>
+              )}
 
+              {subNavId.calendar === 'api' && (
               <section className="space-y-2">
                 <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   {t('settings.calendarApiHeading')}
@@ -1513,11 +1849,90 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
                   </div>
                 )}
               </section>
+              )}
+
+              {subNavId.calendar === 'sidebar' && (
+              <section className="space-y-2">
+                <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  <PanelLeft className="h-3.5 w-3.5" />
+                  {t('settings.calendarSidebarHeading')}
+                </h3>
+                <p className="text-xs leading-relaxed text-muted-foreground">{t('settings.calendarSidebarIntro')}</p>
+                {calendarLinkedAccounts.length === 0 ? (
+                  <p className="rounded-md border border-dashed border-border bg-background/50 p-3 text-xs text-muted-foreground">
+                    {t('settings.calendarConnectHint')}
+                  </p>
+                ) : (
+                  <div className="max-h-[min(70vh,520px)] space-y-3 overflow-y-auto overscroll-contain pr-0.5">
+                    {calendarLinkedAccounts.map((acc) => {
+                      const pack = calSidebarPerAccount[acc.id]
+                      return (
+                        <div
+                          key={acc.id}
+                          className="rounded-md border border-border/60 bg-background/40 p-2.5 shadow-sm"
+                        >
+                          <div className="mb-2 border-b border-border/50 pb-2">
+                            <p className="truncate text-[11px] font-semibold text-foreground">{acc.displayName}</p>
+                            <p className="truncate text-[10px] text-muted-foreground">{acc.email}</p>
+                            <p className="mt-0.5 text-[9px] uppercase tracking-wide text-muted-foreground/90">
+                              {acc.provider === 'google'
+                                ? t('settings.calendarSidebarProviderGoogle')
+                                : t('settings.calendarSidebarProviderMicrosoft')}
+                            </p>
+                          </div>
+                          {!pack || pack.loading ? (
+                            <p className="flex items-center gap-1 py-1 text-[10px] text-muted-foreground">
+                              <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden />
+                              {t('settings.catLoading')}
+                            </p>
+                          ) : pack.error ? (
+                            <div className="rounded border border-destructive/40 bg-destructive/10 p-2 text-[10px] text-destructive">
+                              {pack.error}
+                            </div>
+                          ) : (
+                            <div className="space-y-0.5">
+                              {pack.calendars.map((cal) => {
+                                const isDefaultSlot = cal.id === SIDEBAR_DEFAULT_CAL_ID
+                                const vk = calendarVisibilityKey(acc.id, cal.id)
+                                const inSidebar = !calSidebarHiddenKeysForSettings.has(vk)
+                                return (
+                                  <label
+                                    key={`${acc.id}:${cal.id}`}
+                                    className={cn(
+                                      'flex cursor-pointer items-start gap-2 rounded border border-transparent px-1 py-0.5 hover:bg-background/60',
+                                      isDefaultSlot && 'opacity-60'
+                                    )}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-primary"
+                                      checked={inSidebar}
+                                      disabled={isDefaultSlot || busy || reconnectingAccountId !== null}
+                                      onChange={(e): void => {
+                                        handleCalendarSidebarRowToggle(acc.id, cal.id, e.target.checked)
+                                      }}
+                                    />
+                                    <span className="min-w-0 flex-1 text-[11px] leading-snug text-foreground">
+                                      {cal.name}
+                                    </span>
+                                  </label>
+                                )
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </section>
+              )}
             </div>
           )}
 
           {activeTab === 'contacts' && (
             <div role="tabpanel" aria-label={t('settings.contactsPanelAria')} className="space-y-5">
+              {subNavId.contacts === 'workspace' && (
               <section className="space-y-2">
                 <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   <Contact className="h-3.5 w-3.5" aria-hidden />
@@ -1538,21 +1953,27 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
                   {t('settings.contactsOpenModule')}
                 </button>
               </section>
+              )}
 
+              {subNavId.contacts === 'google' && (
               <section className="space-y-2 rounded-md border border-border/60 bg-muted/20 p-3">
                 <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   {t('settings.contactsGoogleHeading')}
                 </h3>
                 <p className="text-xs leading-relaxed text-muted-foreground">{t('settings.contactsGoogleBody')}</p>
               </section>
+              )}
 
+              {subNavId.contacts === 'microsoft' && (
               <section className="space-y-2 rounded-md border border-border/60 bg-muted/20 p-3">
                 <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   {t('settings.contactsMicrosoftHeading')}
                 </h3>
                 <p className="text-xs leading-relaxed text-muted-foreground">{t('settings.contactsMicrosoftBody')}</p>
               </section>
+              )}
 
+              {subNavId.contacts === 'accountsLink' && (
               <section className="space-y-2">
                 <p className="text-xs leading-relaxed text-muted-foreground">{t('settings.contactsAccountsHint')}</p>
                 <button
@@ -1563,11 +1984,13 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
                   {t('settings.contactsGoAccounts')}
                 </button>
               </section>
+              )}
             </div>
           )}
-
+            </div>
+          </div>
           {showError && (
-            <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
+            <div className="flex shrink-0 items-start gap-2 border-t border-destructive/30 bg-destructive/10 px-5 py-3 text-xs text-destructive">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
               <span>{showError}</span>
             </div>

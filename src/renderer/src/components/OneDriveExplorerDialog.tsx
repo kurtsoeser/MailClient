@@ -25,10 +25,12 @@ export function OneDriveExplorerDialog({ open, accountId, onClose, onPickFile }:
   const [crumbs, setCrumbs] = useState<Crumb[]>([])
   const [entries, setEntries] = useState<ComposeDriveExplorerEntry[]>([])
   const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   const load = useCallback(async (): Promise<void> => {
     if (!open || !accountId) return
     setLoading(true)
+    setLoadError(null)
     try {
       const last = crumbs[crumbs.length - 1]
       const folderId = last?.id ?? undefined
@@ -40,8 +42,9 @@ export function OneDriveExplorerDialog({ open, accountId, onClose, onPickFile }:
         folderDriveId: scope === 'recent' ? undefined : folderDriveId ?? null
       })
       setEntries(list)
-    } catch {
+    } catch (e) {
       setEntries([])
+      setLoadError(e instanceof Error ? e.message : String(e))
     } finally {
       setLoading(false)
     }
@@ -56,6 +59,7 @@ export function OneDriveExplorerDialog({ open, accountId, onClose, onPickFile }:
       setScope('myfiles')
       setCrumbs([])
       setEntries([])
+      setLoadError(null)
     }
   }, [open])
 
@@ -161,6 +165,22 @@ export function OneDriveExplorerDialog({ open, accountId, onClose, onPickFile }:
                 <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
                   <Loader2 className="h-5 w-5 animate-spin" />
                   Laden…
+                </div>
+              ) : loadError ? (
+                <div className="flex flex-col items-center gap-3 px-4 py-10 text-center">
+                  <p className="text-sm text-destructive">{loadError}</p>
+                  <button
+                    type="button"
+                    className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary"
+                    onClick={(): void => void load()}
+                  >
+                    Erneut versuchen
+                  </button>
+                  <p className="max-w-md text-[11px] text-muted-foreground">
+                    Haeufig: Konto unter Einstellungen erneut mit Microsoft verbinden, damit die Berechtigung
+                    «Dateien lesen» (Files.Read.All) im Token enthalten ist — sie wurde fuer OneDrive-Anhaenge
+                    nachgeruestet.
+                  </p>
                 </div>
               ) : entries.length === 0 ? (
                 <p className="py-12 text-center text-sm text-muted-foreground">

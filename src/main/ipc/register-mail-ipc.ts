@@ -10,6 +10,8 @@ import {
   type UndoableActionSummary,
   type UndoResult,
   type ComposeSendInput,
+  type ComposeSaveDraftInput,
+  type ComposeSaveDraftResult,
   type SnoozedMessageItem,
   type ComposeRecipientSuggestion,
   type ComposeListDriveExplorerInput,
@@ -29,7 +31,7 @@ import {
 } from '@shared/types'
 import { loadConfig } from '../config'
 import { listAccounts } from '../accounts'
-import { gmailSendMail } from '../google/gmail-compose'
+import { gmailSendMail, gmailSaveDraft } from '../google/gmail-compose'
 import {
   gmailCreateMailLabel,
   gmailRenameMailLabel,
@@ -116,7 +118,7 @@ import {
   graphUpdateMasterCategory,
   graphDeleteMasterCategory
 } from '../graph/master-categories'
-import { sendMail as graphSendMail } from '../graph/compose'
+import { sendMail as graphSendMail, saveMailDraft as graphSaveMailDraft } from '../graph/compose'
 import {
   graphListDriveExplorer,
   graphSearchPeopleForCompose,
@@ -918,6 +920,84 @@ export function registerMailIpc(): void {
   )
 
   ipcMain.handle(
+    IPC.compose.saveDraft,
+    async (_event, input: ComposeSaveDraftInput): Promise<ComposeSaveDraftResult> => {
+      if (!input.accountId) throw new Error('Kein Konto ausgewaehlt.')
+      const accounts = await listAccounts()
+      const acc = accounts.find((a) => a.id === input.accountId)
+      if (!acc) throw new Error('Konto nicht gefunden.')
+
+      if (input.referenceAttachments?.length && acc.provider === 'google') {
+        throw new Error('Cloud-Anhaenge (OneDrive) sind nur fuer Microsoft 365 verfuegbar.')
+      }
+
+      const toRecipients = input.to.map((r) => ({
+        address: r.address.trim(),
+        ...(r.name?.trim() ? { name: r.name.trim() } : {})
+      }))
+      const ccRecipients = (input.cc ?? []).map((r) => ({
+        address: r.address.trim(),
+        ...(r.name?.trim() ? { name: r.name.trim() } : {})
+      }))
+      const bccRecipients = (input.bcc ?? []).map((r) => ({
+        address: r.address.trim(),
+        ...(r.name?.trim() ? { name: r.name.trim() } : {})
+      }))
+      const attachments = input.attachments?.map((a) => ({
+        name: a.name,
+        contentType: a.contentType,
+        dataBase64: a.dataBase64,
+        ...(a.isInline ? { isInline: true as const } : {}),
+        ...(a.contentId ? { contentId: a.contentId } : {})
+      }))
+
+      let result: ComposeSaveDraftResult
+      if (acc.provider === 'google') {
+        const r = await gmailSaveDraft(
+          {
+            accountId: input.accountId,
+            subject: input.subject,
+            bodyHtml: input.bodyHtml,
+            to: toRecipients,
+            cc: ccRecipients.length ? ccRecipients : undefined,
+            bcc: bccRecipients.length ? bccRecipients : undefined,
+            attachments,
+            replyToRemoteId: input.replyToRemoteId,
+            replyMode: input.replyMode,
+            remoteDraftId: input.remoteDraftId
+          },
+          acc.email,
+          acc.displayName ?? ''
+        )
+        result = { remoteDraftId: r.remoteDraftId }
+      } else {
+        result = await graphSaveMailDraft({
+          accountId: input.accountId,
+          subject: input.subject,
+          bodyHtml: input.bodyHtml,
+          to: toRecipients,
+          cc: ccRecipients.length ? ccRecipients : undefined,
+          bcc: bccRecipients.length ? bccRecipients : undefined,
+          attachments,
+          replyToRemoteId: input.replyToRemoteId,
+          replyMode: input.replyMode,
+          referenceAttachments: input.referenceAttachments,
+          importance: input.importance,
+          isDeliveryReceiptRequested: input.isDeliveryReceiptRequested,
+          isReadReceiptRequested: input.isReadReceiptRequested,
+          remoteDraftId: input.remoteDraftId
+        })
+      }
+
+      const draftsFolder = findFolderByWellKnown(input.accountId, 'drafts')
+      if (draftsFolder) {
+        void runFolderSync(draftsFolder.id).catch(() => undefined)
+      }
+      return result
+    }
+  )
+
+  ipcMain.handle(
     IPC.compose.recipientSuggestions,
     async (
       _event,
@@ -1018,32 +1098,39 @@ export function registerMailIpc(): void {
   ipcMain.handle(
     IPC.compose.listDriveExplorer,
     async (_event, raw: unknown): Promise<ComposeDriveExplorerEntry[]> => {
-      const o = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
-      const accountId = typeof o.accountId === 'string' ? o.accountId.trim() : ''
-      if (!accountId) return []
-      const scopeRaw = o.scope
-      const scope =
-        scopeRaw === 'recent' || scopeRaw === 'myfiles' || scopeRaw === 'shared' ? scopeRaw : 'myfiles'
-      const folderId =
-        typeof o.folderId === 'string'
-          ? o.folderId.trim() || null
-          : o.folderId === null
-            ? null
-            : undefined
-      const folderDriveId =
-        typeof o.folderDriveId === 'string'
-          ? o.folderDriveId.trim() || null
-          : o.folderDriveId === null
-            ? null
-            : undefined
-      const accounts = await listAccounts()
-      const acc = accounts.find((a) => a.id === accountId)
-      if (!acc || acc.provider !== 'microsoft') return []
       try {
+        const o = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+        const accountId = typeof o.accountId === 'string' ? o.accountId.trim() : ''
+        if (!accountId) {
+          throw new Error('Kein Konto fuer OneDrive ausgewaehlt.')
+        }
+        const scopeRaw = o.scope
+        const scope =
+          scopeRaw === 'recent' || scopeRaw === 'myfiles' || scopeRaw === 'shared' ? scopeRaw : 'myfiles'
+        const folderId =
+          typeof o.folderId === 'string'
+            ? o.folderId.trim() || null
+            : o.folderId === null
+              ? null
+              : undefined
+        const folderDriveId =
+          typeof o.folderDriveId === 'string'
+            ? o.folderDriveId.trim() || null
+            : o.folderDriveId === null
+              ? null
+              : undefined
+        const accounts = await listAccounts()
+        const acc = accounts.find((a) => a.id === accountId)
+        if (!acc) {
+          throw new Error('Konto nicht gefunden oder nicht mehr angemeldet.')
+        }
+        if (acc.provider !== 'microsoft') {
+          throw new Error('OneDrive steht nur fuer Microsoft-365-Konten zur Verfuegung.')
+        }
         return await graphListDriveExplorer(accountId, scope, folderId ?? null, folderDriveId ?? null)
       } catch (e) {
         console.warn('[ipc] compose.listDriveExplorer:', e)
-        return []
+        throw e instanceof Error ? e : new Error(String(e))
       }
     }
   )

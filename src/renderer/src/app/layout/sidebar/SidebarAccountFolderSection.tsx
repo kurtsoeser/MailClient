@@ -7,10 +7,16 @@ import {
   Loader2,
   RefreshCw
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { buildFolderTree, flattenTree } from '@/lib/folder-tree'
 import { sidebarInitialCollapsedRemoteIds } from '@/lib/sidebar-well-known'
+import {
+  persistMailSidebarAccountExpanded,
+  persistMailSidebarCollapsedFolderRemoteIds,
+  readMailSidebarAccountExpanded,
+  readMailSidebarCollapsedFolderRemoteIds
+} from '@/app/layout/sidebar/mail-sidebar-tree-storage'
 import { Avatar } from '@/components/Avatar'
 import { AccountColorStripe } from '@/components/AccountColorStripe'
 import type { ConnectedAccount, MailFolder } from '@shared/types'
@@ -58,10 +64,50 @@ export function SidebarAccountFolderSection({
   const isSyncedOk = sync?.state === 'idle'
 
   const tree = useMemo(() => buildFolderTree(folders), [folders])
-  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(() =>
-    sidebarInitialCollapsedRemoteIds(tree)
-  )
-  const [accountOpen, setAccountOpen] = useState(true)
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(() => new Set())
+  const [accountOpen, setAccountOpen] = useState(() => readMailSidebarAccountExpanded(account.id))
+  const folderHydrationKeyRef = useRef<string>('')
+  const collapsedPersistReadyRef = useRef(false)
+
+  useLayoutEffect(() => {
+    if (folders.length === 0) return
+    if (folderHydrationKeyRef.current !== account.id) {
+      folderHydrationKeyRef.current = account.id
+      const saved = readMailSidebarCollapsedFolderRemoteIds(account.id)
+      const valid = new Set(folders.map((f) => f.remoteId))
+      if (saved != null) {
+        setCollapsedFolders(new Set(saved.filter((id) => valid.has(id))))
+      } else {
+        setCollapsedFolders(sidebarInitialCollapsedRemoteIds(buildFolderTree(folders)))
+      }
+      collapsedPersistReadyRef.current = true
+      return
+    }
+    setCollapsedFolders((prev) => {
+      const valid = new Set(folders.map((f) => f.remoteId))
+      let changed = false
+      const next = new Set<string>()
+      for (const id of prev) {
+        if (valid.has(id)) next.add(id)
+        else changed = true
+      }
+      return changed ? next : prev
+    })
+  }, [account.id, folders])
+
+  useEffect(() => {
+    setAccountOpen(readMailSidebarAccountExpanded(account.id))
+  }, [account.id])
+
+  useEffect(() => {
+    persistMailSidebarAccountExpanded(account.id, accountOpen)
+  }, [account.id, accountOpen])
+
+  useEffect(() => {
+    if (!collapsedPersistReadyRef.current || folders.length === 0) return
+    persistMailSidebarCollapsedFolderRemoteIds(account.id, collapsedFolders)
+  }, [account.id, collapsedFolders, folders.length])
+
   const visible = useMemo(() => flattenTree(tree, collapsedFolders), [tree, collapsedFolders])
 
   function toggleFolder(remoteId: string): void {

@@ -11,6 +11,8 @@ import {
   type SnoozedMessageItem,
   type SyncStatus,
   type ComposeSendInput,
+  type ComposeSaveDraftInput,
+  type ComposeSaveDraftResult,
   type UndoableActionSummary,
   type ComposeRecipientSuggestion,
   type ComposeListDriveExplorerInput,
@@ -359,6 +361,8 @@ const api = {
   compose: {
     send: (input: ComposeSendInput): Promise<void> =>
       ipcRenderer.invoke(IPC.compose.send, input),
+    saveDraft: (input: ComposeSaveDraftInput): Promise<ComposeSaveDraftResult> =>
+      ipcRenderer.invoke(IPC.compose.saveDraft, input),
     recipientSuggestions: (args: {
       accountId: string
       query: string

@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { CalendarEventView } from '@shared/types'
 
-export type PendingCreateEventOnDay = { dateIso: string; anchor: { x: number; y: number } }
+export type PendingCreateEventOnDay = { dateIso: string }
 
 /**
  * Einmaliger Fokus beim Wechsel in den Kalender (z. B. Klick auf Termin auf der Startseite).
@@ -16,7 +16,7 @@ interface CalendarPendingFocusState {
   pendingCreateOnDay: PendingCreateEventOnDay | null
   queueFocusEvent: (ev: CalendarEventView) => void
   queueGotoDate: (iso: string) => void
-  queueCreateEventOnDay: (dateIso: string, anchor: { x: number; y: number }) => void
+  queueCreateEventOnDay: (dateIso: string) => void
   peekPendingEvent: () => CalendarEventView | null
   peekPendingGotoDate: () => string | null
   peekPendingCreateOnDay: () => PendingCreateEventOnDay | null
@@ -38,9 +38,9 @@ export const useCalendarPendingFocusStore = create<CalendarPendingFocusState>((s
     set({ pendingGotoDateIso: iso, pendingEvent: null, pendingCreateOnDay: null })
   },
 
-  queueCreateEventOnDay(dateIso: string, anchor: { x: number; y: number }): void {
+  queueCreateEventOnDay(dateIso: string): void {
     set({
-      pendingCreateOnDay: { dateIso, anchor },
+      pendingCreateOnDay: { dateIso },
       pendingEvent: null,
       pendingGotoDateIso: null
     })

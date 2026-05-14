@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import {
   addDays,
   addHours,
   addMinutes,
   addMonths,
-  differenceInCalendarDays,
   format,
   parseISO,
   set
@@ -130,7 +130,7 @@ function formatDurationMs(
   return tr('calendar.eventDialog.durationMin', { minutes: m })
 }
 
-type SchedulePickerKind = 'startTime' | 'endTime' | 'date' | 'dayStart' | 'dayEnd'
+type SchedulePickerKind = 'startTime' | 'endTime' | 'startDate' | 'endDate' | 'dayStart' | 'dayEnd'
 
 function quarterHourTimesForYmd(ymd: string): string[] {
   const base = parseISO(`${ymd}T12:00:00`)
@@ -168,25 +168,15 @@ function mergeTimeIntoEnd(dtStart: string, dtEnd: string, hhmm: string): string 
   return next
 }
 
-function shiftTimedRangeToNewStartYmd(
-  dtStart: string,
-  dtEnd: string,
-  newStartYmd: string
-): { nextStart: string; nextEnd: string } {
-  const oldS = new Date(dtStart)
-  const oldE = new Date(dtEnd)
-  if (Number.isNaN(oldS.getTime()) || Number.isNaN(oldE.getTime())) {
-    return { nextStart: dtStart, nextEnd: dtEnd }
-  }
-  const oldYmd = format(oldS, 'yyyy-MM-dd')
-  const delta = differenceInCalendarDays(
-    parseISO(`${newStartYmd}T12:00:00`),
-    parseISO(`${oldYmd}T12:00:00`)
-  )
-  return {
-    nextStart: dateToDatetimeLocal(addDays(oldS, delta)),
-    nextEnd: dateToDatetimeLocal(addDays(oldE, delta))
-  }
+/** Kalendertag (`yyyy-MM-dd`) in einen `datetime-local`-String einsetzen, Uhrzeit bleibt erhalten. */
+function mergeYmdIntoDatetimeLocal(dtLocal: string, ymd: string): string {
+  const d = new Date(dtLocal)
+  if (Number.isNaN(d.getTime())) return dtLocal
+  const parts = ymd.split('-').map(Number)
+  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) return dtLocal
+  const [y, m, day] = parts
+  d.setFullYear(y, m - 1, day)
+  return dateToDatetimeLocal(d)
 }
 
 function fieldChipClass(locked: boolean): string {
@@ -205,8 +195,6 @@ export interface CalendarEventDialogProps {
   initialRange?: { start: Date; end: Date; allDay: boolean } | null
   /** Optional: Betreff/Ort beim Anlegen (z. B. Duplizieren aus Kontextmenue). */
   createPrefill?: { subject?: string; location?: string } | null
-  /** Mausposition: Formular als Popover statt rechter Seitenleiste (nur Anlegen). */
-  anchor?: { x: number; y: number } | null
   initialEvent?: CalendarEventView | null
   onClose: () => void
   onSaved: () => void
@@ -253,7 +241,6 @@ export function CalendarEventDialog({
   defaultAccountId,
   initialRange,
   createPrefill,
-  anchor,
   initialEvent,
   onClose,
   onSaved
@@ -474,14 +461,21 @@ export function CalendarEventDialog({
     const e = new Date(dtEnd)
     if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return null
     const ms = e.getTime() - s.getTime()
+    const sameDay = format(s, 'yyyy-MM-dd') === format(e, 'yyyy-MM-dd')
+    const sameYear = format(s, 'yyyy') === format(e, 'yyyy')
+    const startDateChip =
+      sameDay || sameYear
+        ? format(s, 'EEE d. MMM', { locale: dfLocale })
+        : format(s, 'EEE d. MMM yyyy', { locale: dfLocale })
+    const endDateChip = sameDay
+      ? startDateChip
+      : format(e, 'EEE d. MMM yyyy', { locale: dfLocale })
     return {
       startHm: format(s, 'HH:mm'),
       endHm: format(e, 'HH:mm'),
       duration: formatDurationMs(ms, t),
-      dateChip:
-        format(s, 'yyyy-MM-dd') === format(e, 'yyyy-MM-dd')
-          ? format(s, 'EEE d. MMM', { locale: dfLocale })
-          : `${format(s, 'EEE d. MMM', { locale: dfLocale })} – ${format(e, 'EEE d. MMM yyyy', { locale: dfLocale })}`,
+      startDateChip,
+      endDateChip,
       startYmd: format(s, 'yyyy-MM-dd'),
       endYmd: format(e, 'yyyy-MM-dd')
     }
@@ -583,36 +577,8 @@ export function CalendarEventDialog({
   const panelRef = useRef<HTMLElement>(null)
   const schedulePickerRef = useRef<HTMLDivElement>(null)
   const selectedTimeOptionRef = useRef<HTMLButtonElement>(null)
-  const isPopoverCreate = open && mode === 'create' && anchor != null
-  const [popoverPos, setPopoverPos] = useState<{ left: number; top: number } | null>(null)
-
-  useLayoutEffect(() => {
-    if (!isPopoverCreate || !anchor) {
-      setPopoverPos(null)
-      return
-    }
-    const clamp = (): void => {
-      const el = panelRef.current
-      const margin = 8
-      let left = anchor.x + margin
-      let top = anchor.y + margin
-      if (el) {
-        const { width: w, height: h } = el.getBoundingClientRect()
-        const vw = window.innerWidth
-        const vh = window.innerHeight
-        if (left + w > vw - margin) left = Math.max(margin, vw - w - margin)
-        if (top + h > vh - margin) top = Math.max(margin, vh - h - margin)
-        if (left < margin) left = margin
-        if (top < margin) top = margin
-      }
-      setPopoverPos({ left, top })
-    }
-    clamp()
-    window.addEventListener('resize', clamp)
-    return (): void => {
-      window.removeEventListener('resize', clamp)
-    }
-  }, [isPopoverCreate, anchor, calendarsLoading])
+  /** Nativer Datums-Dialog per showPicker() gleich beim Chip-Klick (Chromium/Electron). */
+  const scheduleDateInputRef = useRef<HTMLInputElement>(null)
 
   const selectedAccount = useMemo(
     () => calendarAccounts.find((a) => a.id === accountId),
@@ -691,8 +657,32 @@ export function CalendarEventDialog({
       top = r.top - 6 - listMax
       if (top < margin) top = margin
     }
-    setSchedulePickerPos({ top, left, width: popW })
-    setSchedulePicker(kind)
+    const pos = { top, left, width: popW }
+    const dateKind =
+      kind === 'startDate' ||
+      kind === 'endDate' ||
+      kind === 'dayStart' ||
+      kind === 'dayEnd'
+    if (dateKind) {
+      flushSync(() => {
+        setSchedulePickerPos(pos)
+        setSchedulePicker(kind)
+      })
+      const input = scheduleDateInputRef.current
+      if (input) {
+        input.focus()
+        try {
+          if ('showPicker' in input && typeof input.showPicker === 'function') {
+            input.showPicker()
+          }
+        } catch {
+          // ohne User-Gesture oder nicht unterstützt
+        }
+      }
+    } else {
+      setSchedulePickerPos(pos)
+      setSchedulePicker(kind)
+    }
   }
 
   const timePickerYmd =
@@ -873,10 +863,7 @@ export function CalendarEventDialog({
 
   return (
     <div
-      className={cn(
-        'fixed inset-0 z-[100] bg-black/45 backdrop-blur-[2px]',
-        !isPopoverCreate && 'flex justify-end'
-      )}
+      className="fixed inset-0 z-[100] flex justify-end bg-black/45 backdrop-blur-[2px]"
       onClick={onClose}
       onKeyDown={(ev): void => {
         if (ev.key === 'Escape') onClose()
@@ -885,20 +872,7 @@ export function CalendarEventDialog({
     >
       <aside
         ref={panelRef}
-        className={cn(
-          'calendar-event-panel flex flex-col border-border bg-card text-foreground shadow-2xl',
-          isPopoverCreate
-            ? 'fixed z-[101] max-h-[min(92dvh,calc(100vh-16px))] w-[min(630px,calc(100vw-16px))] overflow-hidden rounded-xl border'
-            : 'h-[100dvh] max-h-[100dvh] w-full max-w-[630px] border-l'
-        )}
-        style={
-          isPopoverCreate && anchor
-            ? {
-                left: popoverPos?.left ?? anchor.x + 8,
-                top: popoverPos?.top ?? anchor.y + 8
-              }
-            : undefined
-        }
+        className="calendar-event-panel flex h-[100dvh] max-h-[100dvh] w-full max-w-[630px] flex-col overflow-hidden border-l border-border bg-card text-foreground shadow-2xl"
         onClick={(ev): void => ev.stopPropagation()}
       >
         <header className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-3">
@@ -1010,7 +984,7 @@ export function CalendarEventDialog({
 
               {!isAllDay && timedDisplay ? (
                 <>
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[14px]">
+                  <div className="grid w-fit max-w-full grid-cols-[auto_auto_auto_1fr] items-center gap-x-2 gap-y-1.5 text-[14px]">
                     <button
                       type="button"
                       disabled={eventFieldsLocked}
@@ -1032,20 +1006,31 @@ export function CalendarEventDialog({
                     >
                       {timedDisplay.endHm}
                     </button>
-                    <span className="text-[13px] tabular-nums text-muted-foreground">
+                    <span className="min-w-0 text-[13px] tabular-nums text-muted-foreground">
                       · {timedDisplay.duration}
                     </span>
-                  </div>
-                  <div className="mt-2">
                     <button
                       type="button"
                       disabled={eventFieldsLocked}
-                      aria-label={t('calendar.eventDialog.editDateAria')}
-                      onClick={(ev): void => openSchedulePicker('date', ev.currentTarget)}
+                      aria-label={t('calendar.eventDialog.editStartDateAria')}
+                      onClick={(ev): void => openSchedulePicker('startDate', ev.currentTarget)}
                       className={fieldChipClass(eventFieldsLocked)}
                     >
-                      {timedDisplay.dateChip}
+                      {timedDisplay.startDateChip}
                     </button>
+                    <span className="select-none text-transparent" aria-hidden>
+                      →
+                    </span>
+                    <button
+                      type="button"
+                      disabled={eventFieldsLocked}
+                      aria-label={t('calendar.eventDialog.editEndDateAria')}
+                      onClick={(ev): void => openSchedulePicker('endDate', ev.currentTarget)}
+                      className={fieldChipClass(eventFieldsLocked)}
+                    >
+                      {timedDisplay.endDateChip}
+                    </button>
+                    <span aria-hidden className="min-w-0" />
                   </div>
                 </>
               ) : isAllDay && allDayDisplay ? (
@@ -1334,9 +1319,6 @@ export function CalendarEventDialog({
                     rows={3}
                     className="mt-1 w-full resize-y rounded-md border border-border bg-background px-2 py-1.5 font-mono text-[12px] text-foreground outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-60"
                   />
-                  <p className="mt-1 text-[10px] leading-snug text-muted-foreground">
-                    {t('calendar.eventDialog.attendeesHintMicrosoft')}
-                  </p>
                 </PropertyRow>
               </div>
             ) : null}
@@ -1450,6 +1432,7 @@ export function CalendarEventDialog({
                 <ObjectNoteEditor
                   variant="section"
                   layout="toggle"
+                  sectionCollapsedDefault
                   target={{
                     kind: 'calendar',
                     accountId: initialEvent.accountId,
@@ -1591,18 +1574,45 @@ export function CalendarEventDialog({
             </ul>
           )}
 
-          {schedulePicker === 'date' && timedDisplay ? (
+          {schedulePicker === 'startDate' && timedDisplay ? (
             <div className="p-2">
               <input
+                ref={scheduleDateInputRef}
                 type="date"
                 value={timedDisplay.startYmd}
                 disabled={eventFieldsLocked}
                 onChange={(ev): void => {
                   const v = ev.target.value
                   if (!v) return
-                  const { nextStart, nextEnd } = shiftTimedRangeToNewStartYmd(dtStart, dtEnd, v)
+                  const nextStart = mergeYmdIntoDatetimeLocal(dtStart, v)
                   setDtStart(nextStart)
-                  setDtEnd(nextEnd)
+                  if (new Date(dtEnd).getTime() <= new Date(nextStart).getTime()) {
+                    setDtEnd(dateToDatetimeLocal(addMinutes(new Date(nextStart), 15)))
+                  }
+                  closeSchedulePicker()
+                }}
+                className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+              />
+            </div>
+          ) : null}
+
+          {schedulePicker === 'endDate' && timedDisplay ? (
+            <div className="p-2">
+              <input
+                ref={scheduleDateInputRef}
+                type="date"
+                value={timedDisplay.endYmd}
+                min={timedDisplay.startYmd}
+                disabled={eventFieldsLocked}
+                onChange={(ev): void => {
+                  const v = ev.target.value
+                  if (!v) return
+                  const nextEnd = mergeYmdIntoDatetimeLocal(dtEnd, v)
+                  if (new Date(nextEnd).getTime() <= new Date(dtStart).getTime()) {
+                    setDtEnd(dateToDatetimeLocal(addMinutes(new Date(dtStart), 15)))
+                  } else {
+                    setDtEnd(nextEnd)
+                  }
                   closeSchedulePicker()
                 }}
                 className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
@@ -1613,6 +1623,7 @@ export function CalendarEventDialog({
           {schedulePicker === 'dayStart' ? (
             <div className="p-2">
               <input
+                ref={scheduleDateInputRef}
                 type="date"
                 value={dayStart}
                 disabled={eventFieldsLocked}
@@ -1636,6 +1647,7 @@ export function CalendarEventDialog({
                 {t('calendar.eventDialog.allDayEndLastDayHint')}
               </p>
               <input
+                ref={scheduleDateInputRef}
                 type="date"
                 min={dayStart}
                 value={format(addDays(parseISO(`${dayEnd}T12:00:00`), -1), 'yyyy-MM-dd')}

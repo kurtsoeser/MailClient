@@ -62,7 +62,7 @@ export interface CalendarShellHeaderProps {
   leftSidebarCollapsed: boolean
   onLeftSidebarCollapsedChange: (collapsed: boolean) => void
   /** Kalender: neuer Termin (Erstellungsdialog). */
-  onNewEventClick?: (anchor: { clientX: number; clientY: number }) => void
+  onNewEventClick?: () => void
   newEventDisabled?: boolean
 }
 
@@ -200,9 +200,9 @@ export function CalendarShellHeader(props: CalendarShellHeaderProps): JSX.Elemen
               newEventDisabled ? t('calendar.shell.noLinkedAccount') : t('calendar.shell.newEvent')
             }
             aria-label={t('calendar.shell.newEvent')}
-            onClick={(e): void => {
+            onClick={(): void => {
               if (newEventDisabled) return
-              onNewEventClick({ clientX: e.clientX, clientY: e.clientY })
+              onNewEventClick()
             }}
             className={cn(
               'flex shrink-0 items-center gap-1 rounded-md bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 sm:gap-1.5 sm:px-2.5 sm:text-xs',

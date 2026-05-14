@@ -80,6 +80,7 @@ import { CalendarDockStripFrame } from '@/app/calendar/CalendarDockStripFrame'
 import { useCalendarMailExternalDrop } from '@/lib/use-calendar-mail-external-drop'
 import { buildCalendarIncludeCalendars } from '@/lib/build-calendar-include-calendars'
 import {
+  CALENDAR_VISIBILITY_CHANGED_EVENT,
   calendarVisibilityKey,
   dispatchCalendarVisibilityChanged,
   HIDDEN_CALENDARS_STORAGE_KEY,
@@ -126,6 +127,14 @@ import {
   MAX_TIME_GRID_SPAN_DAYS
 } from '@/app/calendar/calendar-shell-view-helpers'
 import './notion-calendar.css'
+
+function sameStringSet(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) return false
+  for (const x of a) {
+    if (!b.has(x)) return false
+  }
+  return true
+}
 
 export function CalendarShell(): JSX.Element {
   const { t, i18n } = useTranslation()
@@ -195,8 +204,6 @@ export function CalendarShell(): JSX.Element {
         range?: { start: Date; end: Date; allDay: boolean } | null
         createPrefill?: { subject: string; location: string }
         createAccountId?: string
-        /** Popover-Position beim Anlegen (Maus / Kontextmenue). */
-        anchor?: { x: number; y: number }
       }
     | { mode: 'edit'; event: CalendarEventView }
 
@@ -515,6 +522,22 @@ export function CalendarShell(): JSX.Element {
     }
     dispatchCalendarVisibilityChanged()
   }, [sidebarHiddenCalendarKeys])
+
+  /** Sichtbarkeit aus Einstellungen / anderem Code via localStorage + Event — State nachziehen. */
+  useEffect(() => {
+    const onVis = (): void => {
+      setHiddenCalendarKeys((prev) => {
+        const next = readHiddenCalendarKeysFromStorage()
+        return sameStringSet(prev, next) ? prev : next
+      })
+      setSidebarHiddenCalendarKeys((prev) => {
+        const next = readSidebarHiddenCalendarKeysFromStorage()
+        return sameStringSet(prev, next) ? prev : next
+      })
+    }
+    window.addEventListener(CALENDAR_VISIBILITY_CHANGED_EVENT, onVis)
+    return (): void => window.removeEventListener(CALENDAR_VISIBILITY_CHANGED_EVENT, onVis)
+  }, [])
 
   useEffect(() => {
     persistAccountSidebarOpen(accountSidebarOpen)
@@ -923,7 +946,6 @@ export function CalendarShell(): JSX.Element {
         return
       }
       const dayStart = startOfDay(parsed)
-      const anchor = createOnDay.anchor
 
       let rafC = 0
       let cancelledC = false
@@ -934,8 +956,7 @@ export function CalendarShell(): JSX.Element {
           api.gotoDate(dayStart)
           setEventDialog({
             mode: 'create',
-            range: { start: dayStart, end: dayStart, allDay: true },
-            anchor
+            range: { start: dayStart, end: dayStart, allDay: true }
           })
           useCalendarPendingFocusStore.getState().clearPendingCreateOnDay()
           return
@@ -1563,14 +1584,13 @@ export function CalendarShell(): JSX.Element {
                   onCalendarNext={(): void => calendarRef.current?.getApi().next()}
                   leftSidebarCollapsed={leftSidebarCollapsed}
                   onLeftSidebarCollapsedChange={setLeftSidebarCollapsed}
-                  onNewEventClick={({ clientX, clientY }): void => {
+                  onNewEventClick={(): void => {
                     if (calendarLinkedAccounts.length === 0) return
                     setError(null)
                     setPreviewCalendarEvent(null)
                     setEventDialog({
                       mode: 'create',
-                      range: null,
-                      anchor: { x: clientX, y: clientY }
+                      range: null
                     })
                   }}
                   newEventDisabled={calendarLinkedAccounts.length === 0}
@@ -1756,8 +1776,7 @@ export function CalendarShell(): JSX.Element {
                       setPreviewCalendarEvent(null)
                       setEventDialog({
                         mode: 'create',
-                        range: null,
-                        anchor: { x: ev.clientX, y: ev.clientY }
+                        range: null
                       })
                     }}
                     className={cn(
@@ -1829,14 +1848,9 @@ export function CalendarShell(): JSX.Element {
                   if (calendarLinkedAccounts.length === 0) return
                   setError(null)
                   setPreviewCalendarEvent(null)
-                  const anchor =
-                    sel.jsEvent != null
-                      ? { x: sel.jsEvent.clientX, y: sel.jsEvent.clientY }
-                      : { x: window.innerWidth / 2, y: window.innerHeight / 3 }
                   setEventDialog({
                     mode: 'create',
-                    range: { start: sel.start, end: sel.end, allDay: sel.allDay },
-                    anchor
+                    range: { start: sel.start, end: sel.end, allDay: sel.allDay }
                   })
                   calendarRef.current?.getApi().unselect()
                 }}
@@ -1935,8 +1949,7 @@ export function CalendarShell(): JSX.Element {
                                   : t('calendar.context.duplicateEmptyTitle'),
                                 location: calEv.location ?? ''
                               },
-                              createAccountId: calEv.accountId,
-                              anchor: { x: e.clientX, y: e.clientY }
+                              createAccountId: calEv.accountId
                             })
                           },
                           onOpenNote: (): void => {
@@ -2241,7 +2254,6 @@ export function CalendarShell(): JSX.Element {
             ? eventDialog.createPrefill
             : undefined
         }
-        anchor={eventDialog && eventDialog.mode === 'create' ? (eventDialog.anchor ?? null) : null}
         initialEvent={eventDialog?.mode === 'edit' ? eventDialog.event : null}
         onClose={(): void => setEventDialog(null)}
         onSaved={reloadVisibleRange}

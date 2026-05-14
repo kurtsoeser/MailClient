@@ -312,7 +312,8 @@
     "noAccount": "No account",
     "statusError": "Sync error",
     "statusSyncing": "Syncing…",
-    "statusOnline": "Online"
+    "statusOnline": "Online",
+    "mailContextHideFromSidebar": "Remove from sidebar…"
   },
   "settings": {
     "title": "Settings",
@@ -322,6 +323,7 @@
     "tabMail": "Mail",
     "tabCalendar": "Calendar",
     "tabContacts": "Contacts",
+    "subNavAria": "Sections",
     "contactsPanelAria": "Contacts — settings",
     "contactsWorkspaceHeading": "Contacts view",
     "contactsWorkspaceIntro": "Use the contacts area to browse, edit, and sync contacts (Microsoft Outlook and Google). More options for this area will be added over time.",
@@ -396,6 +398,9 @@
     "mailDisplayHeading": "Mail display",
     "autoImagesTitle": "Load external images automatically",
     "autoImagesHint": "Images load directly from servers. For privacy this can enable tracking pixels. When off, you can load images per message manually.",
+    "mailSidebarFoldersHeading": "Folders in the mail sidebar",
+    "mailSidebarFoldersIntro": "Per account, choose which folders appear in the left mail navigation. Hidden folders remain available (e.g. move, search); the inbox cannot be hidden. Use “Remove from sidebar…” in the folder context menu for a quicker toggle.",
+    "mailSidebarFoldersAccountSr": "Account for folder visibility",
     "triageHeading": "Triage folders (Microsoft 365 / Gmail)",
     "triageIntro": "When you add a to-do or terminate a message, the app can move it to “In progress” — regardless of its current folder (if mapped). After “Done” (complete to-do) it moves to “Done”. In Gmail, those folders are labels. Without an “In progress” mapping, the message stays where it is.",
     "triageNeedMailAccount": "Connect at least one Microsoft or Gmail account under “Accounts”.",
@@ -426,6 +431,10 @@
     "calendarConnectHint": "Connect a Microsoft or Google account with calendar under “Accounts”.",
     "calendarAccountLabel": "Account",
     "calendarAheadLabel": "Horizon from today",
+    "calendarSidebarHeading": "Calendars in the sidebar",
+    "calendarSidebarIntro": "Choose which calendars are listed on the left in Calendar view (same as “Remove from sidebar…” in the context menu). The default calendar slot always stays visible. Calendars are grouped by connected account.",
+    "calendarSidebarProviderGoogle": "Google",
+    "calendarSidebarProviderMicrosoft": "Microsoft 365",
     "savingDots": "Saving…",
     "syncWindow": {
       "d7": "7 days",
@@ -669,6 +678,7 @@
       "noSubjectPlaceholder": "(No subject)",
       "removeAttachmentAria": "Remove attachment",
       "send": "Send",
+      "saveDraft": "Save draft",
       "attachment": "Attachment",
       "clear": "Clear",
       "attachmentMax": "Maximum {{maxMb}} MB — skipped “{{file}}”."
@@ -1061,6 +1071,8 @@
       "editStartTimeAria": "Choose start time",
       "editEndTimeAria": "Choose end time",
       "editDateAria": "Choose date",
+      "editStartDateAria": "Choose start date",
+      "editEndDateAria": "Choose end date",
       "editAllDayStartAria": "Choose first day",
       "editAllDayEndAria": "Choose last day",
       "advancedDateTime": "Advanced input (raw fields)",
@@ -1112,7 +1124,6 @@
       "teamsDisabledAllDay": "Teams is not available for all-day events.",
       "attendeesRowLabel": "Attendees",
       "attendeesPlaceholder": "one@address per line — or comma-separated",
-      "attendeesHintMicrosoft": "Microsoft 365: saving replaces the full attendee list on the event (max. 40 addresses).",
       "googleTeamsAttendeesHint": "Teams meetings and attendee invitations in MailClient are only supported for Microsoft 365 calendars.",
       "loadingEventDetails": "Loading event details…",
       "summaryDash": "—",

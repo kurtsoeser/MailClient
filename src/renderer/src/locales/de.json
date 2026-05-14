@@ -312,7 +312,8 @@
     "noAccount": "Kein Konto",
     "statusError": "Sync-Fehler",
     "statusSyncing": "Synchronisiert …",
-    "statusOnline": "Online"
+    "statusOnline": "Online",
+    "mailContextHideFromSidebar": "Aus Seitenleiste entfernen …"
   },
   "settings": {
     "title": "Einstellungen",
@@ -322,6 +323,7 @@
     "tabMail": "Mail",
     "tabCalendar": "Kalender",
     "tabContacts": "Kontakte",
+    "subNavAria": "Unterbereiche",
     "contactsPanelAria": "Kontakte — Einstellungen",
     "contactsWorkspaceHeading": "Kontakte-Ansicht",
     "contactsWorkspaceIntro": "Hier findest du die Oberfläche zum Durchsuchen, Bearbeiten und Synchronisieren deiner Kontakte (Microsoft Outlook und Google). Gezielte Optionen für diesen Bereich werden nach und nach ergänzt.",
@@ -396,6 +398,9 @@
     "mailDisplayHeading": "Mail-Anzeige",
     "autoImagesTitle": "Externe Bilder automatisch laden",
     "autoImagesHint": "Bilder werden direkt vom Server geladen. Aus Datenschutzgründen kann das Tracking-Pixel ermöglichen. Wenn ausgeschaltet, kannst du Bilder pro Mail manuell laden.",
+    "mailSidebarFoldersHeading": "Ordner in der Mail-Seitenleiste",
+    "mailSidebarFoldersIntro": "Wähle pro Konto, welche Ordner in der Posteingangs-Navigation links erscheinen. Ausgeblendete Ordner bleiben erreichbar (z. B. verschieben, Suche); der Posteingang kann nicht ausgeblendet werden. Über «Aus Seitenleiste entfernen» im Ordner-Kontextmenü geht es schneller.",
+    "mailSidebarFoldersAccountSr": "Konto für Ordner-Sichtbarkeit",
     "triageHeading": "Triage-Ordner (Microsoft 365 / Gmail)",
     "triageIntro": "Sobald du einer Mail ein ToDo gibst oder sie terminierst, kann die App sie in «In Bearbeitung» verschieben — unabhängig vom aktuellen Ordner (wenn die Zuordnung gesetzt ist). Nach «Erledigt» (ToDo abschließen) wandert sie in «Erledigt». Bei Gmail entsprechen die Ordner Labels. Ohne Zuordnung für «In Bearbeitung» bleibt die Mail am Ort.",
     "triageNeedMailAccount": "Verbinde unter «Konten» mindestens ein Microsoft- oder Gmail-Konto.",
@@ -426,6 +431,10 @@
     "calendarConnectHint": "Verbinde unter «Konten» ein Microsoft- oder Google-Konto mit Kalender.",
     "calendarAccountLabel": "Konto",
     "calendarAheadLabel": "Vorausschau ab heute",
+    "calendarSidebarHeading": "Kalender in der Seitenleiste",
+    "calendarSidebarIntro": "Steuere, welche Kalender links in der Kalender-Ansicht gelistet werden (wie beim Rechtsklick «Aus Seitenleiste entfernen»). Der Standard-Kalenderplatz bleibt immer sichtbar. Die Liste ist nach verbundenem Konto gruppiert.",
+    "calendarSidebarProviderGoogle": "Google",
+    "calendarSidebarProviderMicrosoft": "Microsoft 365",
     "savingDots": "Speichern …",
     "syncWindow": {
       "d7": "7 Tage",
@@ -669,6 +678,7 @@
       "noSubjectPlaceholder": "(Kein Betreff)",
       "removeAttachmentAria": "Anhang entfernen",
       "send": "Senden",
+      "saveDraft": "Entwurf speichern",
       "attachment": "Anhang",
       "clear": "Leeren",
       "attachmentMax": "Maximal {{maxMb}} MB – „{{file}}“ übersprungen."
@@ -1061,6 +1071,8 @@
       "editStartTimeAria": "Startzeit wählen",
       "editEndTimeAria": "Endzeit wählen",
       "editDateAria": "Datum wählen",
+      "editStartDateAria": "Startdatum wählen",
+      "editEndDateAria": "Enddatum wählen",
       "editAllDayStartAria": "Starttag wählen",
       "editAllDayEndAria": "Letzten Termintag wählen",
       "advancedDateTime": "Erweiterte Eingabe (Rohfelder)",
@@ -1112,7 +1124,6 @@
       "teamsDisabledAllDay": "Teams ist bei ganztägigen Terminen nicht verfügbar.",
       "attendeesRowLabel": "Teilnehmer",
       "attendeesPlaceholder": "eine@adresse.pro Zeile — oder durch Komma getrennt",
-      "attendeesHintMicrosoft": "Microsoft 365: Beim Speichern wird die Teilnehmerliste am Termin ersetzt (max. 40 Adressen).",
       "googleTeamsAttendeesHint": "Teams-Besprechung und Teilnehmer-Einladungen werden in MailClient nur für Microsoft-365-Kalender unterstützt.",
       "loadingEventDetails": "Termindetails werden geladen …",
       "summaryDash": "—",

@@ -96,7 +96,7 @@ export function DashboardTodayTimeline(props: {
   loading?: boolean
   hasLinkedCalendars: boolean
   onOpenEvent?: (ev: CalendarEventView) => void
-  onCreateEventOnDay?: (day: Date, anchor: { x: number; y: number }) => void
+  onCreateEventOnDay?: (day: Date) => void
 }): JSX.Element {
   const { events, accounts, loading, hasLinkedCalendars, onOpenEvent, onCreateEventOnDay } = props
   const { t, i18n } = useTranslation()
@@ -319,7 +319,7 @@ export function DashboardTodayTimeline(props: {
               label: t('dashboard.miniCalendarNewEventThisDay'),
               icon: Plus,
               onSelect: (): void => {
-                onCreateEventOnDay(today, { x: contextMenu.x, y: contextMenu.y })
+                onCreateEventOnDay(today)
               }
             }
           ]}

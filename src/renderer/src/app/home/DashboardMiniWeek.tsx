@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils'
 
 export function DashboardMiniWeek(props: {
   onOpenCalendarDay?: (day: Date) => void
-  onCreateEventOnDay?: (day: Date, anchor: { x: number; y: number }) => void
+  onCreateEventOnDay?: (day: Date) => void
 }): JSX.Element {
   const { onOpenCalendarDay, onCreateEventOnDay } = props
   const { t, i18n } = useTranslation()
@@ -129,7 +129,7 @@ export function DashboardMiniWeek(props: {
             label: t('dashboard.miniCalendarNewEventThisDay'),
             icon: Plus,
             onSelect: (): void => {
-              onCreateEventOnDay(contextMenu.day, { x: contextMenu.x, y: contextMenu.y })
+              onCreateEventOnDay(contextMenu.day)
             }
           }
         ]}

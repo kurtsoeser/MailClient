@@ -12,7 +12,8 @@ import {
   ScanSearch,
   Star,
   StarOff,
-  Trash2
+  Trash2,
+  PanelLeftClose
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -56,6 +57,21 @@ import { SidebarSortableAccountFolderSection } from '@/app/layout/sidebar/Sideba
 import { SidebarFooter } from '@/app/layout/sidebar/SidebarFooter'
 import { useUndoStore } from '@/stores/undo'
 import { readDraggedWorkflowMessageIds } from '@/lib/workflow-dnd'
+import {
+  SIDEBAR_HIDDEN_MAIL_FOLDER_KEYS_STORAGE_KEY,
+  MAIL_SIDEBAR_FOLDER_VISIBILITY_CHANGED_EVENT,
+  mailFolderSidebarVisibilityKey,
+  readSidebarHiddenMailFolderKeysFromStorage,
+  filterFoldersForMailSidebar
+} from '@/lib/mail-sidebar-folder-visibility-storage'
+
+function sameStringSet(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) return false
+  for (const x of a) {
+    if (!b.has(x)) return false
+  }
+  return true
+}
 
 interface Props {
   onOpenAccountDialog: () => void
@@ -134,8 +150,43 @@ export function Sidebar({ onOpenAccountDialog }: Props): JSX.Element {
     name: string
   } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [sidebarHiddenFolderKeys, setSidebarHiddenFolderKeys] = useState<Set<string>>(() =>
+    readSidebarHiddenMailFolderKeysFromStorage()
+  )
+
+  useEffect(() => {
+    const onVis = (): void => {
+      setSidebarHiddenFolderKeys((prev) => {
+        const next = readSidebarHiddenMailFolderKeysFromStorage()
+        return sameStringSet(prev, next) ? prev : next
+      })
+    }
+    window.addEventListener(MAIL_SIDEBAR_FOLDER_VISIBILITY_CHANGED_EVENT, onVis)
+    return (): void => window.removeEventListener(MAIL_SIDEBAR_FOLDER_VISIBILITY_CHANGED_EVENT, onVis)
+  }, [])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        SIDEBAR_HIDDEN_MAIL_FOLDER_KEYS_STORAGE_KEY,
+        JSON.stringify(Array.from(sidebarHiddenFolderKeys))
+      )
+    } catch {
+      // ignore
+    }
+    window.dispatchEvent(new CustomEvent(MAIL_SIDEBAR_FOLDER_VISIBILITY_CHANGED_EVENT))
+  }, [sidebarHiddenFolderKeys])
 
   const accountIds = useMemo(() => accounts.map((a) => a.id), [accounts])
+
+  const foldersForSidebar = useMemo(() => {
+    const out: Record<string, MailFolder[]> = {}
+    for (const acc of accounts) {
+      const all = foldersByAccount[acc.id] ?? []
+      out[acc.id] = filterFoldersForMailSidebar(acc.id, all, sidebarHiddenFolderKeys)
+    }
+    return out
+  }, [accounts, foldersByAccount, sidebarHiddenFolderKeys])
   const accountDragSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   )
@@ -320,6 +371,26 @@ export function Sidebar({ onOpenAccountDialog }: Props): JSX.Element {
         icon: folder.isFavorite ? StarOff : Star,
         onSelect: (): void => {
           void toggleFolderFavorite(folder.id, !folder.isFavorite)
+        }
+      },
+      {
+        id: 'hide-mail-sidebar',
+        label: t('sidebar.mailContextHideFromSidebar'),
+        icon: PanelLeftClose,
+        disabled: folder.wellKnown === 'inbox',
+        onSelect: (): void => {
+          setContextMenu(null)
+          if (folder.wellKnown === 'inbox') return
+          setSidebarHiddenFolderKeys((prev) => {
+            const next = new Set(prev)
+            next.add(mailFolderSidebarVisibilityKey(folder.accountId, folder.remoteId))
+            return next
+          })
+          if (selectedFolderId === folder.id) {
+            const list = foldersByAccount[folder.accountId] ?? []
+            const inbox = list.find((f) => f.wellKnown === 'inbox')
+            if (inbox) void selectFolder(folder.accountId, inbox.id)
+          }
         }
       },
       ...(isGmail
@@ -641,7 +712,7 @@ export function Sidebar({ onOpenAccountDialog }: Props): JSX.Element {
                 account={account}
                 showDragHandle={accounts.length > 1}
                 profilePhotoDataUrl={profilePhotoDataUrls[account.id]}
-                folders={foldersByAccount[account.id] ?? []}
+                folders={foldersForSidebar[account.id] ?? []}
                 sync={syncByAccount[account.id]}
                 selectedFolderId={selectedFolderId}
                 inlineEdit={inlineEdit?.accountId === account.id ? inlineEdit : null}

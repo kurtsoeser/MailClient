@@ -1451,8 +1451,8 @@ export function HomeDashboard(): JSX.Element {
                 useCalendarPendingFocusStore.getState().queueGotoDate(formatISO(startOfDay(day)))
                 setAppMode('calendar')
               }}
-              onCreateEventOnDay={(day, anchor): void => {
-                useCalendarPendingFocusStore.getState().queueCreateEventOnDay(formatISO(startOfDay(day)), anchor)
+              onCreateEventOnDay={(day): void => {
+                useCalendarPendingFocusStore.getState().queueCreateEventOnDay(formatISO(startOfDay(day)))
                 setAppMode('calendar')
               }}
             />
@@ -1472,8 +1472,8 @@ export function HomeDashboard(): JSX.Element {
                 useCalendarPendingFocusStore.getState().queueGotoDate(formatISO(startOfDay(day)))
                 setAppMode('calendar')
               }}
-              onCreateEventOnDay={(day, anchor): void => {
-                useCalendarPendingFocusStore.getState().queueCreateEventOnDay(formatISO(startOfDay(day)), anchor)
+              onCreateEventOnDay={(day): void => {
+                useCalendarPendingFocusStore.getState().queueCreateEventOnDay(formatISO(startOfDay(day)))
                 setAppMode('calendar')
               }}
             />
@@ -1497,8 +1497,8 @@ export function HomeDashboard(): JSX.Element {
                 useCalendarPendingFocusStore.getState().queueFocusEvent(ev)
                 setAppMode('calendar')
               }}
-              onCreateEventOnDay={(day, anchor): void => {
-                useCalendarPendingFocusStore.getState().queueCreateEventOnDay(formatISO(startOfDay(day)), anchor)
+              onCreateEventOnDay={(day): void => {
+                useCalendarPendingFocusStore.getState().queueCreateEventOnDay(formatISO(startOfDay(day)))
                 setAppMode('calendar')
               }}
             />

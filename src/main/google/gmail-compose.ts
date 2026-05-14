@@ -129,7 +129,7 @@ function buildMime(
 
   const topHeaders: string[] = []
   topHeaders.push(`From: ${fromLine}`)
-  topHeaders.push(`To: ${to}`)
+  if (to) topHeaders.push(`To: ${to}`)
   if (cc) topHeaders.push(`Cc: ${cc}`)
   if (bcc) topHeaders.push(`Bcc: ${bcc}`)
   topHeaders.push(`Subject: ${encodeSubject(input.subject)}`)
@@ -193,4 +193,67 @@ export async function gmailSendMail(
       ...(threadId && input.replyMode !== 'forward' ? { threadId } : {})
     }
   })
+}
+
+export interface GmailSaveDraftResult {
+  remoteDraftId: string
+}
+
+/** Entwurf in Gmail (Label Entwürfe); `remoteDraftId` ist die Draft-Ressourcen-ID. */
+export async function gmailSaveDraft(
+  input: GmailComposeInput & { remoteDraftId?: string | null },
+  fromEmail: string,
+  fromName: string
+): Promise<GmailSaveDraftResult> {
+  const { gmail } = await getGoogleApis(input.accountId)
+  const fromLine = fromName.trim()
+    ? `${fromName.replace(/"/g, '')} <${fromEmail}>`
+    : fromEmail
+
+  let threadId: string | undefined
+  const replyHeaders: string[] = []
+  if (input.replyToRemoteId && input.replyMode) {
+    const orig = await gmail.users.messages.get({
+      userId: 'me',
+      id: input.replyToRemoteId,
+      format: 'metadata',
+      metadataHeaders: ['Message-ID', 'References', 'Subject']
+    })
+    threadId = orig.data.threadId ?? undefined
+    const hmap = new Map<string, string>()
+    for (const h of orig.data.payload?.headers ?? []) {
+      const n = (h.name ?? '').toLowerCase()
+      if (h.value) hmap.set(n, h.value)
+    }
+    const mid = hmap.get('message-id')
+    const refs = hmap.get('references')
+    if (mid) {
+      replyHeaders.push(`In-Reply-To: ${mid}`)
+      replyHeaders.push(`References: ${refs ? `${refs} ${mid}` : mid}`)
+    }
+  }
+
+  const raw = buildMime(input, fromLine, replyHeaders)
+  const body: { raw: string; threadId?: string } = {
+    raw: toRawBase64Url(raw),
+    ...(threadId && input.replyMode !== 'forward' ? { threadId } : {})
+  }
+
+  const existing = input.remoteDraftId?.trim()
+  if (existing) {
+    await gmail.users.drafts.update({
+      userId: 'me',
+      id: existing,
+      requestBody: { message: body }
+    })
+    return { remoteDraftId: existing }
+  }
+
+  const created = await gmail.users.drafts.create({
+    userId: 'me',
+    requestBody: { message: body }
+  })
+  const id = created.data.id
+  if (!id) throw new Error('Gmail hat keine Draft-ID zurueckgegeben.')
+  return { remoteDraftId: id }
 }
