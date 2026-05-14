@@ -2,6 +2,16 @@ import type { MailRuleDefinition, MailRuleTrigger } from './mail-rules'
 
 export type Provider = 'microsoft' | 'google'
 
+/** Gespeicherte Signatur-Vorlage pro Mailkonto (lokal). */
+export interface AccountSignatureTemplate {
+  id: string
+  name: string
+  /** HTML im Compose-Subset (Renderer bereinigt vor dem Speichern). */
+  html: string
+  /** ISO-Zeitstempel der letzten Speicherung (optional). */
+  updatedAt?: string
+}
+
 export interface ConnectedAccount {
   id: string
   provider: Provider
@@ -23,6 +33,13 @@ export interface ConnectedAccount {
    * `undefined` = Standard 365 Tage.
    */
   calendarLoadAheadDays?: number | null
+  /** Signatur-Vorlagen fuer dieses Konto (lokal gespeichert). */
+  signatureTemplates?: AccountSignatureTemplate[]
+  /**
+   * ID einer Vorlage aus `signatureTemplates` fuer neue Entwuerfe.
+   * `null`/`undefined` = keine automatische Signatur.
+   */
+  defaultSignatureTemplateId?: string | null
 }
 
 /** Kalender-Referenz fuer gefiltertes Laden (Microsoft Graph- oder Google-Kalender-ID). */
@@ -31,7 +48,7 @@ export type CalendarIncludeCalendarRef = {
   graphCalendarId: string
 }
 
-/** IPC `auth:patch-account` — mindestens eines von `color` / `calendarLoadAheadDays`. */
+/** IPC `auth:patch-account` — mindestens eines der optionalen Felder. */
 export interface PatchAccountInput {
   accountId: string
   color?: string
@@ -40,6 +57,10 @@ export interface PatchAccountInput {
    * `'default'` = Standard-Vorausschau (365 Tage), gespeicherten Wert entfernen.
    */
   calendarLoadAheadDays?: number | null | 'default'
+  /** Ersetzt die komplette Vorlagenliste (max. 40 Eintraege). */
+  signatureTemplates?: AccountSignatureTemplate[]
+  /** Standard-Signatur fuer neue Mails; `null` = leer starten. */
+  defaultSignatureTemplateId?: string | null
 }
 
 export interface AuthResult {
@@ -1102,7 +1123,7 @@ export interface ComposeSendInput {
 export interface ComposeRecipientSuggestion {
   email: string
   displayName?: string | null
-  source: 'people-local' | 'mail-history' | 'graph-people'
+  source: 'people-local' | 'mail-history' | 'graph-people' | 'graph-directory' | 'graph-group'
 }
 
 export interface ComposeListDriveItemsInput {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { X } from 'lucide-react'
+import { UserPlus, X } from 'lucide-react'
 import type { ComposeRecipientSuggestion } from '@shared/types'
+import { ComposeContactPickerDialog } from '@/components/ComposeContactPickerDialog'
 import {
   formatRecipientsWithTail,
   parseRecipients,
@@ -28,16 +29,15 @@ export function RecipientTokenField({
   const { complete, tail } = useMemo(() => parseRecipientsWithTail(value), [value])
   const [suggestions, setSuggestions] = useState<ComposeRecipientSuggestion[]>([])
   const [open, setOpen] = useState(false)
+  const [loadingSuggest, setLoadingSuggest] = useState(false)
+  const [pickerOpen, setPickerOpen] = useState(false)
   const debRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
 
   const fetchSuggest = useCallback(
     async (q: string): Promise<void> => {
       const t = q.trim()
-      if (t.length < 2) {
-        setSuggestions([])
-        return
-      }
+      setLoadingSuggest(true)
       try {
         const list = await window.mailClient.compose.recipientSuggestions({
           accountId,
@@ -46,6 +46,8 @@ export function RecipientTokenField({
         setSuggestions(list)
       } catch {
         setSuggestions([])
+      } finally {
+        setLoadingSuggest(false)
       }
     },
     [accountId]
@@ -53,9 +55,10 @@ export function RecipientTokenField({
 
   useEffect(() => {
     if (debRef.current) clearTimeout(debRef.current)
+    const delay = tail.trim().length === 0 ? 0 : 220
     debRef.current = setTimeout(() => {
       void fetchSuggest(tail)
-    }, 220)
+    }, delay)
     return (): void => {
       if (debRef.current) clearTimeout(debRef.current)
     }
@@ -85,7 +88,19 @@ export function RecipientTokenField({
 
   return (
     <div className={cn('relative flex items-start border-b border-border/60 px-4 py-2', className)}>
-      <span className="mt-1.5 w-12 shrink-0 text-xs text-muted-foreground">{label}</span>
+      <div className="mt-1.5 flex w-12 shrink-0 items-center gap-0.5">
+        <span className="text-xs text-muted-foreground">{label}</span>
+        <button
+          type="button"
+          title="Aus Kontakten wählen"
+          aria-label="Aus Kontakten wählen"
+          className="rounded p-0.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
+          onMouseDown={(e): void => e.preventDefault()}
+          onClick={(): void => setPickerOpen(true)}
+        >
+          <UserPlus className="h-3.5 w-3.5" />
+        </button>
+      </div>
       <div className="relative min-w-0 flex-1">
         <div className="flex min-h-[28px] flex-wrap items-center gap-1 rounded border border-transparent bg-transparent px-0 py-0.5 focus-within:border-border/80">
           {complete.map((r, idx) => (
@@ -126,12 +141,15 @@ export function RecipientTokenField({
                 removeAt(complete.length - 1)
               }
             }}
-            placeholder={complete.length ? '' : 'name@beispiel.com'}
+            placeholder={complete.length ? '' : 'Tippen für Vorschläge oder + für Kontakte'}
             className="min-w-[120px] flex-1 bg-transparent py-0.5 text-xs text-foreground outline-none placeholder:text-muted-foreground"
           />
         </div>
-        {open && suggestions.length > 0 && (
+        {open && (suggestions.length > 0 || loadingSuggest) && (
           <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-48 overflow-y-auto rounded-md border border-border bg-card py-1 shadow-lg">
+            {loadingSuggest && suggestions.length === 0 && (
+              <div className="px-3 py-2 text-[11px] text-muted-foreground">Vorschläge werden geladen…</div>
+            )}
             {suggestions.map((s, i) => (
               <button
                 key={`${s.email}-${s.source}-${i}`}
@@ -151,7 +169,13 @@ export function RecipientTokenField({
                     ? 'Kontakt'
                     : s.source === 'mail-history'
                       ? 'Verlauf'
-                      : 'Microsoft'}
+                      : s.source === 'graph-people'
+                        ? 'Microsoft'
+                        : s.source === 'graph-directory'
+                          ? 'Verzeichnis'
+                          : s.source === 'graph-group'
+                            ? 'Gruppe'
+                            : 'Vorschlag'}
                 </span>
               </button>
             ))}
@@ -167,6 +191,18 @@ export function RecipientTokenField({
           Cc/Bcc
         </button>
       )}
+      <ComposeContactPickerDialog
+        open={pickerOpen}
+        accountId={accountId}
+        onClose={(): void => setPickerOpen(false)}
+        onPick={(email, displayName): void => {
+          pickSuggestion({
+            email,
+            displayName,
+            source: 'people-local'
+          })
+        }}
+      />
     </div>
   )
 }

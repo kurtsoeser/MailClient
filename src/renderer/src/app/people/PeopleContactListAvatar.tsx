@@ -9,6 +9,8 @@ interface PeopleContactListAvatarProps {
   contact: PeopleContactView
   displayName: string
   accountColor?: string | null
+  /** Kachel-Ansicht: größerer Avatar (Listen-Zeile bleibt `list`). */
+  variant?: 'list' | 'tile'
 }
 
 /**
@@ -17,7 +19,8 @@ interface PeopleContactListAvatarProps {
 export function PeopleContactListAvatar({
   contact,
   displayName,
-  accountColor
+  accountColor,
+  variant = 'list'
 }: PeopleContactListAvatarProps): JSX.Element {
   const rootRef = useRef<HTMLSpanElement>(null)
   const [loadLocalPhoto, setLoadLocalPhoto] = useState(false)
@@ -45,6 +48,8 @@ export function PeopleContactListAvatar({
 
   const ringCls = accountColor ? bgToRingClass(accountColor) : ''
 
+  const isTile = variant === 'tile'
+
   return (
     <span ref={rootRef} className="inline-flex shrink-0">
       <Avatar
@@ -53,8 +58,12 @@ export function PeopleContactListAvatar({
         imageSrc={localUrl}
         useGravatar={!hasLocal}
         accountColor={accountColor ?? null}
-        size="md"
-        className={cn('!h-9 !w-9 ring-2 ring-offset-2 ring-offset-background', ringCls)}
+        size={isTile ? 'xl' : 'md'}
+        className={cn(
+          'ring-2 ring-offset-2 ring-offset-background',
+          isTile ? '!h-[4.25rem] !w-[4.25rem]' : '!h-9 !w-9',
+          ringCls
+        )}
       />
     </span>
   )

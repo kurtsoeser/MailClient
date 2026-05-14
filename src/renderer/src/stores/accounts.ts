@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AppConfig, AppConfigWeatherLocation, ConnectedAccount } from '@shared/types'
+import type { AppConfig, AppConfigWeatherLocation, ConnectedAccount, PatchAccountInput } from '@shared/types'
 import { safeSetCalendarTimeZone, safeSetGoogleClientId, safeSetWeatherLocation } from '@/lib/config-invoke'
 
 async function loadProfilePhotoDataUrls(accounts: ConnectedAccount[]): Promise<Record<string, string>> {
@@ -41,6 +41,10 @@ interface AccountsState {
   patchAccountCalendarLoadAhead: (
     accountId: string,
     value: number | null | 'default'
+  ) => Promise<void>
+  patchAccountSignatures: (
+    accountId: string,
+    patch: Pick<PatchAccountInput, 'signatureTemplates' | 'defaultSignatureTemplateId'>
   ) => Promise<void>
   dismissWorkflowMailFoldersIntro: () => Promise<void>
   setFirstRunSetupCompleted: (value: boolean) => Promise<void>
@@ -222,6 +226,19 @@ export const useAccountsStore = create<AccountsState>((set, get) => ({
     set({ error: null })
     try {
       await window.mailClient.auth.patchAccount({ accountId, calendarLoadAheadDays: value })
+    } catch (e) {
+      set({ error: e instanceof Error ? e.message : String(e) })
+      throw e
+    }
+  },
+
+  async patchAccountSignatures(
+    accountId: string,
+    patch: Pick<PatchAccountInput, 'signatureTemplates' | 'defaultSignatureTemplateId'>
+  ): Promise<void> {
+    set({ error: null })
+    try {
+      await window.mailClient.auth.patchAccount({ accountId, ...patch })
     } catch (e) {
       set({ error: e instanceof Error ? e.message : String(e) })
       throw e

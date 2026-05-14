@@ -68,11 +68,12 @@ import {
   searchMessages,
   listSnoozedMessages,
   listWaitingMessages,
-  searchMessageParticipantEmails
+  searchMessageParticipantEmails,
+  listRecentParticipantEmailsForCompose
 } from '../db/messages-repo'
 import { listMailTemplates } from '../db/templates-repo'
 import { insertScheduledCompose } from '../db/compose-scheduled-repo'
-import { searchPeopleContactsForCompose } from '../db/people-repo'
+import { searchPeopleContactsForCompose, listBootstrapPeopleContactsForCompose } from '../db/people-repo'
 import { listMailQuickSteps } from '../db/quicksteps-repo'
 import {
   ensureMicrosoftWorkflowMailFolders,
@@ -118,7 +119,9 @@ import {
 import { sendMail as graphSendMail } from '../graph/compose'
 import {
   graphListComposeDriveItems,
-  graphSearchPeopleForCompose
+  graphSearchPeopleForCompose,
+  graphSearchDirectoryUsersForCompose,
+  graphSearchMailEnabledGroupsForCompose
 } from '../graph/compose-recipient-graph'
 import {
   fetchInlineImages as graphFetchInlineImages,
@@ -924,8 +927,7 @@ export function registerMailIpc(): void {
       const acc = accounts.find((a) => a.id === args.accountId)
       if (!acc) return []
       const q = args.query.trim()
-      if (q.length < 2) return []
-      const limit = 12
+      const limit = 16
       const seen = new Set<string>()
       const out: ComposeRecipientSuggestion[] = []
 
@@ -934,6 +936,32 @@ export function registerMailIpc(): void {
         if (!k || seen.has(k)) return
         seen.add(k)
         out.push(s)
+      }
+
+      if (q.length === 0) {
+        for (const r of listBootstrapPeopleContactsForCompose({
+          accountId: args.accountId,
+          limit: 10
+        })) {
+          push({
+            email: r.email,
+            displayName: r.displayName,
+            source: 'people-local'
+          })
+          if (out.length >= limit) return out
+        }
+        for (const r of listRecentParticipantEmailsForCompose({
+          accountId: args.accountId,
+          limit: 10
+        })) {
+          push({
+            email: r.email,
+            displayName: r.displayName,
+            source: 'mail-history'
+          })
+          if (out.length >= limit) return out
+        }
+        return out
       }
 
       for (const r of searchPeopleContactsForCompose({
@@ -967,6 +995,16 @@ export function registerMailIpc(): void {
           for (const r of await graphSearchPeopleForCompose(args.accountId, q, 8)) {
             push(r)
             if (out.length >= limit) return out
+          }
+          if (q.length >= 2) {
+            for (const r of await graphSearchDirectoryUsersForCompose(args.accountId, q, 6)) {
+              push(r)
+              if (out.length >= limit) return out
+            }
+            for (const r of await graphSearchMailEnabledGroupsForCompose(args.accountId, q, 5)) {
+              push(r)
+              if (out.length >= limit) return out
+            }
           }
         } catch (e) {
           console.warn('[ipc] compose.recipientSuggestions graph:', e)

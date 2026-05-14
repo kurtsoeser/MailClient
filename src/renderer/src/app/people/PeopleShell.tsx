@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { Loader2, Plus, RefreshCw, Search, Star } from 'lucide-react'
+import { Loader2, Plus, RefreshCw, Search, Star, LayoutGrid, LayoutList } from 'lucide-react'
 
 import { useTranslation } from 'react-i18next'
 
@@ -30,6 +30,7 @@ import { PeopleNewContactDialog } from '@/app/people/PeopleNewContactDialog'
 import { peopleListPrimaryLabel } from '@/app/people/people-display-label'
 import { groupPeopleListRows } from '@/app/people/people-list-groups'
 import { useContactPhotoDataUrl } from '@/app/people/useContactPhotoDataUrl'
+import { PeopleContactTile } from '@/app/people/PeopleContactTile'
 import { PeopleShellSortableAccountNavRow } from '@/app/people/PeopleShellAccountNavRow'
 import {
   moduleColumnHeaderOutlineSmClass,
@@ -53,6 +54,10 @@ type NavKey =
 
 const PEOPLE_SORT_STORAGE_KEY = 'mailclient.people.sortBy'
 
+const PEOPLE_VIEW_STORAGE_KEY = 'mailclient.people.viewMode'
+
+type PeopleListViewMode = 'list' | 'tiles'
+
 function readStoredPeopleSort(): PeopleListSort {
 
   try {
@@ -68,6 +73,24 @@ function readStoredPeopleSort(): PeopleListSort {
   }
 
   return 'displayName'
+
+}
+
+function readStoredPeopleView(): PeopleListViewMode {
+
+  try {
+
+    const v = window.localStorage.getItem(PEOPLE_VIEW_STORAGE_KEY)
+
+    if (v === 'list' || v === 'tiles') return v
+
+  } catch {
+
+    /* ignore */
+
+  }
+
+  return 'list'
 
 }
 
@@ -98,6 +121,8 @@ export function PeopleShell(): JSX.Element {
   const [query, setQuery] = useState('')
 
   const [sortBy, setSortBy] = useState<PeopleListSort>(() => readStoredPeopleSort())
+
+  const [viewMode, setViewMode] = useState<PeopleListViewMode>(() => readStoredPeopleView())
 
   const [counts, setCounts] = useState<PeopleNavCounts | null>(null)
 
@@ -185,6 +210,24 @@ export function PeopleShell(): JSX.Element {
     try {
 
       window.localStorage.setItem(PEOPLE_SORT_STORAGE_KEY, next)
+
+    } catch {
+
+      /* ignore */
+
+    }
+
+  }, [])
+
+
+
+  const setViewModePersist = useCallback((next: PeopleListViewMode): void => {
+
+    setViewMode(next)
+
+    try {
+
+      window.localStorage.setItem(PEOPLE_VIEW_STORAGE_KEY, next)
 
     } catch {
 
@@ -569,6 +612,52 @@ export function PeopleShell(): JSX.Element {
           </button>
 
         </li>
+
+      )
+
+    },
+
+    [accountById, selected, sortBy, commitDetailThen]
+
+  )
+
+
+
+  const renderContactTile = useCallback(
+
+    (c: PeopleContactView): JSX.Element => {
+
+      const acc = accountById.get(c.accountId)
+
+      const active =
+
+        selected?.accountId === c.accountId &&
+
+        selected?.remoteId === c.remoteId &&
+
+        selected?.provider === c.provider
+
+      return (
+
+        <PeopleContactTile
+
+          key={`${c.accountId}:${c.provider}:${c.remoteId}`}
+
+          contact={c}
+
+          sortBy={sortBy}
+
+          accountColor={acc?.color}
+
+          selected={active}
+
+          onSelect={(): void => {
+
+            void commitDetailThen(() => setSelected(c))
+
+          }}
+
+        />
 
       )
 
@@ -968,39 +1057,115 @@ export function PeopleShell(): JSX.Element {
 
               </div>
 
-              <label className="block text-xs text-muted-foreground">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
 
-                <span className="mb-1 block">{t('people.shell.sortBy')}</span>
+                <label className="block min-w-0 flex-1 text-xs text-muted-foreground">
 
-                <select
+                  <span className="mb-1 block">{t('people.shell.sortBy')}</span>
 
-                  value={sortBy}
+                  <select
 
-                  onChange={(e): void => {
+                    value={sortBy}
 
-                    const v = e.target.value
+                    onChange={(e): void => {
 
-                    if (v === 'displayName' || v === 'givenName' || v === 'surname') setSortByPersist(v)
+                      const v = e.target.value
 
-                  }}
+                      if (v === 'displayName' || v === 'givenName' || v === 'surname') setSortByPersist(v)
 
-                  className="w-full rounded-md border border-border bg-card px-2 py-1.5 text-sm text-foreground outline-none ring-primary focus:ring-1"
+                    }}
+
+                    className="w-full rounded-md border border-border bg-card px-2 py-1.5 text-sm text-foreground outline-none ring-primary focus:ring-1"
+
+                  >
+
+                    <option value="displayName">{t('people.shell.sortDisplayName')}</option>
+
+                    <option value="givenName">{t('people.shell.sortGivenName')}</option>
+
+                    <option value="surname">{t('people.shell.sortSurname')}</option>
+
+                  </select>
+
+                </label>
+
+                <div
+
+                  role="group"
+
+                  aria-label={t('people.shell.viewModeAria')}
+
+                  className="flex shrink-0 gap-0.5 self-stretch rounded-md border border-border bg-secondary/25 p-0.5 sm:self-auto"
 
                 >
 
-                  <option value="displayName">{t('people.shell.sortDisplayName')}</option>
+                  <button
 
-                  <option value="givenName">{t('people.shell.sortGivenName')}</option>
+                    type="button"
 
-                  <option value="surname">{t('people.shell.sortSurname')}</option>
+                    aria-pressed={viewMode === 'list'}
 
-                </select>
+                    title={t('people.shell.viewList')}
 
-              </label>
+                    onClick={(): void => setViewModePersist('list')}
+
+                    className={cn(
+
+                      'flex flex-1 items-center justify-center rounded px-2 py-1.5 sm:flex-initial',
+
+                      viewMode === 'list'
+
+                        ? 'bg-card text-foreground shadow-sm'
+
+                        : 'text-muted-foreground hover:bg-secondary/80 hover:text-foreground'
+
+                    )}
+
+                  >
+
+                    <LayoutList className="h-4 w-4" aria-hidden />
+
+                    <span className="sr-only">{t('people.shell.viewList')}</span>
+
+                  </button>
+
+                  <button
+
+                    type="button"
+
+                    aria-pressed={viewMode === 'tiles'}
+
+                    title={t('people.shell.viewTiles')}
+
+                    onClick={(): void => setViewModePersist('tiles')}
+
+                    className={cn(
+
+                      'flex flex-1 items-center justify-center rounded px-2 py-1.5 sm:flex-initial',
+
+                      viewMode === 'tiles'
+
+                        ? 'bg-card text-foreground shadow-sm'
+
+                        : 'text-muted-foreground hover:bg-secondary/80 hover:text-foreground'
+
+                    )}
+
+                  >
+
+                    <LayoutGrid className="h-4 w-4" aria-hidden />
+
+                    <span className="sr-only">{t('people.shell.viewTiles')}</span>
+
+                  </button>
+
+                </div>
+
+              </div>
 
             </div>
 
-            <div key={`people-contact-list-${sortBy}`} className="min-h-0 flex-1 overflow-y-auto">
+            <div key={`people-contact-list-${sortBy}-${viewMode}`} className="min-h-0 flex-1 overflow-y-auto">
 
               {listLoading ? (
 
@@ -1024,9 +1189,11 @@ export function PeopleShell(): JSX.Element {
 
               ) : (
 
-                <div className="min-w-0 divide-y divide-border">
+                viewMode === 'list' ? (
 
-                  {listGroups.map((g, idx) => {
+                  <div className="min-w-0 divide-y divide-border">
+
+                    {listGroups.map((g, idx) => {
 
                       const header = groupHeaderLabel(g.letter)
 
@@ -1066,6 +1233,57 @@ export function PeopleShell(): JSX.Element {
                     })}
 
                   </div>
+
+                ) : (
+
+                  <div className="min-w-0 space-y-1 pb-2">
+
+                    {listGroups.map((g, idx) => {
+
+                      const header = groupHeaderLabel(g.letter)
+
+                      return (
+
+                        <div
+                          key={`tiles-${sortBy}-${g.letter}-${idx}`}
+                          className="min-w-0"
+                          role="group"
+                          aria-label={t('people.shell.groupSectionAria', { letter: header })}
+                        >
+
+                          <div
+
+                            className={cn(
+
+                              'sticky top-0 z-[1] border-b border-border bg-background/95 px-3 py-1.5',
+
+                              'text-xs font-semibold uppercase tracking-wide text-muted-foreground',
+
+                              'backdrop-blur supports-[backdrop-filter]:bg-background/75'
+
+                            )}
+
+                          >
+
+                            {header}
+
+                          </div>
+
+                          <div className="grid grid-cols-1 gap-2.5 p-2.5 min-[380px]:grid-cols-2 min-[560px]:grid-cols-3">
+
+                            {g.items.map((c) => renderContactTile(c))}
+
+                          </div>
+
+                        </div>
+
+                      )
+
+                    })}
+
+                  </div>
+
+                )
 
               )}
 

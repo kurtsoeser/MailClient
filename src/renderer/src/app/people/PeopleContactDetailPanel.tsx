@@ -21,6 +21,7 @@ import {
   MapPin,
   Pencil,
   Phone,
+  StickyNote,
   Star,
   Trash2,
   X
@@ -323,35 +324,41 @@ export const PeopleContactDetailPanel = forwardRef<PeopleContactDetailPanelHandl
         />
       ) : null}
 
-      <header className="shrink-0 border-b border-border bg-card">
-        <div className="flex min-h-10 flex-wrap items-center gap-x-2 gap-y-1 px-2 py-1">
-          <div
-            className="flex min-h-9 min-w-0 flex-1 items-start gap-2 border-l-2 border-solid pl-2"
-            style={{ borderLeftColor: resolvedAccountColorCss(account?.color) }}
-          >
+      <header className="shrink-0 border-b border-border bg-gradient-to-b from-secondary/25 to-card">
+        <div
+          className="flex flex-col gap-4 border-l-[3px] border-solid px-4 py-4 sm:px-5 sm:py-5 md:flex-row md:items-start md:gap-6"
+          style={{ borderLeftColor: resolvedAccountColorCss(account?.color) }}
+        >
+          <div className="flex shrink-0 flex-col items-center gap-2 md:items-start">
             <Avatar
               name={peopleListPrimaryLabel(selected, listSortBy)}
               email={selected.primaryEmail}
               imageSrc={photoUrl}
               useGravatar={!hasLocalPhoto}
               accountColor={account?.color ?? null}
-              size="md"
-              className={cn('!h-9 !w-9 ring-2 ring-offset-1 ring-offset-card', ringCls)}
+              size="xl"
+              className={cn(
+                '!h-[6.5rem] !w-[6.5rem] ring-[3px] ring-offset-2 ring-offset-card sm:!h-28 sm:!w-28',
+                ringCls
+              )}
             />
-            <div className="min-w-0 flex-1 py-0.5">
-              <h2 className="truncate text-sm font-semibold leading-tight text-foreground">
-                {peopleListPrimaryLabel(selected, listSortBy)}
-              </h2>
-              {selected.primaryEmail ? (
-                <p className="truncate text-xs text-muted-foreground">{selected.primaryEmail}</p>
-              ) : null}
-              <p className="mt-0.5 text-[10px] text-muted-foreground">
-                {selected.provider === 'microsoft' ? 'Microsoft 365' : 'Google'}
-              </p>
-            </div>
           </div>
 
-          <div className="flex shrink-0 flex-wrap items-center gap-0.5">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+              <div className="min-w-0 flex-1 text-center sm:text-left">
+                <h2 className="text-balance text-xl font-semibold leading-tight tracking-tight text-foreground sm:text-2xl">
+                  {peopleListPrimaryLabel(selected, listSortBy)}
+                </h2>
+                {selected.primaryEmail ? (
+                  <p className="mt-1.5 truncate text-sm text-muted-foreground">{selected.primaryEmail}</p>
+                ) : null}
+                <p className="mt-1 text-xs text-muted-foreground/90">
+                  {selected.provider === 'microsoft' ? 'Microsoft 365' : 'Google'}
+                </p>
+              </div>
+
+              <div className="flex shrink-0 flex-wrap items-center justify-center gap-0.5 sm:justify-end">
             {editing ? (
               <>
                 <PeopleDetailIconButton
@@ -430,11 +437,13 @@ export const PeopleContactDetailPanel = forwardRef<PeopleContactDetailPanelHandl
                 />
               </>
             )}
+              </div>
+            </div>
           </div>
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+      <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
         {editing ? (
           <div className="space-y-3 rounded-lg border border-border bg-background/60 p-3 text-sm">
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -535,64 +544,64 @@ export const PeopleContactDetailPanel = forwardRef<PeopleContactDetailPanelHandl
               <p className="text-xs text-muted-foreground">{t('people.shell.noEmail')}</p>
             ) : null}
 
-            <div className="mt-4 space-y-4 text-sm">
+            <div className="mt-2 grid gap-x-8 gap-y-5 text-sm sm:grid-cols-2">
               {selected.company?.trim() ? (
-                <div>
+                <div className="min-w-0">
                   <div className="mb-1 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    <Building2 className="h-3.5 w-3.5" />
+                    <Building2 className="h-3.5 w-3.5 shrink-0" />
                     {t('people.shell.company')}
                   </div>
-                  <p className="text-foreground">{selected.company}</p>
+                  <p className="break-words text-foreground">{selected.company}</p>
                 </div>
               ) : null}
               {selected.jobTitle?.trim() ? (
-                <div>
+                <div className="min-w-0">
                   <div className="mb-1 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    <Briefcase className="h-3.5 w-3.5" />
+                    <Briefcase className="h-3.5 w-3.5 shrink-0" />
                     {t('people.shell.jobTitle')}
                   </div>
-                  <p className="text-foreground">{selected.jobTitle}</p>
+                  <p className="break-words text-foreground">{selected.jobTitle}</p>
                 </div>
               ) : null}
               {selected.department?.trim() ? (
-                <div>
+                <div className="min-w-0">
                   <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     {t('people.shell.fieldDepartment')}
                   </div>
-                  <p className="text-foreground">{selected.department}</p>
+                  <p className="break-words text-foreground">{selected.department}</p>
                 </div>
               ) : null}
               {selected.officeLocation?.trim() ? (
-                <div>
+                <div className="min-w-0">
                   <div className="mb-1 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    <MapPin className="h-3.5 w-3.5" />
+                    <MapPin className="h-3.5 w-3.5 shrink-0" />
                     {t('people.shell.fieldOffice')}
                   </div>
-                  <p className="text-foreground">{selected.officeLocation}</p>
+                  <p className="break-words text-foreground">{selected.officeLocation}</p>
                 </div>
               ) : null}
               {selected.birthdayIso?.trim() ? (
-                <div>
+                <div className="min-w-0">
                   <div className="mb-1 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    <Cake className="h-3.5 w-3.5" />
+                    <Cake className="h-3.5 w-3.5 shrink-0" />
                     {t('people.shell.fieldBirthday')}
                   </div>
                   <p className="text-foreground">{selected.birthdayIso}</p>
                 </div>
               ) : null}
               {selected.webPage?.trim() ? (
-                <div>
+                <div className="min-w-0 sm:col-span-2">
                   <div className="mb-1 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    <Globe className="h-3.5 w-3.5" />
+                    <Globe className="h-3.5 w-3.5 shrink-0" />
                     {t('people.shell.fieldWeb')}
                   </div>
-                  <p className="truncate text-foreground">{selected.webPage}</p>
+                  <p className="break-all text-foreground">{selected.webPage}</p>
                 </div>
               ) : null}
               {phonesDisplay.length > 0 ? (
-                <div>
+                <div className="min-w-0 sm:col-span-2">
                   <div className="mb-1 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    <Phone className="h-3.5 w-3.5" />
+                    <Phone className="h-3.5 w-3.5 shrink-0" />
                     {t('people.shell.phone')}
                   </div>
                   <ul className="space-y-1 text-foreground">
@@ -606,11 +615,14 @@ export const PeopleContactDetailPanel = forwardRef<PeopleContactDetailPanelHandl
                 </div>
               ) : null}
               {selected.notes?.trim() ? (
-                <div>
-                  <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <div className="min-w-0 sm:col-span-2">
+                  <div className="mb-1 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    <StickyNote className="h-3.5 w-3.5 shrink-0" />
                     {t('people.shell.notes')}
                   </div>
-                  <p className="whitespace-pre-wrap text-foreground">{selected.notes}</p>
+                  <p className="whitespace-pre-wrap rounded-md border border-border/60 bg-muted/15 p-3 text-foreground">
+                    {selected.notes}
+                  </p>
                 </div>
               ) : null}
             </div>

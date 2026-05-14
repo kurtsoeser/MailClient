@@ -926,7 +926,7 @@ export function searchMessageParticipantEmails(args: {
   limit: number
 }): Array<{ email: string; displayName?: string }> {
   const raw = args.needle.trim().replace(/%/g, '').replace(/_/g, '')
-  if (raw.length < 2) return []
+  if (raw.length < 1) return []
   const needle = `%${raw}%`
   const lim = Math.min(Math.max(args.limit, 1), 24)
   const db = getDb()
@@ -961,6 +961,56 @@ export function searchMessageParticipantEmails(args: {
       const eLower = em.toLowerCase()
       if (seen.has(eLower)) continue
       if (!eLower.includes(rawLower) && !line.toLowerCase().includes(rawLower)) continue
+      seen.add(eLower)
+      out.push({ email: em, ...(nameHint?.trim() ? { displayName: nameHint.trim() } : {}) })
+    }
+  }
+
+  for (const r of rows) {
+    collectFromLine(r.from_addr, r.from_name)
+    collectFromLine(r.to_addrs, undefined)
+    collectFromLine(r.cc_addrs, undefined)
+    if (out.length >= lim) break
+  }
+  return out.slice(0, lim)
+}
+
+/** Zuletzt vorkommende Empfaenger-Adressen ohne Suchbegriff (Compose-Autocomplete beim Fokus). */
+export function listRecentParticipantEmailsForCompose(args: {
+  accountId: string
+  limit: number
+}): Array<{ email: string; displayName?: string }> {
+  const lim = Math.min(Math.max(args.limit, 1), 24)
+  const db = getDb()
+  const rows = db
+    .prepare(
+      `SELECT from_addr, from_name, to_addrs, cc_addrs
+       FROM messages
+       WHERE account_id = ?
+         AND (
+           (from_addr IS NOT NULL AND from_addr LIKE '%@%')
+           OR (to_addrs IS NOT NULL AND to_addrs LIKE '%@%')
+           OR (cc_addrs IS NOT NULL AND cc_addrs LIKE '%@%')
+         )
+       ORDER BY received_at DESC NULLS LAST, id DESC
+       LIMIT 120`
+    )
+    .all(args.accountId) as Array<{
+    from_addr: string | null
+    from_name: string | null
+    to_addrs: string | null
+    cc_addrs: string | null
+  }>
+
+  const seen = new Set<string>()
+  const out: Array<{ email: string; displayName?: string }> = []
+
+  const collectFromLine = (line: string | null | undefined, nameHint: string | null | undefined): void => {
+    if (!line?.trim()) return
+    const emails = line.match(EMAIL_RE) ?? []
+    for (const em of emails) {
+      const eLower = em.toLowerCase()
+      if (seen.has(eLower)) continue
       seen.add(eLower)
       out.push({ email: em, ...(nameHint?.trim() ? { displayName: nameHint.trim() } : {}) })
     }

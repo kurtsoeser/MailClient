@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { TipTapBody } from '@/components/TipTapBody'
+import { SignatureTemplateControls } from '@/components/SignatureTemplateControls'
 import { RecipientTokenField } from '@/components/RecipientTokenField'
 import {
   useComposeStore,
@@ -550,8 +551,15 @@ function ComposerWindow({
       />
 
       <div className="shrink-0 border-t border-border/50 bg-secondary/10">
-        <div className="px-4 pt-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-          Signatur / Footer
+        <div className="flex flex-wrap items-start justify-between gap-2 px-4 pt-2">
+          <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            Signatur / Footer
+          </div>
+          <SignatureTemplateControls
+            accountId={draft.accountId}
+            signatureRichHtml={draft.signatureRichHtml}
+            onSignatureHtmlChange={(html): void => update(draft.id, { signatureRichHtml: html })}
+          />
         </div>
         <TipTapBody
           variant="compact"

@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import { IPC, type ConnectedAccount } from '@shared/types'
+import { IPC, type AccountSignatureTemplate, type ConnectedAccount } from '@shared/types'
 import { normalizeStoredAccountColor } from '@shared/account-colors'
 import { loadConfig } from '../config'
 import {
@@ -32,6 +32,42 @@ import {
 import { broadcastAccountsChanged } from './ipc-broadcasts'
 import { parseGoogleIdToken, tryAttachGoogleProfilePhoto } from './ipc-helpers'
 import { deletePeopleDataForAccount } from '../db/people-repo'
+
+const MAX_SIGNATURE_TEMPLATES = 40
+const MAX_TEMPLATE_HTML_CHARS = 500_000
+
+function parseSignatureTemplatesPayload(raw: unknown): AccountSignatureTemplate[] {
+  if (!Array.isArray(raw)) {
+    throw new Error('Signaturvorlagen: Ungueltiges Format.')
+  }
+  if (raw.length > MAX_SIGNATURE_TEMPLATES) {
+    throw new Error(`Signaturvorlagen: Maximal ${MAX_SIGNATURE_TEMPLATES} Eintraege.`)
+  }
+  const out: AccountSignatureTemplate[] = []
+  const seen = new Set<string>()
+  const now = new Date().toISOString()
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') {
+      throw new Error('Signaturvorlagen: Ungueltiger Eintrag.')
+    }
+    const o = item as Record<string, unknown>
+    const id = typeof o.id === 'string' ? o.id.trim().slice(0, 96) : ''
+    const name = typeof o.name === 'string' ? o.name.trim().slice(0, 160) : ''
+    const html = typeof o.html === 'string' ? o.html : ''
+    if (!id || !name) {
+      throw new Error('Signaturvorlagen: Jede Vorlage braucht ID und Name.')
+    }
+    if (seen.has(id)) {
+      throw new Error('Signaturvorlagen: Doppelte ID.')
+    }
+    seen.add(id)
+    if (html.length > MAX_TEMPLATE_HTML_CHARS) {
+      throw new Error('Signaturvorlagen: HTML zu gross.')
+    }
+    out.push({ id, name, html, updatedAt: now })
+  }
+  return out
+}
 
 export function registerAuthIpc(): void {
   ipcMain.handle(IPC.auth.listAccounts, async (): Promise<ConnectedAccount[]> => {
@@ -334,6 +370,8 @@ export function registerAuthIpc(): void {
         accountId?: string
         color?: string
         calendarLoadAheadDays?: number | null | 'default'
+        signatureTemplates?: unknown
+        defaultSignatureTemplateId?: string | null
       }
       const accountId = typeof body.accountId === 'string' ? body.accountId.trim() : ''
       if (!accountId) {
@@ -341,8 +379,10 @@ export function registerAuthIpc(): void {
       }
       const hasColor = typeof body.color === 'string' && body.color.trim().length > 0
       const hasAhead = 'calendarLoadAheadDays' in body
-      if (!hasColor && !hasAhead) {
-        throw new Error('Keine Aenderungen (Farbe oder Kalender-Vorausschau).')
+      const hasSig = 'signatureTemplates' in body
+      const hasDef = 'defaultSignatureTemplateId' in body
+      if (!hasColor && !hasAhead && !hasSig && !hasDef) {
+        throw new Error('Keine Aenderungen (Farbe, Kalender, Signaturvorlagen).')
       }
       const current = await listAccounts()
       const prev = current.find((a) => a.id === accountId)
@@ -371,6 +411,32 @@ export function registerAuthIpc(): void {
           account.calendarLoadAheadDays = raw
         } else {
           throw new Error('Ungueltige Kalender-Vorausschau.')
+        }
+      }
+      if (hasSig) {
+        if (body.signatureTemplates === undefined) {
+          throw new Error('Signaturvorlagen: Keine Daten uebergeben.')
+        }
+        account.signatureTemplates = parseSignatureTemplatesPayload(body.signatureTemplates)
+      }
+      if (account.defaultSignatureTemplateId && !(account.signatureTemplates ?? []).some(
+        (t) => t.id === account.defaultSignatureTemplateId
+      )) {
+        account.defaultSignatureTemplateId = null
+      }
+      if (hasDef) {
+        const rawId = body.defaultSignatureTemplateId
+        if (rawId === null) {
+          account.defaultSignatureTemplateId = null
+        } else if (typeof rawId === 'string') {
+          const tid = rawId.trim()
+          const list = account.signatureTemplates ?? []
+          if (!list.some((t) => t.id === tid)) {
+            throw new Error('Standard-Signatur: Vorlage nicht gefunden.')
+          }
+          account.defaultSignatureTemplateId = tid
+        } else {
+          throw new Error('Ungueltige Standard-Signatur.')
         }
       }
       await upsertAccount(account)

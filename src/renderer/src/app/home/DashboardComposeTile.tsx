@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertCircle, Loader2, Paperclip, Send, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { TipTapBody } from '@/components/TipTapBody'
+import { SignatureTemplateControls } from '@/components/SignatureTemplateControls'
 import { RecipientTokenField } from '@/components/RecipientTokenField'
 import { cn } from '@/lib/utils'
 import { useAccountsStore } from '@/stores/accounts'
@@ -174,8 +175,16 @@ export function DashboardComposeTile(): JSX.Element {
           className="min-h-[100px] border-0 bg-transparent px-1 py-1 text-[11px]"
         />
         <div className="border-t border-border/40 bg-secondary/10 px-1 py-0.5">
-          <div className="px-1 pb-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
-            {t('mail.composeTile.signature', { defaultValue: 'Signatur' })}
+          <div className="flex flex-wrap items-start justify-between gap-1 px-1 pb-0.5">
+            <span className="shrink-0 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+              {t('mail.composeTile.signature', { defaultValue: 'Signatur' })}
+            </span>
+            <SignatureTemplateControls
+              compact
+              accountId={draft.accountId}
+              signatureRichHtml={draft.signatureRichHtml}
+              onSignatureHtmlChange={(html): void => update(draft.id, { signatureRichHtml: html })}
+            />
           </div>
           <TipTapBody
             variant="compact"

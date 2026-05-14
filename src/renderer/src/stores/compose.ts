@@ -13,6 +13,7 @@ import {
   withReplyPrefix
 } from '@/lib/compose-helpers'
 import { sanitizeComposeHtmlFragment } from '@/lib/sanitize-compose-html'
+import { useAccountsStore } from '@/stores/accounts'
 
 export type ComposeMode = 'new' | 'reply' | 'replyAll' | 'forward'
 
@@ -106,7 +107,18 @@ function newId(): string {
   return `cmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
-function defaultComposeFields(): Pick<
+function initialSignatureHtmlForAccount(accountId: string): string {
+  const acc = useAccountsStore.getState().accounts.find((a) => a.id === accountId)
+  if (!acc?.signatureTemplates?.length) return ''
+  const defId = acc.defaultSignatureTemplateId
+  if (defId === null || defId === undefined || defId === '') return ''
+  const tpl = acc.signatureTemplates.find((t) => t.id === defId)
+  const raw = tpl?.html?.trim() ?? ''
+  if (!raw) return ''
+  return sanitizeComposeHtmlFragment(raw)
+}
+
+function defaultComposeFields(accountId: string): Pick<
   ComposeDraft,
   | 'signatureRichHtml'
   | 'referenceAttachments'
@@ -116,7 +128,7 @@ function defaultComposeFields(): Pick<
   | 'scheduledSendAt'
 > {
   return {
-    signatureRichHtml: '',
+    signatureRichHtml: initialSignatureHtmlForAccount(accountId),
     referenceAttachments: [],
     importance: 'normal',
     isDeliveryReceiptRequested: false,
@@ -145,7 +157,7 @@ export const useComposeStore = create<ComposeState>((set, get) => ({
       attachments: [],
       expectReply: false,
       expectReplyDays: 7,
-      ...defaultComposeFields()
+      ...defaultComposeFields(accountId)
     }
     set((s) => ({ drafts: [...s.drafts, draft], activeId: draft.id }))
   },
@@ -166,7 +178,7 @@ export const useComposeStore = create<ComposeState>((set, get) => ({
       attachments: [],
       expectReply: false,
       expectReplyDays: 7,
-      ...defaultComposeFields()
+      ...defaultComposeFields(accountId)
     }
     set((s) => ({ drafts: [...s.drafts, draft], activeId: draft.id }))
   },
@@ -190,7 +202,7 @@ export const useComposeStore = create<ComposeState>((set, get) => ({
       expectReply: false,
       expectReplyDays: 7,
       embedInDashboard: true,
-      ...defaultComposeFields()
+      ...defaultComposeFields(accountId)
     }
     set((s) => ({ drafts: [...s.drafts, draft], activeId: draft.id }))
     return draft.id
@@ -221,7 +233,7 @@ export const useComposeStore = create<ComposeState>((set, get) => ({
       replyToMessageId: message.id,
       expectReply: false,
       expectReplyDays: 7,
-      ...defaultComposeFields()
+      ...defaultComposeFields(message.accountId)
     }
     set((s) => ({ drafts: [...s.drafts, draft], activeId: draft.id }))
   },
@@ -244,7 +256,7 @@ export const useComposeStore = create<ComposeState>((set, get) => ({
       replyToMessageId: message.id,
       expectReply: false,
       expectReplyDays: 7,
-      ...defaultComposeFields()
+      ...defaultComposeFields(message.accountId)
     }
     set((s) => ({ drafts: [...s.drafts, draft], activeId: draft.id }))
   },

@@ -34,6 +34,8 @@ export const MICROSOFT_SCOPES = [
   'Contacts.ReadWrite',
   /** Graph `/me/people` fuer Empfaenger-Vorschlaege im Compose. */
   'People.Read',
+  /** Organisationsverzeichnis: `/users` mit Filter fuer Empfaenger-Autocomplete. */
+  'User.ReadBasic.All',
   /** OneDrive: Dateien als Cloud-Anhang auswaehlen (`/me/drive/...`). */
   'Files.Read.All'
 ] as const

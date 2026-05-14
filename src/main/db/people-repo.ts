@@ -577,7 +577,7 @@ export function searchPeopleContactsForCompose(args: {
   limit: number
 }): Array<{ email: string; displayName: string | null }> {
   const raw = args.needle.trim().replace(/%/g, '').replace(/_/g, '')
-  if (raw.length < 2) return []
+  if (raw.length < 1) return []
   const needle = `%${raw}%`
   const lim = Math.min(Math.max(args.limit, 1), 20)
   const db = getDb()
@@ -600,4 +600,24 @@ export function searchPeopleContactsForCompose(args: {
     email: string
     displayName: string | null
   }>
+}
+
+/** Favoriten und erste alphabetische Kontakte mit E-Mail (Compose-Feld leer / Fokus). */
+export function listBootstrapPeopleContactsForCompose(args: {
+  accountId: string
+  limit: number
+}): Array<{ email: string; displayName: string | null }> {
+  const lim = Math.min(Math.max(args.limit, 1), 24)
+  const db = getDb()
+  return db
+    .prepare(
+      `SELECT primary_email as email, display_name as displayName
+       FROM people_contacts
+       WHERE account_id = ?
+         AND primary_email IS NOT NULL
+         AND primary_email != ''
+       ORDER BY is_favorite DESC, display_name ASC
+       LIMIT ?`
+    )
+    .all(args.accountId, lim) as Array<{ email: string; displayName: string | null }>
 }
