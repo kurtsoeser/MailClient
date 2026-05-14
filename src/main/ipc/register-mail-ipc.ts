@@ -12,8 +12,8 @@ import {
   type ComposeSendInput,
   type SnoozedMessageItem,
   type ComposeRecipientSuggestion,
-  type ComposeListDriveItemsInput,
-  type ComposeDriveItemRow,
+  type ComposeListDriveExplorerInput,
+  type ComposeDriveExplorerEntry,
   type TodoDueKindOpen,
   type TodoDueKindList,
   type TodoCountsAll,
@@ -118,7 +118,7 @@ import {
 } from '../graph/master-categories'
 import { sendMail as graphSendMail } from '../graph/compose'
 import {
-  graphListComposeDriveItems,
+  graphListDriveExplorer,
   graphSearchPeopleForCompose,
   graphSearchDirectoryUsersForCompose,
   graphSearchMailEnabledGroupsForCompose
@@ -1016,15 +1016,33 @@ export function registerMailIpc(): void {
   )
 
   ipcMain.handle(
-    IPC.compose.listDriveItems,
-    async (_event, args: ComposeListDriveItemsInput): Promise<ComposeDriveItemRow[]> => {
+    IPC.compose.listDriveExplorer,
+    async (_event, raw: unknown): Promise<ComposeDriveExplorerEntry[]> => {
+      const o = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+      const accountId = typeof o.accountId === 'string' ? o.accountId.trim() : ''
+      if (!accountId) return []
+      const scopeRaw = o.scope
+      const scope =
+        scopeRaw === 'recent' || scopeRaw === 'myfiles' || scopeRaw === 'shared' ? scopeRaw : 'myfiles'
+      const folderId =
+        typeof o.folderId === 'string'
+          ? o.folderId.trim() || null
+          : o.folderId === null
+            ? null
+            : undefined
+      const folderDriveId =
+        typeof o.folderDriveId === 'string'
+          ? o.folderDriveId.trim() || null
+          : o.folderDriveId === null
+            ? null
+            : undefined
       const accounts = await listAccounts()
-      const acc = accounts.find((a) => a.id === args.accountId)
+      const acc = accounts.find((a) => a.id === accountId)
       if (!acc || acc.provider !== 'microsoft') return []
       try {
-        return await graphListComposeDriveItems(args.accountId, args.mode)
+        return await graphListDriveExplorer(accountId, scope, folderId ?? null, folderDriveId ?? null)
       } catch (e) {
-        console.warn('[ipc] compose.listDriveItems:', e)
+        console.warn('[ipc] compose.listDriveExplorer:', e)
         return []
       }
     }

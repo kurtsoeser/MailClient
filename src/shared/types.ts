@@ -987,7 +987,7 @@ export const IPC = {
   compose: {
     send: 'compose:send',
     recipientSuggestions: 'compose:recipient-suggestions',
-    listDriveItems: 'compose:list-drive-items'
+    listDriveExplorer: 'compose:list-drive-explorer'
   },
   calendar: {
     listEvents: 'calendar:list-events',
@@ -1126,10 +1126,28 @@ export interface ComposeRecipientSuggestion {
   source: 'people-local' | 'mail-history' | 'graph-people' | 'graph-directory' | 'graph-group'
 }
 
-export interface ComposeListDriveItemsInput {
+/** OneDrive/SharePoint-Explorer: Bereich und optional aktueller Ordner. */
+export type ComposeDriveExplorerScope = 'recent' | 'myfiles' | 'shared'
+
+export interface ComposeListDriveExplorerInput {
   accountId: string
-  /** `recent` = zuletzt genutzt; `root` = Stammordner */
-  mode: 'recent' | 'root'
+  scope: ComposeDriveExplorerScope
+  /** Bei `myfiles`/`shared`: Ordner-Item-ID; `null` = Wurzel. */
+  folderId?: string | null
+  /** Bei `shared` (und Unterordnern): Ziel-Drive-ID aus Graph `parentReference.driveId`. */
+  folderDriveId?: string | null
+}
+
+/** Eintrag im OneDrive-Explorer (Datei oder Ordner). */
+export interface ComposeDriveExplorerEntry {
+  id: string
+  name: string
+  webUrl: string | null
+  size: number | null
+  mimeType: string | null
+  isFolder: boolean
+  /** Nur bei geteilten Drives fuer Navigation zu Kindern. */
+  driveId?: string | null
 }
 
 export interface ComposeDriveItemRow {

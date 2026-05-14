@@ -13,8 +13,8 @@ import {
   type ComposeSendInput,
   type UndoableActionSummary,
   type ComposeRecipientSuggestion,
-  type ComposeListDriveItemsInput,
-  type ComposeDriveItemRow,
+  type ComposeListDriveExplorerInput,
+  type ComposeDriveExplorerEntry,
   type UndoResult,
   type TodoDueKindOpen,
   type TodoDueKindList,
@@ -364,8 +364,8 @@ const api = {
       query: string
     }): Promise<ComposeRecipientSuggestion[]> =>
       ipcRenderer.invoke(IPC.compose.recipientSuggestions, args),
-    listDriveItems: (args: ComposeListDriveItemsInput): Promise<ComposeDriveItemRow[]> =>
-      ipcRenderer.invoke(IPC.compose.listDriveItems, args)
+    listDriveExplorer: (args: ComposeListDriveExplorerInput): Promise<ComposeDriveExplorerEntry[]> =>
+      ipcRenderer.invoke(IPC.compose.listDriveExplorer, args)
   },
   calendar: {
     listEvents: (args: CalendarListEventsInput): Promise<CalendarEventView[]> =>

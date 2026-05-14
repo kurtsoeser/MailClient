@@ -16,6 +16,7 @@ import {
 import { cn } from '@/lib/utils'
 import { TipTapBody } from '@/components/TipTapBody'
 import { SignatureTemplateControls } from '@/components/SignatureTemplateControls'
+import { OneDriveExplorerDialog } from '@/components/OneDriveExplorerDialog'
 import { RecipientTokenField } from '@/components/RecipientTokenField'
 import {
   useComposeStore,
@@ -24,7 +25,7 @@ import {
   type ComposeReferenceAttachmentDraft
 } from '@/stores/compose'
 import { useAccountsStore } from '@/stores/accounts'
-import type { ComposeDriveItemRow, MailTemplate } from '@shared/types'
+import type { MailTemplate } from '@shared/types'
 import { sanitizeComposeHtmlFragment } from '@/lib/sanitize-compose-html'
 import { applyTemplateVariables } from '@/lib/template-variables'
 
@@ -82,9 +83,6 @@ function ComposerWindow({
   const dragDepthRef = useRef(0)
   const [draggingFiles, setDraggingFiles] = useState(false)
   const [driveOpen, setDriveOpen] = useState(false)
-  const [driveTab, setDriveTab] = useState<'recent' | 'root'>('recent')
-  const [driveLoading, setDriveLoading] = useState(false)
-  const [driveItems, setDriveItems] = useState<ComposeDriveItemRow[]>([])
   const [sendOptionsOpen, setSendOptionsOpen] = useState(false)
   const sendOptionsRef = useRef<HTMLDivElement | null>(null)
 
@@ -245,29 +243,11 @@ function ComposerWindow({
     e.dataTransfer.dropEffect = 'copy'
   }
 
-  const openDrivePicker = async (mode: 'recent' | 'root'): Promise<void> => {
-    if (!isMicrosoft) return
-    setDriveTab(mode)
-    setDriveOpen(true)
-    setDriveLoading(true)
-    try {
-      const rows = await window.mailClient.compose.listDriveItems({
-        accountId: draft.accountId,
-        mode
-      })
-      setDriveItems(rows)
-    } catch {
-      setDriveItems([])
-    } finally {
-      setDriveLoading(false)
-    }
-  }
-
-  const addCloudAttachment = (row: ComposeDriveItemRow): void => {
+  const addCloudAttachment = (file: { name: string; webUrl: string }): void => {
     const next: ComposeReferenceAttachmentDraft = {
       id: `cref-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      name: row.name,
-      webUrl: row.webUrl
+      name: file.name,
+      webUrl: file.webUrl
     }
     update(draft.id, { referenceAttachments: [...draft.referenceAttachments, next] })
     setDriveOpen(false)
@@ -666,7 +646,7 @@ function ComposerWindow({
             title="Aus OneDrive anhängen"
             aria-label="Aus OneDrive anhängen"
             onClick={(): void => {
-              void openDrivePicker('recent')
+              setDriveOpen(true)
             }}
             className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-secondary hover:text-foreground"
           >
@@ -719,97 +699,12 @@ function ComposerWindow({
           Verwerfen
         </button>
       </div>
-      {driveOpen && (
-        <div
-          className="absolute inset-0 z-50 flex items-center justify-center bg-background/75 p-4"
-          onClick={(): void => setDriveOpen(false)}
-          onKeyDown={(e): void => {
-            if (e.key === 'Escape') setDriveOpen(false)
-          }}
-          role="presentation"
-        >
-          <div
-            className="flex max-h-[min(420px,70vh)] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
-            onClick={(e): void => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-label="OneDrive-Dateien"
-          >
-            <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
-              <span className="text-xs font-semibold text-foreground">OneDrive / SharePoint</span>
-              <button
-                type="button"
-                className="rounded p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
-                aria-label="Schliessen"
-                onClick={(): void => setDriveOpen(false)}
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="flex gap-1 border-b border-border/40 px-2 py-1.5">
-              <button
-                type="button"
-                className={cn(
-                  'rounded px-2 py-1 text-[11px] font-medium',
-                  driveTab === 'recent'
-                    ? 'bg-secondary text-foreground'
-                    : 'text-muted-foreground hover:bg-secondary/60'
-                )}
-                onClick={(): void => {
-                  setDriveTab('recent')
-                  void openDrivePicker('recent')
-                }}
-              >
-                Zuletzt
-              </button>
-              <button
-                type="button"
-                className={cn(
-                  'rounded px-2 py-1 text-[11px] font-medium',
-                  driveTab === 'root'
-                    ? 'bg-secondary text-foreground'
-                    : 'text-muted-foreground hover:bg-secondary/60'
-                )}
-                onClick={(): void => {
-                  setDriveTab('root')
-                  void openDrivePicker('root')
-                }}
-              >
-                Mein Ordner
-              </button>
-            </div>
-            <div className="min-h-0 flex-1 overflow-y-auto p-2">
-              {driveLoading ? (
-                <div className="flex items-center justify-center gap-2 py-8 text-xs text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Laden…
-                </div>
-              ) : driveItems.length === 0 ? (
-                <p className="py-6 text-center text-[11px] text-muted-foreground">Keine Dateien.</p>
-              ) : (
-                <ul className="space-y-1">
-                  {driveItems.map((row) => (
-                    <li key={row.id}>
-                      <button
-                        type="button"
-                        className="flex w-full flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left text-[11px] hover:bg-secondary"
-                        onClick={(): void => addCloudAttachment(row)}
-                      >
-                        <span className="font-medium text-foreground">{row.name}</span>
-                        {row.size != null && (
-                          <span className="text-[10px] text-muted-foreground">
-                            {formatBytes(row.size)}
-                          </span>
-                        )}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <OneDriveExplorerDialog
+        open={driveOpen}
+        accountId={draft.accountId}
+        onClose={(): void => setDriveOpen(false)}
+        onPickFile={addCloudAttachment}
+      />
       {draggingFiles && (
         <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-[1px]">
           <div className="flex flex-col items-center gap-2 rounded-xl border border-primary/50 bg-card px-8 py-6 text-sm font-medium text-foreground shadow-2xl">
