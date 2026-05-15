@@ -10,7 +10,7 @@ import {
   syncGoogleMessagesInFolder,
   pollGoogleFolderIfNeeded
 } from './google/gmail-sync'
-import { findFolderById, findFolderByWellKnown } from './db/folders-repo'
+import { findFolderById, findFolderByWellKnown, listFavoriteFolderIdsForAccount } from './db/folders-repo'
 import { listMessageIdsByRemoteIds } from './db/messages-repo'
 import { listAccounts } from './accounts'
 import { runInboxRulesForNewMessages } from './rule-runner'
@@ -123,15 +123,15 @@ export async function runFolderPoll(folderId: number): Promise<number> {
 }
 
 /**
- * Pollt fuer alle Konten die wichtigen Ordner (Inbox + Sent +
- * aktuell ausgewaehlter Folder, falls vom Renderer mitgegeben).
+ * Pollt fuer alle Konten: Posteingang, Gesendet, Entwuerfe, alle als Favorit markierten Ordner,
+ * plus den aktuell ausgewaehlten Folder (extraFolderIds vom Renderer).
  */
 export async function runBackgroundPoll(extraFolderIds: number[] = []): Promise<void> {
   const accounts = await listAccounts()
   const visited = new Set<number>()
 
   for (const acc of accounts) {
-    for (const alias of ['inbox', 'sentitems'] as const) {
+    for (const alias of ['inbox', 'sentitems', 'drafts'] as const) {
       const folder = findFolderByWellKnown(acc.id, alias)
       if (!folder || visited.has(folder.id)) continue
       visited.add(folder.id)
@@ -140,6 +140,16 @@ export async function runBackgroundPoll(extraFolderIds: number[] = []): Promise<
         await yieldToMainThread()
       } catch (e) {
         console.warn('[sync] poll error', acc.id, alias, e)
+      }
+    }
+    for (const fid of listFavoriteFolderIdsForAccount(acc.id)) {
+      if (visited.has(fid)) continue
+      visited.add(fid)
+      try {
+        await runFolderPoll(fid)
+        await yieldToMainThread()
+      } catch (e) {
+        console.warn('[sync] poll favorite folder failed', acc.id, fid, e)
       }
     }
     await yieldToMainThread()

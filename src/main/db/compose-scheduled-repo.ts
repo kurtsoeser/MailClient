@@ -99,3 +99,35 @@ export function recordScheduledComposeSendFailure(id: number, err: string): void
     db.prepare(`UPDATE compose_scheduled SET status = 'failed' WHERE id = ?`).run(id)
   }
 }
+
+export function listPendingScheduledComposeForBackup(): Array<{ payloadJson: string; sendAtIso: string }> {
+  const db = getDb()
+  const rows = db
+    .prepare(
+      `SELECT payload_json, send_at_iso FROM compose_scheduled
+       WHERE status = 'pending'
+       ORDER BY send_at_iso ASC, id ASC`
+    )
+    .all() as Array<{ payload_json: string; send_at_iso: string }>
+  return rows.map((r) => ({ payloadJson: r.payload_json, sendAtIso: r.send_at_iso }))
+}
+
+/** Ersetzt nur ausstehende Eintraege; Sent/Failed-Historie bleibt unangetastet. */
+export function replacePendingScheduledComposeFromBackup(
+  rows: Array<{ payloadJson: string; sendAtIso: string }>
+): void {
+  const db = getDb()
+  const tx = db.transaction(() => {
+    db.prepare(`DELETE FROM compose_scheduled WHERE status = 'pending'`).run()
+    const ins = db.prepare(
+      `INSERT INTO compose_scheduled (payload_json, send_at_iso, status)
+       VALUES (@payload_json, @send_at_iso, 'pending')`
+    )
+    for (const r of rows) {
+      if (typeof r.payloadJson !== 'string' || r.payloadJson.length < 2) continue
+      if (typeof r.sendAtIso !== 'string' || !r.sendAtIso.trim()) continue
+      ins.run({ payload_json: r.payloadJson, send_at_iso: r.sendAtIso.trim() })
+    }
+  })
+  tx()
+}

@@ -39,7 +39,7 @@ export function SidebarFooter({
       title={t('sidebar.footerTitle')}
       aria-label={t('sidebar.openSettingsAria')}
     >
-      <div className="flex shrink-0 -space-x-1.5">
+      <div className="flex shrink-0 -space-x-1">
         {accounts.length === 0 ? (
           <div className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-muted-foreground ring-2 ring-sidebar">
             ?
@@ -59,7 +59,7 @@ export function SidebarFooter({
             return (
               <span
                 key={acc.id}
-                className="relative inline-flex rounded-full ring-1 ring-sidebar"
+                className="relative isolate inline-flex rounded-full ring-1 ring-sidebar"
                 style={{ zIndex: index + 1 }}
               >
                 <Avatar
@@ -72,7 +72,10 @@ export function SidebarFooter({
                   size="sm"
                   title={tip}
                 />
-                <span className="pointer-events-none absolute bottom-0 left-0 z-10 rounded-full ring-2 ring-sidebar">
+                <span
+                  className="pointer-events-none absolute bottom-0 right-0 z-10 flex h-3 w-3 items-center justify-center rounded-full border-2 border-sidebar bg-sidebar shadow-sm"
+                  title={statusText}
+                >
                   <StatusDot variant={variant} size="xs" pulse={pulse} />
                 </span>
               </span>

@@ -327,7 +327,7 @@ export function CalendarShell(): JSX.Element {
 
   const reloadCalendarsForAccount = useCallback(async (accountId: string): Promise<void> => {
     try {
-      const rows = await window.mailClient.calendar.listCalendars({ accountId })
+      const rows = await window.mailClient.calendar.listCalendars({ accountId, forceRefresh: true })
       setCalendarsByAccount((prev) => {
         const keepGroups = (prev[accountId] ?? []).filter((c) => c.calendarKind === 'm365Group')
         return { ...prev, [accountId]: [...rows, ...keepGroups] }

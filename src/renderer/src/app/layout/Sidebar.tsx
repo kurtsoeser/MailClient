@@ -36,7 +36,7 @@ import { MoveFolderDialog } from '@/components/MoveFolderDialog'
 import { MetaFolderDialog } from '@/components/MetaFolderDialog'
 import { accountColorToCssBackground } from '@/lib/avatar-color'
 import { ACCOUNT_COLOR_PRESET_OPTIONS, isPresetAccountColorClass } from '@shared/account-colors'
-import type { ConnectedAccount, MailFolder, MailListItem } from '@shared/types'
+import type { ConnectedAccount, MailFolder, MailListItem, MetaFolderSummary } from '@shared/types'
 import type { SidebarInlineEditState } from '@/app/layout/sidebar/sidebar-types'
 import {
   SidebarCollapsibleSection
@@ -99,6 +99,7 @@ export function Sidebar({ onOpenAccountDialog }: Props): JSX.Element {
   const selectUnifiedInbox = useMailStore((s) => s.selectUnifiedInbox)
   const selectMetaFolder = useMailStore((s) => s.selectMetaFolder)
   const createMetaFolder = useMailStore((s) => s.createMetaFolder)
+  const updateMetaFolder = useMailStore((s) => s.updateMetaFolder)
   const deleteMetaFolder = useMailStore((s) => s.deleteMetaFolder)
   const reorderMetaFolders = useMailStore((s) => s.reorderMetaFolders)
   const metaFolders = useMailStore((s) => s.metaFolders)
@@ -143,6 +144,7 @@ export function Sidebar({ onOpenAccountDialog }: Props): JSX.Element {
   const [inlineEdit, setInlineEdit] = useState<SidebarInlineEditState | null>(null)
   const [moveDialogFor, setMoveDialogFor] = useState<MailFolder | null>(null)
   const [metaDialogOpen, setMetaDialogOpen] = useState(false)
+  const [metaDialogEdit, setMetaDialogEdit] = useState<MetaFolderSummary | null>(null)
   const [metaContext, setMetaContext] = useState<{
     x: number
     y: number
@@ -691,7 +693,10 @@ export function Sidebar({ onOpenAccountDialog }: Props): JSX.Element {
           <li className="list-none px-2 pt-1">
             <button
               type="button"
-              onClick={(): void => setMetaDialogOpen(true)}
+              onClick={(): void => {
+                setMetaDialogEdit(null)
+                setMetaDialogOpen(true)
+              }}
               className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground"
             >
               <Plus className="h-3.5 w-3.5 shrink-0 opacity-80" />
@@ -779,11 +784,18 @@ export function Sidebar({ onOpenAccountDialog }: Props): JSX.Element {
 
       <MetaFolderDialog
         open={metaDialogOpen}
+        editing={metaDialogEdit}
         accounts={accounts}
         foldersByAccount={foldersByAccount}
-        onClose={(): void => setMetaDialogOpen(false)}
+        onClose={(): void => {
+          setMetaDialogOpen(false)
+          setMetaDialogEdit(null)
+        }}
         onCreate={async (input): Promise<void> => {
           await createMetaFolder(input)
+        }}
+        onUpdate={async (input): Promise<void> => {
+          await updateMetaFolder(input)
         }}
       />
 
@@ -792,6 +804,19 @@ export function Sidebar({ onOpenAccountDialog }: Props): JSX.Element {
           x={metaContext.x}
           y={metaContext.y}
           items={[
+            {
+              id: 'meta-edit',
+              label: 'Meta-Ordner bearbeiten',
+              onSelect: (): void => {
+                const id = metaContext.id
+                const mf = metaFolders.find((m) => m.id === id) ?? null
+                setMetaContext(null)
+                if (mf) {
+                  setMetaDialogEdit(mf)
+                  setMetaDialogOpen(true)
+                }
+              }
+            },
             {
               id: 'meta-del',
               label: 'Meta-Ordner loeschen',

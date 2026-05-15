@@ -75,3 +75,46 @@ export function updateWorkflowBoardColumns(boardId: number, columns: WorkflowCol
     `UPDATE workflow_boards SET columns_json = ?, updated_at = datetime('now') WHERE id = ?`
   ).run(JSON.stringify(columns), boardId)
 }
+
+/**
+ * Vollstaendiger Ersatz aller Workflow-Boards (Einstellungen-Import).
+ * Leere Liste: keine Aenderung (verhindert versehentlich leere DB).
+ */
+export function replaceAllWorkflowBoardsFromBackup(
+  boards: Array<{
+    id: number
+    name?: string
+    sortOrder?: number
+    columns: WorkflowColumn[]
+  }>
+): void {
+  if (boards.length === 0) return
+  const db = getDb()
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM workflow_boards').run()
+    const ins = db.prepare(
+      `INSERT INTO workflow_boards (id, name, columns_json, sort_order, created_at, updated_at)
+       VALUES (@id, @name, @columns_json, @sort_order, datetime('now'), datetime('now'))`
+    )
+    const sorted = [...boards].sort(
+      (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.id - b.id
+    )
+    for (const b of sorted) {
+      const name =
+        typeof b.name === 'string' && b.name.trim()
+          ? b.name.trim()
+          : b.id === 1
+            ? 'Standard'
+            : `Board ${b.id}`
+      const sortOrder =
+        typeof b.sortOrder === 'number' && Number.isFinite(b.sortOrder) ? b.sortOrder : 0
+      ins.run({
+        id: b.id,
+        name,
+        columns_json: JSON.stringify(b.columns ?? []),
+        sort_order: sortOrder
+      })
+    }
+  })
+  tx()
+}

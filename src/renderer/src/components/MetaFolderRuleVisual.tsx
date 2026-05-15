@@ -40,8 +40,8 @@ export function buildMetaFolderRuleSummaryDe(args: {
   customUnread: boolean
   customFlagged: boolean
   customAttach: boolean
-  fullText: string
-  customFrom: string
+  fullTextLines: string[]
+  fromLines: string[]
   exceptionRows: MetaFolderExcRowState[]
 }): string {
   const {
@@ -53,8 +53,8 @@ export function buildMetaFolderRuleSummaryDe(args: {
     customUnread,
     customFlagged,
     customAttach,
-    fullText,
-    customFrom,
+    fullTextLines,
+    fromLines,
     exceptionRows
   } = args
   const parts: string[] = []
@@ -65,17 +65,22 @@ export function buildMetaFolderRuleSummaryDe(args: {
   else if (preset === 'flagged') parts.push('Es erscheinen nur markierte Mails.')
   else if (preset === 'attachments') parts.push('Es erscheinen nur Mails mit Anhang.')
   else if (preset === 'fulltext') {
-    const q = fullText.trim()
-    parts.push(q.length >= 2 ? `Volltext passt auf: „${q}“.` : 'Volltextfilter (noch zu kurz).')
+    const lines = fullTextLines.map((l) => l.trim()).filter((l) => l.length >= 2)
+    if (lines.length === 0) parts.push('Volltextfilter (noch zu kurz).')
+    else if (lines.length === 1) parts.push(`Volltext passt auf: „${lines[0]}“.`)
+    else parts.push(`Volltext (eine Zeile reicht): ${lines.map((x) => `„${x}“`).join(' oder ')}.`)
   } else {
     const bits: string[] = []
     if (customUnread) bits.push('ungelesen')
     if (customFlagged) bits.push('markiert')
     if (customAttach) bits.push('mit Anhang')
-    const t = fullText.trim()
-    if (t.length >= 2) bits.push(`Volltext „${t}“`)
-    const f = customFrom.trim()
-    if (f.length >= 2) bits.push(`Absender enthält „${f}“`)
+    const fts = fullTextLines.map((l) => l.trim()).filter((l) => l.length >= 2)
+    if (fts.length === 1) bits.push(`Volltext „${fts[0]}“`)
+    else if (fts.length > 1) bits.push(`Volltext-Zeilen (ODER): ${fts.map((x) => `„${x}“`).join(' oder ')}`)
+    const fromBits = fromLines.map((l) => l.trim()).filter((l) => l.length >= 2)
+    if (fromBits.length === 1) bits.push(`Absender enthält „${fromBits[0]}“`)
+    else if (fromBits.length > 1)
+      bits.push(`Absender-Zeilen (ODER): ${fromBits.map((x) => `„${x}“`).join(' oder ')}`)
     if (bits.length === 0) parts.push('Hauptfilter: (noch nichts gewählt).')
     else
       parts.push(
@@ -147,15 +152,21 @@ export interface MetaFolderRuleFlowProps {
   customUnread: boolean
   customFlagged: boolean
   customAttach: boolean
-  fullText: string
-  customFrom: string
+  fullTextLines: string[]
+  fromLines: string[]
   exceptionRows: MetaFolderExcRowState[]
   onMatchCombine: (v: 'and' | 'or') => void
   onSetUnread: (v: boolean) => void
   onSetFlagged: (v: boolean) => void
   onSetAttach: (v: boolean) => void
-  onFullText: (v: string) => void
-  onCustomFrom: (v: string) => void
+  onChangeFullTextLine: (index: number, value: string) => void
+  onAddFullTextLine: () => void
+  onRemoveFullTextLine: (index: number) => void
+  onClearAllFullTextLines: () => void
+  onChangeFromLine: (index: number, value: string) => void
+  onAddFromLine: () => void
+  onRemoveFromLine: (index: number) => void
+  onClearAllFromLines: () => void
   onUpdateExc: (id: string, patch: Partial<MetaFolderExcRowState>) => void
   onRemoveExc: (id: string) => void
   onAddExc: () => void
@@ -172,15 +183,21 @@ export function MetaFolderRuleFlow(props: MetaFolderRuleFlowProps): JSX.Element 
     customUnread,
     customFlagged,
     customAttach,
-    fullText,
-    customFrom,
+    fullTextLines,
+    fromLines,
     exceptionRows,
     onMatchCombine,
     onSetUnread,
     onSetFlagged,
     onSetAttach,
-    onFullText,
-    onCustomFrom,
+    onChangeFullTextLine,
+    onAddFullTextLine,
+    onRemoveFullTextLine,
+    onClearAllFullTextLines,
+    onChangeFromLine,
+    onAddFromLine,
+    onRemoveFromLine,
+    onClearAllFromLines,
     onUpdateExc,
     onRemoveExc,
     onAddExc
@@ -227,11 +244,15 @@ export function MetaFolderRuleFlow(props: MetaFolderRuleFlowProps): JSX.Element 
       )
     }
     if (preset === 'fulltext') {
-      const q = fullText.trim()
+      const lines = fullTextLines.map((l) => l.trim()).filter((l) => l.length >= 2)
       return (
         <div className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background/80 px-2.5 py-1.5 text-[11px] font-medium shadow-sm">
           <Search className="h-3.5 w-3.5 shrink-0 text-primary" />
-          {q ? `Volltext: „${q}“` : 'Volltextsuche (Suchbegriff unten eintragen)'}
+          {lines.length === 0
+            ? 'Volltextsuche (Suchbegriff unten eintragen)'
+            : lines.length === 1
+              ? `Volltext: „${lines[0]}“`
+              : `Volltext: ${lines.map((x) => `„${x}“`).join(' oder ')}`}
         </div>
       )
     }
@@ -313,29 +334,59 @@ export function MetaFolderRuleFlow(props: MetaFolderRuleFlowProps): JSX.Element 
     chips.push(
       <div
         key="ft"
-        className="inline-flex min-w-[160px] max-w-full flex-1 flex-col gap-1 rounded-lg border border-border bg-background/90 px-2 py-1.5 shadow-sm"
+        className="inline-flex min-w-[160px] max-w-full flex-1 flex-col gap-1.5 rounded-lg border border-border bg-background/90 px-2 py-1.5 shadow-sm"
       >
         <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
           <Search className="h-3 w-3 shrink-0" />
           Volltext
-          {fullText.trim().length > 0 && (
+          {fullTextLines.some((l) => l.trim().length > 0) && (
             <button
               type="button"
               className="ml-auto rounded p-0.5 text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
-              onClick={(): void => onFullText('')}
+              onClick={onClearAllFullTextLines}
               aria-label="Volltext leeren"
             >
               <X className="h-3 w-3" />
             </button>
           )}
         </div>
-        <input
-          type="text"
-          value={fullText}
-          onChange={(e): void => onFullText(e.target.value)}
-          placeholder="Suchbegriff…"
-          className="w-full rounded border border-input bg-background px-1.5 py-1 text-[11px] outline-none focus-visible:ring-1 focus-visible:ring-primary"
-        />
+        <div className="flex flex-col gap-1.5">
+          {fullTextLines.map((line, idx) => (
+            <Fragment key={idx}>
+              {idx > 0 && (
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  oder
+                </span>
+              )}
+              <div className="flex gap-1">
+                <input
+                  type="text"
+                  value={line}
+                  onChange={(e): void => onChangeFullTextLine(idx, e.target.value)}
+                  placeholder={idx === 0 ? 'Suchbegriff…' : 'Alternative…'}
+                  className="min-w-0 flex-1 rounded border border-input bg-background px-1.5 py-1 text-[11px] outline-none focus-visible:ring-1 focus-visible:ring-primary"
+                />
+                {fullTextLines.length > 1 && (
+                  <button
+                    type="button"
+                    className="shrink-0 rounded px-1 text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
+                    onClick={(): void => onRemoveFullTextLine(idx)}
+                    aria-label="Zeile entfernen"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            </Fragment>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={onAddFullTextLine}
+          className="rounded border border-dashed border-primary/40 py-1 text-[10px] font-medium text-primary hover:bg-primary/10"
+        >
+          + Weitere Volltext-Zeile (ODER)
+        </button>
       </div>
     )
     n += 1
@@ -344,29 +395,59 @@ export function MetaFolderRuleFlow(props: MetaFolderRuleFlowProps): JSX.Element 
     chips.push(
       <div
         key="fr"
-        className="inline-flex min-w-[160px] max-w-full flex-1 flex-col gap-1 rounded-lg border border-border bg-background/90 px-2 py-1.5 shadow-sm"
+        className="inline-flex min-w-[160px] max-w-full flex-1 flex-col gap-1.5 rounded-lg border border-border bg-background/90 px-2 py-1.5 shadow-sm"
       >
         <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
           <UserRound className="h-3 w-3 shrink-0" />
           Absender enthält
-          {customFrom.trim().length > 0 && (
+          {fromLines.some((l) => l.trim().length > 0) && (
             <button
               type="button"
               className="ml-auto rounded p-0.5 text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
-              onClick={(): void => onCustomFrom('')}
+              onClick={onClearAllFromLines}
               aria-label="Absender leeren"
             >
               <X className="h-3 w-3" />
             </button>
           )}
         </div>
-        <input
-          type="text"
-          value={customFrom}
-          onChange={(e): void => onCustomFrom(e.target.value)}
-          placeholder="E-Mail oder Name…"
-          className="w-full rounded border border-input bg-background px-1.5 py-1 text-[11px] outline-none focus-visible:ring-1 focus-visible:ring-primary"
-        />
+        <div className="flex flex-col gap-1.5">
+          {fromLines.map((line, idx) => (
+            <Fragment key={idx}>
+              {idx > 0 && (
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  oder
+                </span>
+              )}
+              <div className="flex gap-1">
+                <input
+                  type="text"
+                  value={line}
+                  onChange={(e): void => onChangeFromLine(idx, e.target.value)}
+                  placeholder={idx === 0 ? 'E-Mail oder Name…' : 'Alternative…'}
+                  className="min-w-0 flex-1 rounded border border-input bg-background px-1.5 py-1 text-[11px] outline-none focus-visible:ring-1 focus-visible:ring-primary"
+                />
+                {fromLines.length > 1 && (
+                  <button
+                    type="button"
+                    className="shrink-0 rounded px-1 text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
+                    onClick={(): void => onRemoveFromLine(idx)}
+                    aria-label="Zeile entfernen"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            </Fragment>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={onAddFromLine}
+          className="rounded border border-dashed border-primary/40 py-1 text-[10px] font-medium text-primary hover:bg-primary/10"
+        >
+          + Weitere Absender-Zeile (ODER)
+        </button>
       </div>
     )
 

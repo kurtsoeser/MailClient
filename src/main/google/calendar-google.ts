@@ -7,6 +7,7 @@ import { getGoogleApis } from './google-auth-client'
 import type { GraphCalendarEventRow } from '../graph/calendar-graph'
 import { buildGoogleEventRecurrence } from '../calendar-recurrence'
 import { getCalendarEventsSyncToken, setCalendarEventsSyncToken } from './google-sync-meta-store'
+import { withGoogleUsageLimitRetry } from './google-api-usage-retry'
 
 function googleDateToIso(
   dt: calendar_v3.Schema$EventDateTime | null | undefined,
@@ -57,12 +58,26 @@ function rowFromGoogleEvent(
   }
 }
 
-export async function googleListCalendars(accountId: string): Promise<CalendarGraphCalendarRow[]> {
+const GOOGLE_CALENDAR_LIST_TTL_MS = 5 * 60 * 1000
+
+const googleCalendarListCache = new Map<
+  string,
+  { fetchedAt: number; rows: CalendarGraphCalendarRow[] }
+>()
+const googleCalendarListInflight = new Map<string, Promise<CalendarGraphCalendarRow[]>>()
+
+function cloneCalendarGraphRows(rows: CalendarGraphCalendarRow[]): CalendarGraphCalendarRow[] {
+  return rows.map((r) => ({ ...r }))
+}
+
+async function fetchGoogleCalendarListUncached(accountId: string): Promise<CalendarGraphCalendarRow[]> {
   const { calendar } = await getGoogleApis(accountId)
-  const res = await calendar.calendarList.list({
-    minAccessRole: 'reader',
-    showHidden: false
-  })
+  const res = await withGoogleUsageLimitRetry('calendarList.list', () =>
+    calendar.calendarList.list({
+      minAccessRole: 'reader',
+      showHidden: false
+    })
+  )
   const items = res.data.items ?? []
   return items
     .filter((c) => c.id)
@@ -76,6 +91,43 @@ export async function googleListCalendars(accountId: string): Promise<CalendarGr
       provider: 'google' as const,
       accessRole: c.accessRole ?? null
     }))
+}
+
+export async function googleListCalendars(
+  accountId: string,
+  opts?: { forceRefresh?: boolean }
+): Promise<CalendarGraphCalendarRow[]> {
+  if (!opts?.forceRefresh) {
+    const hit = googleCalendarListCache.get(accountId)
+    if (hit && Date.now() - hit.fetchedAt < GOOGLE_CALENDAR_LIST_TTL_MS) {
+      return cloneCalendarGraphRows(hit.rows)
+    }
+  }
+
+  while (googleCalendarListInflight.has(accountId)) {
+    await googleCalendarListInflight.get(accountId)
+  }
+
+  if (!opts?.forceRefresh) {
+    const hit = googleCalendarListCache.get(accountId)
+    if (hit && Date.now() - hit.fetchedAt < GOOGLE_CALENDAR_LIST_TTL_MS) {
+      return cloneCalendarGraphRows(hit.rows)
+    }
+  }
+
+  const run = fetchGoogleCalendarListUncached(accountId).then((rows) => {
+    googleCalendarListCache.set(accountId, { fetchedAt: Date.now(), rows })
+    return rows
+  })
+  googleCalendarListInflight.set(accountId, run)
+  try {
+    const rows = await run
+    return cloneCalendarGraphRows(rows)
+  } finally {
+    if (googleCalendarListInflight.get(accountId) === run) {
+      googleCalendarListInflight.delete(accountId)
+    }
+  }
 }
 
 export async function googleListEventsInCalendar(
@@ -112,17 +164,21 @@ export async function googleListEventsInCalendar(
   const rows: GraphCalendarEventRow[] = []
   let latestSyncToken: string | null = null
 
-  const calMeta = await calendar.calendarList.get({ calendarId })
+  const calMeta = await withGoogleUsageLimitRetry('calendarList.get', () =>
+    calendar.calendarList.get({ calendarId })
+  )
   const calHex = calMeta.data.backgroundColor ?? null
   const ar = calMeta.data.accessRole
   const calendarCanEdit = ar === 'owner' || ar === 'writer'
 
   try {
     while (true) {
-      const res = await calendar.events.list({
-        ...params,
-        pageToken
-      })
+      const res = await withGoogleUsageLimitRetry('events.list', () =>
+        calendar.events.list({
+          ...params,
+          pageToken
+        })
+      )
       if (res.data.nextSyncToken) {
         latestSyncToken = res.data.nextSyncToken
       }

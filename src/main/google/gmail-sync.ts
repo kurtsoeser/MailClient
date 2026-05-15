@@ -277,6 +277,7 @@ export async function syncGoogleAccountInitial(accountId: string): Promise<{
   folders: number
   inboxMessages: number
   sentMessages: number
+  draftMessages: number
 }> {
   const folders = await syncGoogleFolders(accountId)
   const inbox = findFolderByWellKnown(accountId, 'inbox')
@@ -293,8 +294,17 @@ export async function syncGoogleAccountInitial(accountId: string): Promise<{
       console.warn('[gmail-sync] Sent-Label konnte nicht synchronisiert werden:', e)
     }
   }
+  const drafts = findFolderByWellKnown(accountId, 'drafts')
+  let draftMessages = 0
+  if (drafts) {
+    try {
+      draftMessages = await syncGoogleMessagesInFolder(accountId, drafts.remoteId, 50)
+    } catch (e) {
+      console.warn('[gmail-sync] Entwuerfe konnten nicht synchronisiert werden:', e)
+    }
+  }
   await refreshGmailHistoryId(accountId)
-  return { folders, inboxMessages, sentMessages }
+  return { folders, inboxMessages, sentMessages, draftMessages }
 }
 
 /**

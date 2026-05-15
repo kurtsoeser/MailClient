@@ -10,6 +10,7 @@ import {
   upsertMessages,
   clearWaitingForReplyOnThreads,
   listMessageIdsByRemoteIds,
+  deleteMessagesByAccountRemoteIds,
   type UpsertMessageInput
 } from '../db/messages-repo'
 import { listAccounts } from '../accounts'
@@ -324,6 +325,191 @@ function normalizeMailbox(addr: string | null): string | null {
   return s
 }
 
+function normalizeGraphRequestPath(fullOrRelative: string): string {
+  let u = fullOrRelative.trim()
+  if (u.startsWith('/')) return u
+  u = u.replace(/^https?:\/\/graph\.microsoft\.com\/v1\.0/i, '')
+  u = u.replace(/^https?:\/\/[^/]+\/v[\d.]+\//i, '/')
+  return u.startsWith('/') ? u : `/${u}`
+}
+
+function isDeltaRemovedMessageEntry(v: unknown): v is { id: string } {
+  if (!v || typeof v !== 'object') return false
+  const o = v as Record<string, unknown>
+  return typeof o.id === 'string' && '@removed' in o
+}
+
+function isGraphMessageShape(v: unknown): v is GraphMessage {
+  if (!v || typeof v !== 'object') return false
+  const o = v as Record<string, unknown>
+  return typeof o.id === 'string'
+}
+
+function isGraphDeltaGoneError(e: unknown): boolean {
+  const err = e as { statusCode?: number; body?: { error?: { code?: string } } }
+  if (err?.statusCode === 410) return true
+  const code = err?.body?.error?.code
+  if (code === 'syncStateNotFound' || code === 'resyncRequired') return true
+  const msg = e instanceof Error ? e.message : String(e)
+  return /410|syncStateNotFound|resyncRequired/i.test(msg)
+}
+
+function ingestGraphDeltaPageValues(
+  accountId: string,
+  folderId: number,
+  rawValues: unknown[],
+  selfEmailNorm: string | null,
+  folderWellKnown: string | null
+): {
+  rows: UpsertMessageInput[]
+  graphMessages: GraphMessage[]
+  removedRemoteIds: string[]
+  remoteIds: string[]
+  maxLastMod: string | null
+  threadsToClear: string[]
+} {
+  const removedRemoteIds: string[] = []
+  const rows: UpsertMessageInput[] = []
+  const graphMessages: GraphMessage[] = []
+  const remoteIds: string[] = []
+  let maxLastMod: string | null = null
+  const threadsToClear: string[] = []
+  for (const v of rawValues) {
+    if (isDeltaRemovedMessageEntry(v)) {
+      removedRemoteIds.push(v.id)
+      continue
+    }
+    if (!isGraphMessageShape(v)) continue
+    const m = v as GraphMessage
+    if (!m.id) continue
+    remoteIds.push(m.id)
+    const row = graphMessageToUpsert(m, accountId, folderId)
+    rows.push(row)
+    graphMessages.push(m)
+    const t = m.lastModifiedDateTime
+    if (t && (!maxLastMod || t > maxLastMod)) maxLastMod = t
+    if (folderWellKnown === 'inbox' && selfEmailNorm && row.remoteThreadId) {
+      const fromN = normalizeMailbox(row.fromAddr)
+      if (fromN && fromN !== selfEmailNorm) {
+        threadsToClear.push(row.remoteThreadId)
+      }
+    }
+  }
+  return { rows, graphMessages, removedRemoteIds, remoteIds, maxLastMod, threadsToClear }
+}
+
+async function runGraphDeltaPollCycle(
+  client: ReturnType<typeof createGraphClient>,
+  accountId: string,
+  folder: { id: number; remoteId: string; wellKnown: string | null },
+  folderRemoteId: string,
+  startUrl: string,
+  maxPages: number,
+  baseLastSyncedAt: string | null
+): Promise<{ added: number; from: string | null; to: string | null; remoteIds: string[] }> {
+  void folderRemoteId
+  let url: string | null = normalizeGraphRequestPath(startUrl)
+  let pages = 0
+  let total = 0
+  const remoteIds: string[] = []
+  let maxLastMod = baseLastSyncedAt
+  let continuationToPersist: string | null = null
+
+  let selfEmailNorm: string | null = null
+  if (folder.wellKnown === 'inbox') {
+    const accounts = await listAccounts()
+    const email = accounts.find((a) => a.id === accountId)?.email
+    selfEmailNorm = email ? normalizeMailbox(email) : null
+  }
+
+  while (url && pages < maxPages) {
+    pages += 1
+    const page = (await client.api(url).get()) as GraphCollection<GraphMessage> & {
+      ['@odata.deltaLink']?: string
+    }
+    const raw = Array.isArray(page.value) ? (page.value as unknown[]) : []
+    const ing = ingestGraphDeltaPageValues(
+      accountId,
+      folder.id,
+      raw,
+      selfEmailNorm,
+      folder.wellKnown
+    )
+    if (ing.removedRemoteIds.length > 0) {
+      deleteMessagesByAccountRemoteIds(accountId, ing.removedRemoteIds)
+    }
+    if (ing.rows.length > 0) {
+      upsertMessages(ing.rows)
+      mirrorGraphCategoriesToLocal(accountId, ing.graphMessages)
+      total += ing.rows.length
+      remoteIds.push(...ing.remoteIds)
+      if (ing.maxLastMod && (!maxLastMod || ing.maxLastMod > maxLastMod)) maxLastMod = ing.maxLastMod
+      if (ing.threadsToClear.length > 0) {
+        clearWaitingForReplyOnThreads(accountId, [...new Set(ing.threadsToClear)])
+      }
+    }
+
+    const deltaLinkRaw = page['@odata.deltaLink']
+    const next = page['@odata.nextLink']
+    if (typeof deltaLinkRaw === 'string' && deltaLinkRaw.trim()) {
+      continuationToPersist = normalizeGraphRequestPath(deltaLinkRaw.trim())
+      url = null
+    } else if (typeof next === 'string' && next.trim()) {
+      const nextRel = next.replace(/^https?:\/\/[^/]+\/v[0-9.]+/, '')
+      continuationToPersist = nextRel.startsWith('/') ? nextRel : normalizeGraphRequestPath(next)
+      url = continuationToPersist
+    } else {
+      url = null
+    }
+  }
+
+  const st = getFolderSyncState(accountId, folder.id)
+  upsertFolderSyncState({
+    accountId,
+    folderId: folder.id,
+    deltaToken: continuationToPersist ?? st?.deltaToken ?? null,
+    lastSyncedAt: maxLastMod ?? st?.lastSyncedAt ?? null
+  })
+
+  return { added: total, from: baseLastSyncedAt, to: maxLastMod, remoteIds }
+}
+
+async function bootstrapGraphFolderDelta(accountId: string, folder: {
+  id: number
+  remoteId: string
+  wellKnown: string | null
+}): Promise<void> {
+  const st = getFolderSyncState(accountId, folder.id)
+  if (st?.deltaToken) return
+  const config = await loadConfig()
+  const sw = syncWindowFilter(config.syncWindowDays)
+  const filterQ = sw ? `&$filter=${encodeURIComponent(sw)}` : ''
+  const initial = `/me/mailFolders/${folder.remoteId}/messages/delta?$select=${encodeURIComponent(MESSAGE_SELECT)}${filterQ}`
+  const client = await getClientFor(accountId)
+  try {
+    await runGraphDeltaPollCycle(
+      client,
+      accountId,
+      folder,
+      folder.remoteId,
+      initial,
+      35,
+      st?.lastSyncedAt ?? null
+    )
+  } catch (e) {
+    if (isGraphDeltaGoneError(e)) {
+      upsertFolderSyncState({
+        accountId,
+        folderId: folder.id,
+        deltaToken: null,
+        lastSyncedAt: st?.lastSyncedAt ?? null
+      })
+    } else {
+      console.warn('[mail-sync] delta-bootstrap', folder.wellKnown ?? folder.remoteId, e)
+    }
+  }
+}
+
 export async function syncMessagesInFolder(
   accountId: string,
   folderRemoteId: string,
@@ -359,10 +545,11 @@ export async function syncMessagesInFolder(
     if (t && (!maxLastMod || t > maxLastMod)) maxLastMod = t
   }
   if (maxLastMod) {
+    const prev = getFolderSyncState(accountId, folder.id)
     upsertFolderSyncState({
       accountId,
       folderId: folder.id,
-      deltaToken: null,
+      deltaToken: prev?.deltaToken ?? null,
       lastSyncedAt: maxLastMod
     })
   }
@@ -393,6 +580,32 @@ export async function pollMessagesInFolder(
   }
 
   const client = await getClientFor(accountId)
+
+  if (state.deltaToken?.trim()) {
+    try {
+      return await runGraphDeltaPollCycle(
+        client,
+        accountId,
+        folder,
+        folderRemoteId,
+        state.deltaToken.trim(),
+        Math.max(maxPages, 10),
+        state.lastSyncedAt
+      )
+    } catch (e) {
+      if (isGraphDeltaGoneError(e)) {
+        upsertFolderSyncState({
+          accountId,
+          folderId: folder.id,
+          deltaToken: null,
+          lastSyncedAt: state.lastSyncedAt
+        })
+      } else {
+        throw e
+      }
+    }
+  }
+
   const since = state.lastSyncedAt
   const filter = `lastModifiedDateTime gt ${since}`
 
@@ -448,10 +661,11 @@ export async function pollMessagesInFolder(
   }
 
   if (maxLastMod !== since) {
+    const st = getFolderSyncState(accountId, folder.id)
     upsertFolderSyncState({
       accountId,
       folderId: folder.id,
-      deltaToken: null,
+      deltaToken: st?.deltaToken ?? null,
       lastSyncedAt: maxLastMod
     })
   }
@@ -463,6 +677,7 @@ export async function syncAccountInitial(accountId: string): Promise<{
   folders: number
   inboxMessages: number
   sentMessages: number
+  draftMessages: number
 }> {
   const folders = await syncFolders(accountId)
 
@@ -484,5 +699,22 @@ export async function syncAccountInitial(accountId: string): Promise<{
     }
   }
 
-  return { folders, inboxMessages, sentMessages }
+  const drafts = findFolderByWellKnown(accountId, 'drafts')
+  let draftMessages = 0
+  if (drafts) {
+    try {
+      draftMessages = await syncMessagesInFolder(accountId, drafts.remoteId, 50)
+    } catch (e) {
+      console.warn('[mail-sync] Entwuerfe konnten nicht synchronisiert werden:', e)
+    }
+  }
+
+  const hotFolders = [inbox, sent, drafts].filter(
+    (f): f is NonNullable<typeof inbox> => f != null
+  )
+  for (const hf of hotFolders) {
+    await bootstrapGraphFolderDelta(accountId, hf)
+  }
+
+  return { folders, inboxMessages, sentMessages, draftMessages }
 }

@@ -37,7 +37,9 @@ export const MICROSOFT_SCOPES = [
   /** Organisationsverzeichnis: `/users` mit Filter fuer Empfaenger-Autocomplete. */
   'User.ReadBasic.All',
   /** OneDrive: Dateien als Cloud-Anhang auswaehlen (`/me/drive/...`). */
-  'Files.Read.All'
+  'Files.Read.All',
+  /** SharePoint: verfolgte Sites (`/me/followedSites`) und Site-Bibliotheken. */
+  'Sites.Read.All'
 ] as const
 
 const LOOPBACK_PORT_RANGE = { start: 47813, end: 47830 } as const

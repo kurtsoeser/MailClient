@@ -398,11 +398,18 @@ export function normalizeMessagesFtsMatchQuery(rawQuery: string): string | null 
 
 export function metaFolderCriteriaHasActiveFilter(criteria: MetaFolderCriteria): boolean {
   if (normalizeMessagesFtsMatchQuery(criteria.textQuery ?? '')) return true
+  for (const alt of criteria.textQueryOrAlternatives ?? []) {
+    if (normalizeMessagesFtsMatchQuery(typeof alt === 'string' ? alt : '')) return true
+  }
   if (criteria.unreadOnly) return true
   if (criteria.flaggedOnly) return true
   if (criteria.hasAttachmentsOnly) return true
-  const from = criteria.fromContains?.trim()
-  if (from && from.length >= 2) return true
+  const from0 = criteria.fromContains?.trim()
+  if (from0 && from0.length >= 2) return true
+  for (const a of criteria.fromContainsOrAlternatives ?? []) {
+    const f = typeof a === 'string' ? a.trim() : ''
+    if (f.length >= 2) return true
+  }
   const scope = criteria.scopeFolderIds?.filter((id) => Number.isFinite(id) && id > 0) ?? []
   if (scope.length > 0) return true
   return false
@@ -419,27 +426,49 @@ export function metaFolderExceptionClauseHasFilter(e: MetaFolderExceptionClause)
   return false
 }
 
-function collectMetaFolderAtomSqlFragments(
-  src: MetaFolderExceptionClause,
-  params: unknown[]
-): string[] {
+type MetaFolderAtomSource = MetaFolderExceptionClause & Pick<
+  MetaFolderCriteria,
+  'textQueryOrAlternatives' | 'fromContainsOrAlternatives'
+>
+
+function collectMetaFolderAtomSqlFragments(src: MetaFolderAtomSource, params: unknown[]): string[] {
   const parts: string[] = []
-  const fts = normalizeMessagesFtsMatchQuery(src.textQuery ?? '')
-  if (fts) {
-    parts.push(`m.id IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?)`)
-    params.push(fts)
+  const ftsLines: string[] = []
+  const t0 = src.textQuery?.trim()
+  if (t0) ftsLines.push(t0)
+  for (const alt of src.textQueryOrAlternatives ?? []) {
+    if (typeof alt === 'string' && alt.trim()) ftsLines.push(alt.trim())
   }
+  const ftsFrags: string[] = []
+  for (const line of ftsLines) {
+    const fts = normalizeMessagesFtsMatchQuery(line)
+    if (fts) {
+      ftsFrags.push(`m.id IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?)`)
+      params.push(fts)
+    }
+  }
+  if (ftsFrags.length === 1) parts.push(ftsFrags[0]!)
+  else if (ftsFrags.length > 1) parts.push(`(${ftsFrags.join(' OR ')})`)
   if (src.unreadOnly) parts.push('m.is_read = 0')
   if (src.flaggedOnly) parts.push('m.is_flagged = 1')
   if (src.hasAttachmentsOnly) parts.push('m.has_attachments = 1')
-  const fromQ = src.fromContains?.trim()
-  if (fromQ && fromQ.length >= 2) {
+  const fromLines: string[] = []
+  const f0 = src.fromContains?.trim()
+  if (f0) fromLines.push(f0)
+  for (const alt of src.fromContainsOrAlternatives ?? []) {
+    if (typeof alt === 'string' && alt.trim()) fromLines.push(alt.trim())
+  }
+  const fromFrags: string[] = []
+  for (const fromQ of fromLines) {
+    if (fromQ.length < 2) continue
     const like = `%${escapeSqlLikePattern(fromQ)}%`
-    parts.push(
+    fromFrags.push(
       `(LOWER(IFNULL(m.from_addr,'')) LIKE LOWER(?) ESCAPE '\\' OR LOWER(IFNULL(m.from_name,'')) LIKE LOWER(?) ESCAPE '\\')`
     )
     params.push(like, like)
   }
+  if (fromFrags.length === 1) parts.push(fromFrags[0]!)
+  else if (fromFrags.length > 1) parts.push(`(${fromFrags.join(' OR ')})`)
   return parts
 }
 
@@ -469,12 +498,14 @@ export function listMessagesForMetaCriteria(
     )
   }
 
-  const atomSrc: MetaFolderExceptionClause = {
+  const atomSrc: MetaFolderAtomSource = {
     textQuery: criteria.textQuery,
+    textQueryOrAlternatives: criteria.textQueryOrAlternatives,
     unreadOnly: criteria.unreadOnly,
     flaggedOnly: criteria.flaggedOnly,
     hasAttachmentsOnly: criteria.hasAttachmentsOnly,
-    fromContains: criteria.fromContains
+    fromContains: criteria.fromContains,
+    fromContainsOrAlternatives: criteria.fromContainsOrAlternatives
   }
   const posFrags = collectMetaFolderAtomSqlFragments(atomSrc, params)
   if (posFrags.length > 0) {
@@ -592,6 +623,22 @@ export function setMessageHasAttachmentsLocal(id: number, value: boolean): void 
 export function deleteMessageLocal(id: number): void {
   const db = getDb()
   db.prepare('DELETE FROM messages WHERE id = ?').run(id)
+}
+
+/** Delta-/Sync: Mails anhand der Graph-Remote-IDs fuer ein Konto loeschen. */
+export function deleteMessagesByAccountRemoteIds(accountId: string, remoteIds: string[]): void {
+  const ids = Array.from(new Set(remoteIds.map((r) => r.trim()).filter(Boolean)))
+  if (ids.length === 0) return
+  const db = getDb()
+  const chunk = 80
+  for (let i = 0; i < ids.length; i += chunk) {
+    const slice = ids.slice(i, i + chunk)
+    const ph = slice.map(() => '?').join(', ')
+    db.prepare(`DELETE FROM messages WHERE account_id = ? AND remote_id IN (${ph})`).run(
+      accountId,
+      ...slice
+    )
+  }
 }
 
 /** Entfernt alle lokalen Mails eines Ordners (z. B. nach Papierkorb-leeren auf dem Server). */

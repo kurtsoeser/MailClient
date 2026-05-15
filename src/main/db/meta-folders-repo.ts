@@ -52,10 +52,28 @@ function parseCriteriaJson(json: string): MetaFolderCriteria {
       : []
     return {
       textQuery: typeof o.textQuery === 'string' ? o.textQuery : undefined,
+      textQueryOrAlternatives: ((): string[] | undefined => {
+        const altRaw = o.textQueryOrAlternatives
+        if (!Array.isArray(altRaw) || altRaw.length === 0) return undefined
+        const alts = altRaw
+          .filter((x): x is string => typeof x === 'string')
+          .map((x) => x.trim())
+          .filter((x) => x.length > 0)
+        return alts.length > 0 ? alts : undefined
+      })(),
       unreadOnly: o.unreadOnly === true,
       flaggedOnly: o.flaggedOnly === true,
       hasAttachmentsOnly: o.hasAttachmentsOnly === true,
       fromContains: typeof o.fromContains === 'string' ? o.fromContains : undefined,
+      fromContainsOrAlternatives: ((): string[] | undefined => {
+        const altRaw = o.fromContainsOrAlternatives
+        if (!Array.isArray(altRaw) || altRaw.length === 0) return undefined
+        const alts = altRaw
+          .filter((x): x is string => typeof x === 'string')
+          .map((x) => x.trim())
+          .filter((x) => x.length > 0)
+        return alts.length > 0 ? alts : undefined
+      })(),
       scopeFolderIds: scopeFolderIds && scopeFolderIds.length > 0 ? scopeFolderIds : undefined,
       matchOp: matchOp === 'or' || matchOp === 'and' ? matchOp : undefined,
       exceptions: exceptionsParsed.length > 0 ? exceptionsParsed : undefined
@@ -76,10 +94,22 @@ function serializeCriteria(c: MetaFolderCriteria): string {
     }))
   return JSON.stringify({
     textQuery: c.textQuery?.trim() ? c.textQuery : undefined,
+    textQueryOrAlternatives: ((): string[] | undefined => {
+      const alts = c.textQueryOrAlternatives
+        ?.map((x) => (typeof x === 'string' ? x.trim() : ''))
+        .filter((x) => x.length > 0)
+      return alts && alts.length > 0 ? alts : undefined
+    })(),
     unreadOnly: c.unreadOnly === true ? true : undefined,
     flaggedOnly: c.flaggedOnly === true ? true : undefined,
     hasAttachmentsOnly: c.hasAttachmentsOnly === true ? true : undefined,
     fromContains: c.fromContains?.trim() ? c.fromContains.trim() : undefined,
+    fromContainsOrAlternatives: ((): string[] | undefined => {
+      const alts = c.fromContainsOrAlternatives
+        ?.map((x) => (typeof x === 'string' ? x.trim() : ''))
+        .filter((x) => x.length > 0)
+      return alts && alts.length > 0 ? alts : undefined
+    })(),
     scopeFolderIds:
       c.scopeFolderIds && c.scopeFolderIds.length > 0 ? c.scopeFolderIds : undefined,
     matchOp: c.matchOp === 'or' ? 'or' : c.matchOp === 'and' ? 'and' : undefined,
@@ -208,4 +238,61 @@ export function listMessagesForMetaFolder(metaFolderId: number): MailListItem[] 
   const summary = getMetaFolder(metaFolderId)
   if (!summary) return []
   return listMessagesForMetaCriteria(summary.criteria, DEFAULT_META_FOLDER_MESSAGE_LIST_LIMIT)
+}
+
+export function listAllMetaFoldersRawForBackup(): Array<{
+  id: number
+  name: string
+  sortOrder: number
+  criteriaJson: string
+  createdAt: string
+  updatedAt: string
+}> {
+  const db = getDb()
+  const rows = db
+    .prepare<[], Row>(
+      `SELECT id, name, sort_order, criteria_json, created_at, updated_at
+       FROM meta_folders
+       ORDER BY sort_order ASC, id ASC`
+    )
+    .all()
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    sortOrder: r.sort_order,
+    criteriaJson: r.criteria_json,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at
+  }))
+}
+
+export function replaceAllMetaFoldersFromBackup(
+  rows: Array<{
+    id: number
+    name: string
+    sortOrder: number
+    criteriaJson: string
+    createdAt: string
+    updatedAt: string
+  }>
+): void {
+  const db = getDb()
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM meta_folders').run()
+    const ins = db.prepare(
+      `INSERT INTO meta_folders (id, name, sort_order, criteria_json, created_at, updated_at)
+       VALUES (@id, @name, @sort_order, @criteria_json, @created_at, @updated_at)`
+    )
+    for (const r of rows) {
+      ins.run({
+        id: r.id,
+        name: r.name,
+        sort_order: r.sortOrder,
+        criteria_json: r.criteriaJson,
+        created_at: r.createdAt,
+        updated_at: r.updatedAt
+      })
+    }
+  })
+  tx()
 }

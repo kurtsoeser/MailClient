@@ -16,6 +16,9 @@ import {
   type ComposeRecipientSuggestion,
   type ComposeListDriveExplorerInput,
   type ComposeDriveExplorerEntry,
+  type ComposeDriveExplorerScope,
+  type ComposeDriveExplorerNavCrumb,
+  type ComposeDriveExplorerFavorite,
   type TodoDueKindOpen,
   type TodoDueKindList,
   type TodoCountsAll,
@@ -44,6 +47,7 @@ import {
 } from '../google/gmail-attachments'
 import { runInitialSync, runFolderSync } from '../sync-runner'
 import { triggerManualPoll, setActivePollFolder } from '../mail-poll-runner'
+import { assertAppOnline } from '../network-status'
 import {
   listFoldersByAccount,
   findFolderById,
@@ -126,6 +130,14 @@ import {
   graphSearchMailEnabledGroupsForCompose
 } from '../graph/compose-recipient-graph'
 import {
+  addDriveExplorerFavorite,
+  listDriveExplorerFavorites,
+  removeDriveExplorerFavorite,
+  updateDriveExplorerFavoriteCache,
+  renameDriveExplorerFavorite,
+  reorderDriveExplorerFavorites
+} from '../drive-explorer-favorites-store'
+import {
   fetchInlineImages as graphFetchInlineImages,
   listAttachmentsMeta,
   downloadAttachmentBytes
@@ -150,6 +162,76 @@ import {
   reorderMetaFolders,
   listMessagesForMetaFolder
 } from '../db/meta-folders-repo'
+
+function parseDriveExplorerScope(raw: unknown): ComposeDriveExplorerScope | null {
+  if (raw === 'recent' || raw === 'myfiles' || raw === 'shared' || raw === 'sharepoint') return raw
+  return null
+}
+
+function parseDriveExplorerNavCrumbs(raw: unknown): ComposeDriveExplorerNavCrumb[] {
+  if (!Array.isArray(raw)) return []
+  const out: ComposeDriveExplorerNavCrumb[] = []
+  for (const x of raw) {
+    if (!x || typeof x !== 'object') continue
+    const o = x as Record<string, unknown>
+    const id = o.id === null ? null : typeof o.id === 'string' ? o.id : null
+    const name = typeof o.name === 'string' ? o.name : ''
+    const driveId =
+      typeof o.driveId === 'string'
+        ? o.driveId.trim() || null
+        : o.driveId === null
+          ? null
+          : undefined
+    const siteId =
+      typeof o.siteId === 'string'
+        ? o.siteId.trim() || null
+        : o.siteId === null
+          ? null
+          : undefined
+    if (id === null && !name.trim() && siteId == null && driveId == null) continue
+    out.push({ id, name: name.trim() || '—', driveId: driveId ?? undefined, siteId: siteId ?? undefined })
+  }
+  return out
+}
+
+function parseDriveExplorerEntries(raw: unknown): ComposeDriveExplorerEntry[] | null {
+  if (!Array.isArray(raw)) return null
+  const out: ComposeDriveExplorerEntry[] = []
+  for (const x of raw) {
+    if (!x || typeof x !== 'object') continue
+    const o = x as Record<string, unknown>
+    const id = typeof o.id === 'string' ? o.id.trim() : ''
+    const name = typeof o.name === 'string' ? o.name.trim() : ''
+    if (!id || !name) continue
+    const webUrl = typeof o.webUrl === 'string' && o.webUrl ? o.webUrl : null
+    const size = typeof o.size === 'number' ? o.size : null
+    const mimeType = typeof o.mimeType === 'string' ? o.mimeType : null
+    const isFolder = o.isFolder === true
+    const driveId =
+      typeof o.driveId === 'string'
+        ? o.driveId.trim() || null
+        : o.driveId === null
+          ? null
+          : undefined
+    const siteId =
+      typeof o.siteId === 'string'
+        ? o.siteId.trim() || null
+        : o.siteId === null
+          ? null
+          : undefined
+    out.push({
+      id,
+      name,
+      webUrl,
+      size,
+      mimeType,
+      isFolder,
+      driveId: driveId ?? undefined,
+      siteId: siteId ?? undefined
+    })
+  }
+  return out.length ? out : null
+}
 
 export function registerMailIpc(): void {
   ipcMain.handle(
@@ -359,16 +441,19 @@ export function registerMailIpc(): void {
   )
   
   ipcMain.handle(IPC.mail.syncAccount, async (_event, accountId: string) => {
+    assertAppOnline()
     return runInitialSync(accountId)
   })
   
   ipcMain.handle(IPC.mail.syncFolder, async (_event, folderId: number) => {
+    assertAppOnline()
     return runFolderSync(folderId)
   })
   
   ipcMain.handle(
     IPC.mail.refreshNow,
     async (_event, args: { folderId: number | null }): Promise<void> => {
+      assertAppOnline()
       await triggerManualPoll(args.folderId)
     }
   )
@@ -1106,7 +1191,9 @@ export function registerMailIpc(): void {
         }
         const scopeRaw = o.scope
         const scope =
-          scopeRaw === 'recent' || scopeRaw === 'myfiles' || scopeRaw === 'shared' ? scopeRaw : 'myfiles'
+          scopeRaw === 'recent' || scopeRaw === 'myfiles' || scopeRaw === 'shared' || scopeRaw === 'sharepoint'
+            ? scopeRaw
+            : 'myfiles'
         const folderId =
           typeof o.folderId === 'string'
             ? o.folderId.trim() || null
@@ -1119,6 +1206,12 @@ export function registerMailIpc(): void {
             : o.folderDriveId === null
               ? null
               : undefined
+        const siteId =
+          typeof o.siteId === 'string'
+            ? o.siteId.trim() || null
+            : o.siteId === null
+              ? null
+              : undefined
         const accounts = await listAccounts()
         const acc = accounts.find((a) => a.id === accountId)
         if (!acc) {
@@ -1127,13 +1220,137 @@ export function registerMailIpc(): void {
         if (acc.provider !== 'microsoft') {
           throw new Error('OneDrive steht nur fuer Microsoft-365-Konten zur Verfuegung.')
         }
-        return await graphListDriveExplorer(accountId, scope, folderId ?? null, folderDriveId ?? null)
+        return await graphListDriveExplorer(
+          accountId,
+          scope,
+          folderId ?? null,
+          folderDriveId ?? null,
+          siteId ?? null
+        )
       } catch (e) {
         console.warn('[ipc] compose.listDriveExplorer:', e)
         throw e instanceof Error ? e : new Error(String(e))
       }
     }
   )
+
+  ipcMain.handle(
+    IPC.compose.listDriveExplorerFavorites,
+    async (_event, raw: unknown): Promise<ComposeDriveExplorerFavorite[]> => {
+      try {
+        const o = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+        const accountId = typeof o.accountId === 'string' ? o.accountId.trim() : ''
+        if (!accountId) return []
+        const accounts = await listAccounts()
+        const acc = accounts.find((a) => a.id === accountId)
+        if (!acc || acc.provider !== 'microsoft') return []
+        return await listDriveExplorerFavorites(accountId)
+      } catch (e) {
+        console.warn('[ipc] compose.listDriveExplorerFavorites:', e)
+        return []
+      }
+    }
+  )
+
+  ipcMain.handle(
+    IPC.compose.addDriveExplorerFavorite,
+    async (_event, raw: unknown): Promise<ComposeDriveExplorerFavorite> => {
+      const o = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+      const accountId = typeof o.accountId === 'string' ? o.accountId.trim() : ''
+      if (!accountId) {
+        throw new Error('Kein Konto.')
+      }
+      const accounts = await listAccounts()
+      const acc = accounts.find((a) => a.id === accountId)
+      if (!acc) {
+        throw new Error('Konto nicht gefunden oder nicht mehr angemeldet.')
+      }
+      if (acc.provider !== 'microsoft') {
+        throw new Error('Favoriten sind nur fuer Microsoft-365-Konten verfuegbar.')
+      }
+      const scope = parseDriveExplorerScope(o.scope)
+      if (!scope) {
+        throw new Error('Ungueltiger Explorer-Bereich.')
+      }
+      const crumbs = parseDriveExplorerNavCrumbs(o.crumbs)
+      const label = typeof o.label === 'string' ? o.label : o.label === null ? null : undefined
+      const cached = parseDriveExplorerEntries(o.cachedEntries)
+      try {
+        return await addDriveExplorerFavorite(accountId, scope, crumbs, label ?? null, cached)
+      } catch (e) {
+        console.warn('[ipc] compose.addDriveExplorerFavorite:', e)
+        throw e instanceof Error ? e : new Error(String(e))
+      }
+    }
+  )
+
+  ipcMain.handle(IPC.compose.removeDriveExplorerFavorite, async (_event, raw: unknown): Promise<void> => {
+    const o = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+    const accountId = typeof o.accountId === 'string' ? o.accountId.trim() : ''
+    const id = typeof o.id === 'string' ? o.id.trim() : ''
+    if (!accountId || !id) return
+    try {
+      await removeDriveExplorerFavorite(accountId, id)
+    } catch (e) {
+      console.warn('[ipc] compose.removeDriveExplorerFavorite:', e)
+      throw e instanceof Error ? e : new Error(String(e))
+    }
+  })
+
+  ipcMain.handle(
+    IPC.compose.updateDriveExplorerFavoriteCache,
+    async (_event, raw: unknown): Promise<void> => {
+      const o = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+      const accountId = typeof o.accountId === 'string' ? o.accountId.trim() : ''
+      const id = typeof o.id === 'string' ? o.id.trim() : ''
+      const entries = parseDriveExplorerEntries(o.entries)
+      if (!accountId || !id || !entries) return
+      try {
+        await updateDriveExplorerFavoriteCache(accountId, id, entries)
+      } catch (e) {
+        console.warn('[ipc] compose.updateDriveExplorerFavoriteCache:', e)
+      }
+    }
+  )
+
+  ipcMain.handle(IPC.compose.renameDriveExplorerFavorite, async (_event, raw: unknown): Promise<void> => {
+    const o = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+    const accountId = typeof o.accountId === 'string' ? o.accountId.trim() : ''
+    const id = typeof o.id === 'string' ? o.id.trim() : ''
+    const label = typeof o.label === 'string' ? o.label : ''
+    if (!accountId || !id) return
+    const accounts = await listAccounts()
+    const acc = accounts.find((a) => a.id === accountId)
+    if (!acc || acc.provider !== 'microsoft') {
+      throw new Error('Favoriten sind nur fuer Microsoft-365-Konten verfuegbar.')
+    }
+    try {
+      await renameDriveExplorerFavorite(accountId, id, label)
+    } catch (e) {
+      console.warn('[ipc] compose.renameDriveExplorerFavorite:', e)
+      throw e instanceof Error ? e : new Error(String(e))
+    }
+  })
+
+  ipcMain.handle(IPC.compose.reorderDriveExplorerFavorites, async (_event, raw: unknown): Promise<void> => {
+    const o = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+    const accountId = typeof o.accountId === 'string' ? o.accountId.trim() : ''
+    const rawIds = o.orderedIds
+    if (!accountId || !Array.isArray(rawIds)) return
+    const orderedIds = rawIds
+      .map((x) => (typeof x === 'string' ? x.trim() : ''))
+      .filter((x) => x.length > 0)
+    const accounts = await listAccounts()
+    const acc = accounts.find((a) => a.id === accountId)
+    if (!acc || acc.provider !== 'microsoft') return
+    try {
+      await reorderDriveExplorerFavorites(accountId, orderedIds)
+    } catch (e) {
+      console.warn('[ipc] compose.reorderDriveExplorerFavorites:', e)
+      throw e instanceof Error ? e : new Error(String(e))
+    }
+  })
+
   void findFolderByRemoteId
   void updateMessageFolderLocal
 }

@@ -25,6 +25,7 @@ import {
 } from '../people-service'
 import { readContactPhotoDataUrl } from '../contact-photo'
 import { getPeopleContactById } from '../db/people-repo'
+import { assertAppOnline } from '../network-status'
 
 function normalizeListInput(raw: unknown): PeopleListInput {
   const o = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
@@ -81,6 +82,7 @@ export function registerPeopleIpc(): void {
 
   ipcMain.removeHandler(IPC.people.syncAccount)
   ipcMain.handle(IPC.people.syncAccount, async (_event, accountId: unknown): Promise<PeopleSyncAccountResult> => {
+    assertAppOnline()
     if (typeof accountId !== 'string' || !accountId.trim()) {
       throw new Error('Keine Konto-ID fuer Kontakte-Sync.')
     }
@@ -89,6 +91,7 @@ export function registerPeopleIpc(): void {
 
   ipcMain.removeHandler(IPC.people.syncAll)
   ipcMain.handle(IPC.people.syncAll, async (): Promise<PeopleSyncAccountResult[]> => {
+    assertAppOnline()
     return syncPeopleForAllAccounts()
   })
 
@@ -124,6 +127,7 @@ export function registerPeopleIpc(): void {
 
   ipcMain.removeHandler(IPC.people.updateContact)
   ipcMain.handle(IPC.people.updateContact, async (_event, raw: unknown): Promise<void> => {
+    assertAppOnline()
     const o = raw && typeof raw === 'object' ? (raw as PeopleUpdateContactInput) : ({} as PeopleUpdateContactInput)
     const id = typeof o.id === 'number' && Number.isFinite(o.id) ? o.id : NaN
     const patch = o.patch && typeof o.patch === 'object' ? (o.patch as PeopleUpdateContactPatch) : {}
@@ -135,6 +139,7 @@ export function registerPeopleIpc(): void {
 
   ipcMain.removeHandler(IPC.people.setContactPhoto)
   ipcMain.handle(IPC.people.setContactPhoto, async (_event, raw: unknown): Promise<PeopleContactView> => {
+    assertAppOnline()
     const o = raw && typeof raw === 'object' ? (raw as PeopleSetContactPhotoInput) : ({} as PeopleSetContactPhotoInput)
     const id = typeof o.id === 'number' && Number.isFinite(o.id) ? o.id : NaN
     const imageBase64 = typeof o.imageBase64 === 'string' ? o.imageBase64 : ''
@@ -149,11 +154,13 @@ export function registerPeopleIpc(): void {
 
   ipcMain.removeHandler(IPC.people.createContact)
   ipcMain.handle(IPC.people.createContact, async (_event, raw: unknown): Promise<PeopleContactView> => {
+    assertAppOnline()
     return createPeopleContact(normalizeCreateContactInput(raw))
   })
 
   ipcMain.removeHandler(IPC.people.deleteContact)
   ipcMain.handle(IPC.people.deleteContact, async (_event, contactId: unknown): Promise<void> => {
+    assertAppOnline()
     if (typeof contactId !== 'number' || !Number.isFinite(contactId)) {
       throw new Error('Ungueltige Kontakt-ID.')
     }

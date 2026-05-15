@@ -274,12 +274,15 @@ export async function listMergedCalendarEvents(
   return out
 }
 
-export async function listMicrosoftCalendars(accountId: string): Promise<CalendarGraphCalendarRow[]> {
+export async function listMicrosoftCalendars(
+  accountId: string,
+  opts?: { forceRefresh?: boolean }
+): Promise<CalendarGraphCalendarRow[]> {
   const accounts = await listAccounts()
   const acc = accounts.find((a) => a.id === accountId)
   if (!acc) return []
   if (acc.provider === 'google') {
-    return googleListCalendars(accountId)
+    return googleListCalendars(accountId, opts)
   }
   return graphListCalendars(accountId)
 }

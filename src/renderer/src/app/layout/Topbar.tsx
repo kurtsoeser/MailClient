@@ -19,7 +19,8 @@ import {
   BookOpen,
   StickyNote,
   ListTodo,
-  Users
+  Users,
+  WifiOff
 } from 'lucide-react'
 import {
   DndContext,
@@ -60,6 +61,7 @@ import {
   reconcileTopbarModuleOrder
 } from '@/app/layout/topbar-module-order'
 import { useMailWorkspaceLayoutStore } from '@/stores/mail-workspace-layout'
+import { useConnectivityStore } from '@/stores/connectivity'
 import { FOCUS_MAIN_SEARCH_EVENT } from '@/lib/search-focus'
 import { pushRecentSearch } from '@/app/home/dashboard-recent-searches'
 
@@ -153,6 +155,7 @@ export function Topbar({ onOpenAccountDialog }: Props): JSX.Element {
   const refreshNow = useMailStore((s) => s.refreshNow)
   const syncByAccount = useMailStore((s) => s.syncByAccount)
   const anyAccountSyncing = Object.values(syncByAccount).some((s) => s.state.startsWith('syncing'))
+  const online = useConnectivityStore((s) => s.online)
 
   const [modeOrder, setModeOrder] = useState(readTopbarModuleOrder)
 
@@ -211,6 +214,7 @@ export function Topbar({ onOpenAccountDialog }: Props): JSX.Element {
   }
 
   async function handleRefresh(): Promise<void> {
+    if (!online) return
     if (refreshing) return
     setRefreshing(true)
     try {
@@ -224,6 +228,16 @@ export function Topbar({ onOpenAccountDialog }: Props): JSX.Element {
 
   return (
     <header className="glass-topbar flex h-12 min-w-0 shrink-0 select-none items-center gap-2 px-2 sm:gap-3 sm:px-3">
+      {!online && (
+        <span
+          className="flex shrink-0 items-center gap-1 rounded-md border border-amber-500/35 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:text-amber-300/95"
+          title={t('topbar.offlineTitle')}
+          role="status"
+        >
+          <WifiOff className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          <span className="hidden sm:inline">{t('topbar.offline')}</span>
+        </span>
+      )}
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
@@ -288,10 +302,14 @@ export function Topbar({ onOpenAccountDialog }: Props): JSX.Element {
 
         <button
           type="button"
+          disabled={!online || refreshing}
           onClick={(): void => void handleRefresh()}
-          className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-          aria-label={t('topbar.refreshAria')}
-          title={t('topbar.refreshTitle')}
+          className={cn(
+            'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground',
+            (!online || refreshing) && 'cursor-not-allowed opacity-45 hover:bg-transparent hover:text-muted-foreground'
+          )}
+          aria-label={online ? t('topbar.refreshAria') : t('topbar.refreshOfflineAria')}
+          title={online ? t('topbar.refreshTitle') : t('topbar.refreshOfflineTitle')}
         >
           <RefreshCw
             className={cn(

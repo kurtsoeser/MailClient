@@ -3,6 +3,15 @@ import { createGraphClient } from './client'
 import { loadConfig } from '../config'
 import type { ComposeDriveExplorerEntry, ComposeRecipientSuggestion } from '@shared/types'
 
+function readGraphStatusCode(e: unknown): number | undefined {
+  if (e instanceof GraphError) return e.statusCode
+  if (e && typeof e === 'object' && 'statusCode' in e) {
+    const c = (e as { statusCode?: unknown }).statusCode
+    return typeof c === 'number' ? c : undefined
+  }
+  return undefined
+}
+
 async function getClientFor(accountId: string): Promise<ReturnType<typeof createGraphClient>> {
   const config = await loadConfig()
   if (!config.microsoftClientId) {
@@ -59,52 +68,192 @@ function normalizeExplorerFolderId(folderId: string | null | undefined): string 
 }
 
 function formatDriveExplorerGraphError(e: unknown): string {
-  if (e instanceof GraphError) {
-    const c = e.statusCode
-    const m = (e.message ?? '').trim() || 'Unbekannter Graph-Fehler'
+  const c = readGraphStatusCode(e)
+  const m =
+    e instanceof GraphError
+      ? (e.message ?? '').trim() || 'Unbekannter Graph-Fehler'
+      : e instanceof Error
+        ? (e.message ?? '').trim() || 'Unbekannter Graph-Fehler'
+        : String(e)
+  if (c != null) {
     if (c === 404) {
       return `OneDrive nicht gefunden oder nicht bereitgestellt (${m}). Pruefen Sie, ob fuer dieses Konto OneDrive aktiviert ist.`
     }
     if (c === 403 || c === 401) {
       return `Kein Zugriff auf OneDrive (${m}). Melden Sie sich unter Konten erneut bei Microsoft an (Berechtigung «Files.Read.All» / Dateien).`
     }
+    if (c === 400) {
+      return `Graph-Anfrage ungueltig (${m}). Oft hilft: Favoriten-Ordner erneut oeffnen oder App neu starten.`
+    }
     return m
   }
   return e instanceof Error ? e.message : String(e)
+}
+
+/** Graph: Root-Kinder eines Drives — `/root/children` ist zuverlaessiger als `/items/root/children`. */
+function driveItemChildrenPathVariants(resourcePath: string): string[] {
+  const p = resourcePath.trim()
+  const out: string[] = [p]
+  if (p.endsWith('/items/root/children')) {
+    out.push(p.replace(/\/items\/root\/children$/, '/root/children'))
+  }
+  return [...new Set(out)]
 }
 
 async function listDriveItemChildrenPage(
   client: ReturnType<typeof createGraphClient>,
   resourcePath: string
 ): Promise<GraphDriveItem[]> {
-  const select = 'id,name,size,webUrl,file,folder'
-  try {
-    const res = (await client.api(resourcePath).select(select).top(120).get()) as {
-      value?: GraphDriveItem[]
-    }
-    return Array.isArray(res.value) ? res.value : []
-  } catch (e) {
-    if (e instanceof GraphError && (e.statusCode === 400 || e.statusCode === 501)) {
-      const res = (await client.api(resourcePath).top(120).get()) as { value?: GraphDriveItem[] }
-      return Array.isArray(res.value) ? res.value : []
-    }
-    throw e
+  const parse = (res: unknown): GraphDriveItem[] => {
+    const v = (res as { value?: GraphDriveItem[] })?.value
+    return Array.isArray(v) ? v : []
   }
+  const paths = driveItemChildrenPathVariants(resourcePath)
+  let lastErr: unknown
+  for (const path of paths) {
+    try {
+      return parse(await client.api(path).get())
+    } catch (e) {
+      lastErr = e
+      const sc = readGraphStatusCode(e)
+      if (sc !== 400 && sc !== 404) throw e
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
 }
 
-/** OneDrive/SharePoint: Zuletzt, eigene Ordnerhierarchie, Mit mir geteilt (Graph). */
+interface GraphDriveSummary {
+  id?: string
+  name?: string
+  driveType?: string
+}
+
+function normalizeExplorerSiteId(siteId: string | null | undefined): string | undefined {
+  if (siteId == null) return undefined
+  const t = typeof siteId === 'string' ? siteId.trim() : ''
+  if (!t || t === 'null' || t === 'undefined') return undefined
+  return t
+}
+
+/**
+ * SharePoint-Site-IDs sind oft `host,guid,guid`. Aus JSON/Favoriten kann einmal `host%2Cguid%2Cguid` stehen —
+ * `encodeURIComponent` darauf wuerde Graph mit «Invalid request» ablehnen.
+ */
+function normalizeSharePointSiteIdForGraphPath(raw: string): string {
+  let t = raw.trim()
+  if (!t) return t
+  for (let i = 0; i < 3 && t.includes('%'); i++) {
+    try {
+      const next = decodeURIComponent(t)
+      if (next === t) break
+      t = next
+    } catch {
+      break
+    }
+  }
+  return t
+}
+
+async function listSharePointRootSites(
+  client: ReturnType<typeof createGraphClient>
+): Promise<Array<{ id: string; displayName: string; webUrl: string | null }>> {
+  const byId = new Map<string, { id: string; displayName: string; webUrl: string | null }>()
+  let followedDenied = false
+
+  try {
+    const res = (await client.api('/me/followedSites').get()) as {
+      value?: Array<{ id?: string; name?: string; displayName?: string; webUrl?: string }>
+    }
+    for (const s of res.value ?? []) {
+      if (!s?.id) continue
+      const label = (s.displayName ?? s.name ?? 'Website').trim() || 'Website'
+      byId.set(s.id, { id: s.id, displayName: label, webUrl: typeof s.webUrl === 'string' ? s.webUrl : null })
+    }
+  } catch (e) {
+    const sc = readGraphStatusCode(e)
+    if (sc === 403 || sc === 401) {
+      followedDenied = true
+    } else if (sc === 400 || sc === 404) {
+      /* followedSites liefert bei manchen Mandanten 400/404; Teams-Liste unten als Fallback */
+    } else {
+      throw e
+    }
+  }
+
+  try {
+    let teamsRes: { value?: Array<{ id?: string; displayName?: string | null }> }
+    try {
+      teamsRes = (await client.api('/me/joinedTeams').select('id,displayName').top(40).get()) as {
+        value?: Array<{ id?: string; displayName?: string | null }>
+      }
+    } catch (e) {
+      if (readGraphStatusCode(e) === 400) {
+        teamsRes = (await client.api('/me/joinedTeams').select('id,displayName').get()) as {
+          value?: Array<{ id?: string; displayName?: string | null }>
+        }
+      } else {
+        throw e
+      }
+    }
+    const teams = Array.isArray(teamsRes.value) ? teamsRes.value : []
+    await Promise.all(
+      teams.slice(0, 30).map(async (t) => {
+        const gid = typeof t.id === 'string' ? t.id.trim() : ''
+        if (!gid) return
+        try {
+          const site = (await client
+            .api(`/groups/${encodeURIComponent(gid)}/sites/root`)
+            .select('id,displayName,webUrl,name')
+            .get()) as { id?: string; displayName?: string; webUrl?: string; name?: string }
+          if (!site?.id) return
+          if (byId.has(site.id)) return
+          const label =
+            (site.displayName ?? site.name ?? t.displayName ?? 'Teamwebsite').trim() || 'Teamwebsite'
+          byId.set(site.id, { id: site.id, displayName: label, webUrl: typeof site.webUrl === 'string' ? site.webUrl : null })
+        } catch {
+          /* Team ohne SharePoint-Site oder fehlende Rechte */
+        }
+      })
+    )
+  } catch {
+    /* Mandanten ohne Teams-Graph o.ae. */
+  }
+
+  if (byId.size === 0 && followedDenied) {
+    throw new Error(
+      'SharePoint-Sites nicht lesbar. Melden Sie sich unter Konten erneut bei Microsoft an (Berechtigung «Sites.Read.All» / Websites), damit verfolgte Sites geladen werden koennen.'
+    )
+  }
+
+  return [...byId.values()].sort((a, b) =>
+    a.displayName.localeCompare(b.displayName, 'de', { sensitivity: 'base' })
+  )
+}
+
+/** OneDrive/SharePoint: Zuletzt, eigene Ordnerhierarchie, Mit mir geteilt, SharePoint-Bibliotheken (Graph). */
 export async function graphListDriveExplorer(
   accountId: string,
-  scope: 'recent' | 'myfiles' | 'shared',
+  scope: 'recent' | 'myfiles' | 'shared' | 'sharepoint',
   folderId: string | null | undefined,
-  folderDriveId: string | null | undefined
+  folderDriveId: string | null | undefined,
+  siteId: string | null | undefined
 ): Promise<ComposeDriveExplorerEntry[]> {
   try {
     const client = await getClientFor(accountId)
 
   if (scope === 'recent') {
-    const res = (await client.api('/me/drive/recent').top(80).get()) as { value?: GraphDriveItem[] }
-    const values = Array.isArray(res.value) ? res.value : []
+    let values: GraphDriveItem[]
+    try {
+      const res = (await client.api('/me/drive/recent').top(80).get()) as { value?: GraphDriveItem[] }
+      values = Array.isArray(res.value) ? res.value : []
+    } catch (e) {
+      if (readGraphStatusCode(e) === 400) {
+        const res = (await client.api('/me/drive/recent').get()) as { value?: GraphDriveItem[] }
+        values = Array.isArray(res.value) ? res.value : []
+      } else {
+        throw e
+      }
+    }
     const out: ComposeDriveExplorerEntry[] = []
     for (const v of values) {
       const e = mapDriveItemToEntry(v, null)
@@ -121,12 +270,12 @@ export async function graphListDriveExplorer(
     const fid = normalizeExplorerFolderId(folderId)
     let values: GraphDriveItem[]
     if (fid) {
-      values = await listDriveItemChildrenPage(client, `/me/drive/items/${encodeURIComponent(fid)}/children`)
+      values = await listDriveItemChildrenPage(client, `/me/drive/items/${fid}/children`)
     } else {
       try {
         values = await listDriveItemChildrenPage(client, '/me/drive/items/root/children')
       } catch (e) {
-        if (e instanceof GraphError && e.statusCode === 404) {
+        if (readGraphStatusCode(e) === 404) {
           values = await listDriveItemChildrenPage(client, '/me/drive/root/children')
         } else {
           throw e
@@ -146,8 +295,20 @@ export async function graphListDriveExplorer(
     const fid = normalizeExplorerFolderId(folderId)
     const did = folderDriveId?.trim()
     if (!fid && !did) {
-      const res = (await client.api('/me/drive/sharedWithMe').top(80).get()) as { value?: GraphSharedWrapper[] }
-      const values = Array.isArray(res.value) ? res.value : []
+      let values: GraphSharedWrapper[]
+      try {
+        const res = (await client.api('/me/drive/sharedWithMe').top(80).get()) as {
+          value?: GraphSharedWrapper[]
+        }
+        values = Array.isArray(res.value) ? res.value : []
+      } catch (e) {
+        if (readGraphStatusCode(e) === 400) {
+          const res = (await client.api('/me/drive/sharedWithMe').get()) as { value?: GraphSharedWrapper[] }
+          values = Array.isArray(res.value) ? res.value : []
+        } else {
+          throw e
+        }
+      }
       const out: ComposeDriveExplorerEntry[] = []
       for (const wrap of values) {
         const ri = wrap.remoteItem
@@ -176,7 +337,97 @@ export async function graphListDriveExplorer(
 
     const values = await listDriveItemChildrenPage(
       client,
-      `/drives/${encodeURIComponent(did)}/items/${encodeURIComponent(fid)}/children`
+      `/drives/${did}/items/${fid}/children`
+    )
+    const out: ComposeDriveExplorerEntry[] = []
+    for (const v of values) {
+      const e = mapDriveItemToEntry(v, did)
+      if (e) out.push(e)
+    }
+    out.sort(sortExplorerEntries)
+    return out
+  }
+
+  if (scope === 'sharepoint') {
+    const sid = normalizeExplorerSiteId(siteId)
+    const did = folderDriveId?.trim()
+    const fidRaw = normalizeExplorerFolderId(folderId)
+    const fid =
+      did && fidRaw && fidRaw === did
+        ? undefined
+        : fidRaw
+
+    if (!sid && !did) {
+      const sites = await listSharePointRootSites(client)
+      return sites.map((s) => ({
+        id: s.id,
+        name: s.displayName,
+        webUrl: s.webUrl,
+        size: null,
+        mimeType: null,
+        isFolder: true,
+        driveId: undefined,
+        siteId: s.id
+      }))
+    }
+
+    if (sid && !did) {
+      const norm = normalizeSharePointSiteIdForGraphPath(sid)
+      const sitePaths = [`/sites/${norm}/drives`, `/sites/${encodeURIComponent(norm)}/drives`]
+      let values: GraphDriveSummary[] = []
+      let lastErr: unknown
+      for (const sp of sitePaths) {
+        try {
+          const res = (await client.api(sp).get()) as { value?: GraphDriveSummary[] }
+          values = Array.isArray(res.value) ? res.value : []
+          lastErr = undefined
+          break
+        } catch (e) {
+          lastErr = e
+          if (readGraphStatusCode(e) !== 400 || sp === sitePaths[sitePaths.length - 1]) {
+            throw e
+          }
+        }
+      }
+      const out: ComposeDriveExplorerEntry[] = []
+      for (const d of values) {
+        const id = typeof d.id === 'string' ? d.id.trim() : ''
+        if (!id) continue
+        const name = (d.name ?? 'Bibliothek').trim() || 'Bibliothek'
+        if (d.driveType === 'personal') continue
+        out.push({
+          id,
+          name,
+          webUrl: null,
+          size: null,
+          mimeType: null,
+          isFolder: true,
+          driveId: id,
+          siteId: undefined
+        })
+      }
+      out.sort(sortExplorerEntries)
+      return out
+    }
+
+    if (!did) {
+      throw new Error('SharePoint: Drive-Information fehlt. Bitte erneut von der Website aus oeffnen.')
+    }
+
+    if (!fid) {
+      const values = await listDriveItemChildrenPage(client, `/drives/${did}/root/children`)
+      const out: ComposeDriveExplorerEntry[] = []
+      for (const v of values) {
+        const e = mapDriveItemToEntry(v, did)
+        if (e) out.push(e)
+      }
+      out.sort(sortExplorerEntries)
+      return out
+    }
+
+    const values = await listDriveItemChildrenPage(
+      client,
+      `/drives/${did}/items/${fid}/children`
     )
     const out: ComposeDriveExplorerEntry[] = []
     for (const v of values) {
@@ -189,7 +440,7 @@ export async function graphListDriveExplorer(
 
   return []
   } catch (e) {
-    if (e instanceof GraphError) {
+    if (readGraphStatusCode(e) != null || e instanceof GraphError) {
       throw new Error(formatDriveExplorerGraphError(e))
     }
     throw e instanceof Error ? e : new Error(String(e))

@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import {
   IPC,
   type AppConfig,
+  type AppConnectivityState,
   type AttachmentMeta,
   type ConnectedAccount,
   type MailFolder,
@@ -17,6 +18,12 @@ import {
   type ComposeRecipientSuggestion,
   type ComposeListDriveExplorerInput,
   type ComposeDriveExplorerEntry,
+  type ComposeDriveExplorerFavorite,
+  type ComposeAddDriveExplorerFavoriteInput,
+  type ComposeRemoveDriveExplorerFavoriteInput,
+  type ComposeUpdateDriveExplorerFavoriteCacheInput,
+  type ComposeRenameDriveExplorerFavoriteInput,
+  type ComposeReorderDriveExplorerFavoritesInput,
   type UndoResult,
   type TodoDueKindOpen,
   type TodoDueKindList,
@@ -32,6 +39,7 @@ import {
   type CalendarGetEventResult,
   type CalendarDeleteEventInput,
   type CalendarGraphCalendarRow,
+  type CalendarListCalendarsInput,
   type CalendarM365GroupCalendarsPage,
   type CalendarListEventsInput,
   type CalendarPatchScheduleInput,
@@ -91,6 +99,7 @@ const api = {
   app: {
     getVersion: (): Promise<string> => ipcRenderer.invoke(IPC.app.getVersion),
     getPlatform: (): Promise<NodeJS.Platform> => ipcRenderer.invoke(IPC.app.getPlatform),
+    getConnectivity: (): Promise<AppConnectivityState> => ipcRenderer.invoke(IPC.app.getConnectivity),
     setLaunchOnLogin: (enabled: boolean): Promise<void> =>
       ipcRenderer.invoke(IPC.app.setLaunchOnLogin, enabled),
     showTestNotification: (): Promise<void> =>
@@ -369,12 +378,26 @@ const api = {
     }): Promise<ComposeRecipientSuggestion[]> =>
       ipcRenderer.invoke(IPC.compose.recipientSuggestions, args),
     listDriveExplorer: (args: ComposeListDriveExplorerInput): Promise<ComposeDriveExplorerEntry[]> =>
-      ipcRenderer.invoke(IPC.compose.listDriveExplorer, args)
+      ipcRenderer.invoke(IPC.compose.listDriveExplorer, args),
+    listDriveExplorerFavorites: (accountId: string): Promise<ComposeDriveExplorerFavorite[]> =>
+      ipcRenderer.invoke(IPC.compose.listDriveExplorerFavorites, { accountId }),
+    addDriveExplorerFavorite: (
+      args: ComposeAddDriveExplorerFavoriteInput
+    ): Promise<ComposeDriveExplorerFavorite> =>
+      ipcRenderer.invoke(IPC.compose.addDriveExplorerFavorite, args),
+    removeDriveExplorerFavorite: (args: ComposeRemoveDriveExplorerFavoriteInput): Promise<void> =>
+      ipcRenderer.invoke(IPC.compose.removeDriveExplorerFavorite, args),
+    updateDriveExplorerFavoriteCache: (args: ComposeUpdateDriveExplorerFavoriteCacheInput): Promise<void> =>
+      ipcRenderer.invoke(IPC.compose.updateDriveExplorerFavoriteCache, args),
+    renameDriveExplorerFavorite: (args: ComposeRenameDriveExplorerFavoriteInput): Promise<void> =>
+      ipcRenderer.invoke(IPC.compose.renameDriveExplorerFavorite, args),
+    reorderDriveExplorerFavorites: (args: ComposeReorderDriveExplorerFavoritesInput): Promise<void> =>
+      ipcRenderer.invoke(IPC.compose.reorderDriveExplorerFavorites, args)
   },
   calendar: {
     listEvents: (args: CalendarListEventsInput): Promise<CalendarEventView[]> =>
       ipcRenderer.invoke(IPC.calendar.listEvents, args),
-    listCalendars: (args: { accountId: string }): Promise<CalendarGraphCalendarRow[]> =>
+    listCalendars: (args: CalendarListCalendarsInput): Promise<CalendarGraphCalendarRow[]> =>
       ipcRenderer.invoke(IPC.calendar.listCalendars, args),
     listMicrosoft365GroupCalendars: (args: {
       accountId: string
@@ -509,6 +532,13 @@ const api = {
       ipcRenderer.on('sync:status', listener)
       return (): void => {
         ipcRenderer.off('sync:status', listener)
+      }
+    },
+    onConnectivityChange: (handler: (payload: { online: boolean }) => void): (() => void) => {
+      const listener = (_e: IpcRendererEvent, payload: { online: boolean }): void => handler(payload)
+      ipcRenderer.on('app:connectivity', listener)
+      return (): void => {
+        ipcRenderer.off('app:connectivity', listener)
       }
     },
     onMailChanged: (handler: (payload: { accountId: string }) => void): (() => void) => {

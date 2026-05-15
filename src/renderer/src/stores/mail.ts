@@ -9,11 +9,14 @@ import type {
   TodoDueKindOpen,
   TodoCountsAll,
   MetaFolderSummary,
-  MetaFolderCreateInput
+  MetaFolderCreateInput,
+  MetaFolderUpdateInput
 } from '@shared/types'
+import { OFFLINE_APP_ERROR } from '@shared/types'
 import { threadGroupingKey } from '@/lib/thread-group'
 import type { MailListArrangeBy, MailListChronoOrder } from '@/lib/mail-list-arrange'
 import { useUndoStore } from './undo'
+import { useConnectivityStore } from './connectivity'
 import {
   readLastMailNav,
   lastMailNavIsRestorable,
@@ -86,6 +89,7 @@ interface MailState {
   selectUnifiedInbox: (opts?: SelectMailNavOptions) => Promise<void>
   selectMetaFolder: (metaFolderId: number, opts?: SelectMailNavOptions) => Promise<void>
   createMetaFolder: (input: MetaFolderCreateInput) => Promise<MetaFolderSummary>
+  updateMetaFolder: (input: MetaFolderUpdateInput) => Promise<MetaFolderSummary>
   deleteMetaFolder: (metaFolderId: number) => Promise<void>
   reorderMetaFolders: (orderedIds: number[]) => Promise<void>
   selectMessage: (messageId: number) => Promise<void>
@@ -431,9 +435,11 @@ export const useMailStore = create<MailState>((set, get) => ({
         snapshotMailNavForPersist(get())
       }
 
-      void window.mailClient.mail
-        .syncFolder(folderId)
-        .catch((e) => console.error('[mail] folder sync failed:', e))
+      if (useConnectivityStore.getState().online) {
+        void window.mailClient.mail
+          .syncFolder(folderId)
+          .catch((e) => console.error('[mail] folder sync failed:', e))
+      }
     } catch (e) {
       set({ loading: false, error: e instanceof Error ? e.message : String(e) })
     }
@@ -664,6 +670,20 @@ export const useMailStore = create<MailState>((set, get) => ({
     return created
   },
 
+  async updateMetaFolder(input: MetaFolderUpdateInput): Promise<MetaFolderSummary> {
+    const updated = await window.mailClient.mail.updateMetaFolder(input)
+    set((s) => {
+      const next = s.metaFolders.map((m) => (m.id === updated.id ? updated : m))
+      next.sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id)
+      return { metaFolders: next }
+    })
+    const st = get()
+    if (st.listKind === 'meta_folder' && st.selectedMetaFolderId === updated.id) {
+      await get().selectMetaFolder(updated.id)
+    }
+    return updated
+  },
+
   async deleteMetaFolder(metaFolderId: number): Promise<void> {
     await window.mailClient.mail.deleteMetaFolder(metaFolderId)
     const mf = await window.mailClient.mail.listMetaFolders()
@@ -760,6 +780,10 @@ export const useMailStore = create<MailState>((set, get) => ({
   },
 
   async triggerSync(accountId: string): Promise<void> {
+    if (!useConnectivityStore.getState().online) {
+      set({ error: OFFLINE_APP_ERROR })
+      return
+    }
     try {
       await window.mailClient.mail.syncAccount(accountId)
     } catch (e) {
@@ -768,6 +792,10 @@ export const useMailStore = create<MailState>((set, get) => ({
   },
 
   async refreshNow(): Promise<void> {
+    if (!useConnectivityStore.getState().online) {
+      set({ error: OFFLINE_APP_ERROR })
+      return
+    }
     const before = get()
     try {
       const folderId = before.listKind === 'folder' ? before.selectedFolderId : null

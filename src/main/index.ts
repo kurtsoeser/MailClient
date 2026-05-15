@@ -7,6 +7,7 @@ import { listAccounts } from './accounts'
 import { runInitialSync } from './sync-runner'
 import { startMailPolling, stopMailPolling } from './mail-poll-runner'
 import { loadConfig } from './config'
+import { isAppOnline, startConnectivityMonitoring, stopConnectivityMonitoring } from './network-status'
 import {
   isAppInternalNavigationUrl,
   normalizeExternalOpenUrl,
@@ -119,6 +120,7 @@ app.whenReady().then(async () => {
   getDb()
   registerIpcHandlers()
   createMainWindow()
+  startConnectivityMonitoring()
 
   try {
     const cfg = await loadConfig()
@@ -137,11 +139,14 @@ app.whenReady().then(async () => {
   }
 
   const accounts = await listAccounts()
-  for (const account of accounts) {
-    if (account.provider !== 'microsoft') continue
-    void runInitialSync(account.id).catch((e) =>
-      console.error('[startup] sync failed for', account.id, e)
-    )
+  if (isAppOnline()) {
+    for (const account of accounts) {
+      void runInitialSync(account.id).catch((e) =>
+        console.error('[startup] sync failed for', account.id, e)
+      )
+    }
+  } else {
+    console.warn('[startup] offline — Initial-Sync wird uebersprungen.')
   }
 
   startMailPolling()
@@ -155,10 +160,12 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', () => {
   stopMailPolling()
+  stopConnectivityMonitoring()
 })
 
 app.on('window-all-closed', () => {
   stopMailPolling()
+  stopConnectivityMonitoring()
   closeDb()
   if (process.platform !== 'darwin') {
     app.quit()

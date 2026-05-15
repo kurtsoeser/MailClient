@@ -1,5 +1,6 @@
 import { getDb } from './index'
 import type {
+  SettingsBackupUserNoteSnapshot,
   UserNote,
   UserNoteCalendarKey,
   UserNoteCalendarUpsertInput,
@@ -277,4 +278,136 @@ export function listNotes(filters: UserNoteListFilters = {}): UserNoteListItem[]
     )
     .all(...params, limit) as UserNoteListRow[]
   return rows.map(rowToListItem)
+}
+
+export function listUserNotesForSettingsBackup(): SettingsBackupUserNoteSnapshot[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT n.kind, n.account_id, n.calendar_source, n.calendar_remote_id, n.event_remote_id,
+              n.title, n.body, n.created_at, n.updated_at, n.event_title_snapshot, n.event_start_iso_snapshot,
+              m.account_id AS mail_account_id, m.remote_id AS mail_remote_id
+       FROM user_notes n
+       LEFT JOIN messages m ON m.id = n.message_id
+       ORDER BY n.id ASC`
+    )
+    .all() as Array<{
+      kind: 'mail' | 'calendar' | 'standalone'
+      account_id: string | null
+      calendar_source: 'microsoft' | 'google' | null
+      calendar_remote_id: string | null
+      event_remote_id: string | null
+      title: string | null
+      body: string
+      created_at: string
+      updated_at: string
+      event_title_snapshot: string | null
+      event_start_iso_snapshot: string | null
+      mail_account_id: string | null
+      mail_remote_id: string | null
+    }>
+  return rows.map((r) => {
+    if (r.kind === 'mail') {
+      return {
+        kind: 'mail' as const,
+        mailAccountId: r.mail_account_id ?? r.account_id,
+        mailRemoteId: r.mail_remote_id,
+        title: r.title,
+        body: r.body,
+        createdAt: r.created_at,
+        updatedAt: r.updated_at
+      }
+    }
+    if (r.kind === 'calendar') {
+      return {
+        kind: 'calendar' as const,
+        accountId: r.account_id,
+        calendarSource: r.calendar_source,
+        calendarRemoteId: r.calendar_remote_id,
+        eventRemoteId: r.event_remote_id,
+        title: r.title,
+        body: r.body,
+        createdAt: r.created_at,
+        updatedAt: r.updated_at,
+        eventTitleSnapshot: r.event_title_snapshot,
+        eventStartIsoSnapshot: r.event_start_iso_snapshot
+      }
+    }
+    return {
+      kind: 'standalone' as const,
+      title: r.title,
+      body: r.body,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at
+    }
+  })
+}
+
+export function replaceAllUserNotesFromBackup(rows: SettingsBackupUserNoteSnapshot[]): void {
+  const db = getDb()
+  const resolveMsg = db.prepare<[string, string], { id: number } | undefined>(
+    'SELECT id FROM messages WHERE account_id = ? AND remote_id = ?'
+  )
+  const insMail = db.prepare(
+    `INSERT INTO user_notes (kind, message_id, title, body, created_at, updated_at)
+     VALUES ('mail', @message_id, @title, @body, @created_at, @updated_at)`
+  )
+  const insCal = db.prepare(
+    `INSERT INTO user_notes (
+       kind, message_id, account_id, calendar_source, calendar_remote_id, event_remote_id,
+       title, body, created_at, updated_at, event_title_snapshot, event_start_iso_snapshot
+     )
+     VALUES (
+       'calendar', NULL, @account_id, @calendar_source, @calendar_remote_id, @event_remote_id,
+       @title, @body, @created_at, @updated_at, @event_title_snapshot, @event_start_iso_snapshot
+     )`
+  )
+  const insStandalone = db.prepare(
+    `INSERT INTO user_notes (kind, message_id, title, body, created_at, updated_at)
+     VALUES ('standalone', NULL, @title, @body, @created_at, @updated_at)`
+  )
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM user_notes').run()
+    for (const r of rows) {
+      if (r.kind === 'mail') {
+        const acc = typeof r.mailAccountId === 'string' ? r.mailAccountId.trim() : ''
+        const rid = typeof r.mailRemoteId === 'string' ? r.mailRemoteId.trim() : ''
+        if (!acc || !rid) continue
+        const m = resolveMsg.get(acc, rid)
+        if (!m) continue
+        insMail.run({
+          message_id: m.id,
+          title: r.title,
+          body: r.body ?? '',
+          created_at: r.createdAt,
+          updated_at: r.updatedAt
+        })
+      } else if (r.kind === 'calendar') {
+        const acc = typeof r.accountId === 'string' ? r.accountId.trim() : ''
+        const cs = r.calendarSource
+        const cr = typeof r.calendarRemoteId === 'string' ? r.calendarRemoteId.trim() : ''
+        const er = typeof r.eventRemoteId === 'string' ? r.eventRemoteId.trim() : ''
+        if (!acc || (cs !== 'microsoft' && cs !== 'google') || !cr || !er) continue
+        insCal.run({
+          account_id: acc,
+          calendar_source: cs,
+          calendar_remote_id: cr,
+          event_remote_id: er,
+          title: r.title,
+          body: r.body ?? '',
+          created_at: r.createdAt,
+          updated_at: r.updatedAt,
+          event_title_snapshot: r.eventTitleSnapshot ?? null,
+          event_start_iso_snapshot: r.eventStartIsoSnapshot ?? null
+        })
+      } else {
+        insStandalone.run({
+          title: r.title,
+          body: r.body ?? '',
+          created_at: r.createdAt,
+          updated_at: r.updatedAt
+        })
+      }
+    }
+  })
+  tx()
 }

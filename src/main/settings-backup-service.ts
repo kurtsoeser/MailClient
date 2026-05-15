@@ -3,11 +3,15 @@ import type {
   AppConfig,
   SettingsBackupDatabaseExtras,
   SettingsBackupPayload,
+  SettingsBackupUserNoteSnapshot,
   WorkflowColumn
 } from '@shared/types'
 import { SETTINGS_BACKUP_FORMAT_VERSION } from '@shared/types'
 import { DEFAULT_APP_CONFIG, loadConfig, saveConfig } from './config'
-import { listWorkflowBoards, updateWorkflowBoardColumns } from './db/workflow-repo'
+import {
+  listWorkflowBoards,
+  replaceAllWorkflowBoardsFromBackup
+} from './db/workflow-repo'
 import {
   listAllAccountWorkflowMailFolders,
   replaceAllAccountWorkflowMailFolders
@@ -15,6 +19,20 @@ import {
 import { listAllVipRows, replaceAllVipSenders } from './db/vip-repo'
 import { listMailRules } from './db/rules-repo'
 import { replaceAllMailRulesFromBackup } from './rules-service'
+import { listAllQuickStepsForBackup, replaceAllQuickStepsFromBackup } from './db/quicksteps-repo'
+import {
+  listAllTemplatesForBackup,
+  replaceAllTemplatesFromBackup
+} from './db/templates-repo'
+import {
+  listAllMetaFoldersRawForBackup,
+  replaceAllMetaFoldersFromBackup
+} from './db/meta-folders-repo'
+import {
+  listPendingScheduledComposeForBackup,
+  replacePendingScheduledComposeFromBackup
+} from './db/compose-scheduled-repo'
+import { listUserNotesForSettingsBackup, replaceAllUserNotesFromBackup } from './db/user-notes-repo'
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return v != null && typeof v === 'object' && !Array.isArray(v)
@@ -55,6 +73,171 @@ function parseWorkflowColumns(raw: unknown): WorkflowColumn[] {
   return out
 }
 
+function parseQuickStepsBackup(raw: unknown[]): SettingsBackupDatabaseExtras['quickSteps'] {
+  const out: NonNullable<SettingsBackupDatabaseExtras['quickSteps']> = []
+  for (const q of raw) {
+    if (!isRecord(q)) continue
+    if (typeof q.id !== 'number' || !Number.isFinite(q.id)) continue
+    if (typeof q.name !== 'string' || !q.name.trim()) continue
+    if (typeof q.actionsJson !== 'string') continue
+    const icon = q.icon == null ? null : typeof q.icon === 'string' ? q.icon : null
+    const shortcut = q.shortcut == null ? null : typeof q.shortcut === 'string' ? q.shortcut : null
+    if (typeof q.sortOrder !== 'number' || !Number.isFinite(q.sortOrder)) continue
+    if (typeof q.enabled !== 'boolean') continue
+    if (typeof q.createdAt !== 'string') continue
+    if (typeof q.updatedAt !== 'string') continue
+    out.push({
+      id: q.id,
+      name: q.name,
+      icon,
+      shortcut,
+      actionsJson: q.actionsJson,
+      sortOrder: q.sortOrder,
+      enabled: q.enabled,
+      createdAt: q.createdAt,
+      updatedAt: q.updatedAt
+    })
+  }
+  return out.length > 0 ? out : undefined
+}
+
+function parseTemplatesBackup(raw: unknown[]): SettingsBackupDatabaseExtras['mailTemplates'] {
+  const out: NonNullable<SettingsBackupDatabaseExtras['mailTemplates']> = []
+  for (const t of raw) {
+    if (!isRecord(t)) continue
+    if (typeof t.id !== 'number' || !Number.isFinite(t.id)) continue
+    if (typeof t.name !== 'string' || !t.name.trim()) continue
+    if (typeof t.bodyHtml !== 'string') continue
+    const bodyText = t.bodyText == null ? null : typeof t.bodyText === 'string' ? t.bodyText : null
+    const variablesJson =
+      t.variablesJson == null ? null : typeof t.variablesJson === 'string' ? t.variablesJson : null
+    const shortcut = t.shortcut == null ? null : typeof t.shortcut === 'string' ? t.shortcut : null
+    if (typeof t.sortOrder !== 'number' || !Number.isFinite(t.sortOrder)) continue
+    if (typeof t.createdAt !== 'string') continue
+    if (typeof t.updatedAt !== 'string') continue
+    out.push({
+      id: t.id,
+      name: t.name,
+      bodyHtml: t.bodyHtml,
+      bodyText,
+      variablesJson,
+      shortcut,
+      sortOrder: t.sortOrder,
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt
+    })
+  }
+  return out.length > 0 ? out : undefined
+}
+
+function parseMetaFoldersBackup(raw: unknown[]): SettingsBackupDatabaseExtras['metaFolders'] {
+  const out: NonNullable<SettingsBackupDatabaseExtras['metaFolders']> = []
+  for (const m of raw) {
+    if (!isRecord(m)) continue
+    if (typeof m.id !== 'number' || !Number.isFinite(m.id)) continue
+    if (typeof m.name !== 'string' || !m.name.trim()) continue
+    if (typeof m.sortOrder !== 'number' || !Number.isFinite(m.sortOrder)) continue
+    if (typeof m.criteriaJson !== 'string') continue
+    if (typeof m.createdAt !== 'string') continue
+    if (typeof m.updatedAt !== 'string') continue
+    out.push({
+      id: m.id,
+      name: m.name,
+      sortOrder: m.sortOrder,
+      criteriaJson: m.criteriaJson,
+      createdAt: m.createdAt,
+      updatedAt: m.updatedAt
+    })
+  }
+  return out.length > 0 ? out : undefined
+}
+
+function parseComposeScheduledBackup(
+  raw: unknown[]
+): SettingsBackupDatabaseExtras['composeScheduledPending'] {
+  const out: NonNullable<SettingsBackupDatabaseExtras['composeScheduledPending']> = []
+  for (const c of raw) {
+    if (!isRecord(c)) continue
+    if (typeof c.payloadJson !== 'string' || c.payloadJson.length < 2) continue
+    if (typeof c.sendAtIso !== 'string' || !c.sendAtIso.trim()) continue
+    out.push({ payloadJson: c.payloadJson, sendAtIso: c.sendAtIso.trim() })
+  }
+  return out
+}
+
+function parseUserNotesBackup(raw: unknown[]): SettingsBackupUserNoteSnapshot[] {
+  const out: SettingsBackupUserNoteSnapshot[] = []
+  for (const n of raw) {
+    if (!isRecord(n)) continue
+    const kind = n.kind
+    if (kind !== 'mail' && kind !== 'calendar' && kind !== 'standalone') continue
+    if (typeof n.body !== 'string') continue
+    if (typeof n.createdAt !== 'string' || typeof n.updatedAt !== 'string') continue
+    const title = n.title == null ? null : typeof n.title === 'string' ? n.title : null
+    if (kind === 'mail') {
+      const mailAccountId =
+        n.mailAccountId == null ? null : typeof n.mailAccountId === 'string' ? n.mailAccountId : null
+      const mailRemoteId =
+        n.mailRemoteId == null ? null : typeof n.mailRemoteId === 'string' ? n.mailRemoteId : null
+      out.push({
+        kind: 'mail',
+        mailAccountId,
+        mailRemoteId,
+        title,
+        body: n.body,
+        createdAt: n.createdAt,
+        updatedAt: n.updatedAt
+      })
+    } else if (kind === 'calendar') {
+      const accountId =
+        n.accountId == null ? null : typeof n.accountId === 'string' ? n.accountId : null
+      const calendarSource = n.calendarSource
+      const calendarRemoteId =
+        n.calendarRemoteId == null
+          ? null
+          : typeof n.calendarRemoteId === 'string'
+            ? n.calendarRemoteId
+            : null
+      const eventRemoteId =
+        n.eventRemoteId == null ? null : typeof n.eventRemoteId === 'string' ? n.eventRemoteId : null
+      const eventTitleSnapshot =
+        n.eventTitleSnapshot == null
+          ? null
+          : typeof n.eventTitleSnapshot === 'string'
+            ? n.eventTitleSnapshot
+            : null
+      const eventStartIsoSnapshot =
+        n.eventStartIsoSnapshot == null
+          ? null
+          : typeof n.eventStartIsoSnapshot === 'string'
+            ? n.eventStartIsoSnapshot
+            : null
+      out.push({
+        kind: 'calendar',
+        accountId,
+        calendarSource: calendarSource === 'microsoft' || calendarSource === 'google' ? calendarSource : null,
+        calendarRemoteId,
+        eventRemoteId,
+        title,
+        body: n.body,
+        createdAt: n.createdAt,
+        updatedAt: n.updatedAt,
+        eventTitleSnapshot,
+        eventStartIsoSnapshot
+      })
+    } else {
+      out.push({
+        kind: 'standalone',
+        title,
+        body: n.body,
+        createdAt: n.createdAt,
+        updatedAt: n.updatedAt
+      })
+    }
+  }
+  return out
+}
+
 export function collectDatabaseExtrasForBackup(): SettingsBackupDatabaseExtras {
   const boards = listWorkflowBoards()
   const rules = listMailRules().map((r) => ({
@@ -73,11 +256,53 @@ export function collectDatabaseExtrasForBackup(): SettingsBackupDatabaseExtras {
     wipFolderRemoteId: row.wipFolderRemoteId,
     doneFolderRemoteId: row.doneFolderRemoteId
   }))
+  const quickSteps = listAllQuickStepsForBackup().map((r) => ({
+    id: r.id,
+    name: r.name,
+    icon: r.icon,
+    shortcut: r.shortcut,
+    actionsJson: r.actionsJson,
+    sortOrder: r.sortOrder,
+    enabled: r.enabled,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt
+  }))
+  const mailTemplates = listAllTemplatesForBackup().map((r) => ({
+    id: r.id,
+    name: r.name,
+    bodyHtml: r.bodyHtml,
+    bodyText: r.bodyText,
+    variablesJson: r.variablesJson,
+    shortcut: r.shortcut,
+    sortOrder: r.sortOrder,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt
+  }))
+  const metaFolders = listAllMetaFoldersRawForBackup().map((r) => ({
+    id: r.id,
+    name: r.name,
+    sortOrder: r.sortOrder,
+    criteriaJson: r.criteriaJson,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt
+  }))
+  const composeScheduledPending = listPendingScheduledComposeForBackup()
+  const userNotes = listUserNotesForSettingsBackup()
   return {
     mailRules: rules,
-    workflowBoards: boards.map((b) => ({ id: b.id, columns: b.columns })),
+    workflowBoards: boards.map((b) => ({
+      id: b.id,
+      name: b.name,
+      sortOrder: b.sortOrder,
+      columns: b.columns
+    })),
     vipSenders,
-    workflowMailFolders
+    workflowMailFolders,
+    quickSteps,
+    mailTemplates,
+    metaFolders,
+    composeScheduledPending,
+    userNotes
   }
 }
 
@@ -138,14 +363,21 @@ export function parseSettingsBackupJson(raw: string): SettingsBackupPayload {
 
     const boardsRaw = Array.isArray(de.workflowBoards) ? de.workflowBoards : []
     const workflowBoards = boardsRaw
-      .filter((b): b is { id: number; columns: WorkflowColumn[] } => {
+      .filter((b): b is Record<string, unknown> & { id: number } => {
         if (!isRecord(b)) return false
         return typeof b.id === 'number' && Number.isFinite(b.id)
       })
-      .map((b) => ({
-        id: b.id,
-        columns: parseWorkflowColumns(b.columns)
-      }))
+      .map((b) => {
+        const name = typeof b.name === 'string' ? b.name : undefined
+        const sortOrder =
+          typeof b.sortOrder === 'number' && Number.isFinite(b.sortOrder) ? b.sortOrder : undefined
+        return {
+          id: b.id,
+          ...(name !== undefined ? { name } : {}),
+          ...(sortOrder !== undefined ? { sortOrder } : {}),
+          columns: parseWorkflowColumns(b.columns)
+        }
+      })
 
     const vipRaw = Array.isArray(de.vipSenders) ? de.vipSenders : []
     const vipSenders = vipRaw
@@ -181,7 +413,30 @@ export function parseSettingsBackupJson(raw: string): SettingsBackupPayload {
             : String(w.doneFolderRemoteId)
       }))
 
-    databaseExtras = { mailRules, workflowBoards, vipSenders, workflowMailFolders }
+    databaseExtras = {
+      mailRules,
+      workflowBoards,
+      vipSenders,
+      workflowMailFolders
+    }
+    if (Array.isArray(de.quickSteps)) {
+      const qs = parseQuickStepsBackup(de.quickSteps)
+      if (qs) databaseExtras.quickSteps = qs
+    }
+    if (Array.isArray(de.mailTemplates)) {
+      const mt = parseTemplatesBackup(de.mailTemplates)
+      if (mt) databaseExtras.mailTemplates = mt
+    }
+    if (Array.isArray(de.metaFolders)) {
+      const mf = parseMetaFoldersBackup(de.metaFolders)
+      if (mf) databaseExtras.metaFolders = mf
+    }
+    if ('composeScheduledPending' in de && Array.isArray(de.composeScheduledPending)) {
+      databaseExtras.composeScheduledPending = parseComposeScheduledBackup(de.composeScheduledPending)
+    }
+    if ('userNotes' in de && Array.isArray(de.userNotes)) {
+      databaseExtras.userNotes = parseUserNotesBackup(de.userNotes)
+    }
   }
 
   return {
@@ -200,14 +455,27 @@ export async function applySettingsBackupPayload(backup: SettingsBackupPayload):
   app.setLoginItemSettings({ openAtLogin: Boolean(config.launchOnLogin), path: process.execPath })
 
   if (backup.databaseExtras) {
-    replaceAllMailRulesFromBackup(backup.databaseExtras.mailRules)
-    replaceAllVipSenders(backup.databaseExtras.vipSenders)
-    replaceAllAccountWorkflowMailFolders(backup.databaseExtras.workflowMailFolders)
-
-    const currentBoardIds = new Set(listWorkflowBoards().map((b) => b.id))
-    for (const wb of backup.databaseExtras.workflowBoards) {
-      if (!currentBoardIds.has(wb.id)) continue
-      updateWorkflowBoardColumns(wb.id, wb.columns)
+    const de = backup.databaseExtras
+    if (de.quickSteps != null && de.quickSteps.length > 0) {
+      replaceAllQuickStepsFromBackup(de.quickSteps)
+    }
+    if (de.workflowBoards.length > 0) {
+      replaceAllWorkflowBoardsFromBackup(de.workflowBoards)
+    }
+    if (de.mailTemplates != null && de.mailTemplates.length > 0) {
+      replaceAllTemplatesFromBackup(de.mailTemplates)
+    }
+    if (de.metaFolders != null && de.metaFolders.length > 0) {
+      replaceAllMetaFoldersFromBackup(de.metaFolders)
+    }
+    replaceAllMailRulesFromBackup(de.mailRules)
+    replaceAllVipSenders(de.vipSenders)
+    replaceAllAccountWorkflowMailFolders(de.workflowMailFolders)
+    if (de.composeScheduledPending != null) {
+      replacePendingScheduledComposeFromBackup(de.composeScheduledPending)
+    }
+    if (de.userNotes != null) {
+      replaceAllUserNotesFromBackup(de.userNotes)
     }
   }
 }

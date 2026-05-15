@@ -13,6 +13,7 @@ import { useMailStore } from './stores/mail'
 import { useGlobalShortcuts } from './lib/use-global-shortcuts'
 import { OPEN_ACCOUNT_SETTINGS_EVENT, type OpenAccountSettingsTab } from './lib/open-account-settings'
 import { useAppModeStore } from './stores/app-mode'
+import { subscribeConnectivityFromMain } from './stores/connectivity'
 
 const HomeDashboard = lazy(async () => {
   const m = await import('./app/home/HomeDashboard')
@@ -109,6 +110,10 @@ export function App(): JSX.Element {
   }, [initialize, initMail])
 
   useGlobalShortcuts()
+
+  useEffect(() => {
+    return subscribeConnectivityFromMain()
+  }, [])
 
   useEffect(() => {
     if (accounts.length > 0) {

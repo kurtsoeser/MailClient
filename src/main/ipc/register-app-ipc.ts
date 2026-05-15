@@ -1,11 +1,13 @@
 import { ipcMain, app, BrowserWindow, Notification } from 'electron'
-import { IPC } from '@shared/types'
+import { IPC, type AppConnectivityState } from '@shared/types'
 import { updateConfig } from '../config'
 import { normalizeExternalOpenUrl, openExternalDeduped } from '../open-external'
+import { getAppConnectivity } from '../network-status'
 
 export function registerAppIpc(): void {
   ipcMain.handle(IPC.app.getVersion, () => app.getVersion())
   ipcMain.handle(IPC.app.getPlatform, () => process.platform)
+  ipcMain.handle(IPC.app.getConnectivity, (): AppConnectivityState => getAppConnectivity())
 
   ipcMain.handle(IPC.app.setLaunchOnLogin, async (_event, enabled: boolean): Promise<void> => {
     await updateConfig({ launchOnLogin: enabled })

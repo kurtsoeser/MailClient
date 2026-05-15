@@ -1,5 +1,6 @@
 import { runBackgroundPoll } from './sync-runner'
 import { wakeDueSnoozes } from './snooze'
+import { isAppOnline } from './network-status'
 
 const POLL_INTERVAL_MS = 60_000
 
@@ -31,15 +32,17 @@ async function tick(): Promise<void> {
       console.warn('[snooze] wake-tick error', e)
     }
 
-    try {
-      const { processScheduledComposeQueue } = await import('./compose-scheduled-runner')
-      await processScheduledComposeQueue()
-    } catch (e) {
-      console.warn('[compose-scheduled] tick error', e)
-    }
+    if (isAppOnline()) {
+      try {
+        const { processScheduledComposeQueue } = await import('./compose-scheduled-runner')
+        await processScheduledComposeQueue()
+      } catch (e) {
+        console.warn('[compose-scheduled] tick error', e)
+      }
 
-    const extra = activeFolderId != null ? [activeFolderId] : []
-    await runBackgroundPoll(extra)
+      const extra = activeFolderId != null ? [activeFolderId] : []
+      await runBackgroundPoll(extra)
+    }
   } catch (e) {
     console.warn('[mail-poll] tick error', e)
   } finally {

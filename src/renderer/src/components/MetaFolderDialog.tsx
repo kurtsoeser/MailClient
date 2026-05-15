@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { X, Loader2, AlertCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { MetaFolderExcRowState, MetaFolderUiPreset } from '@/components/meta-folder-ui-types'
@@ -8,8 +8,14 @@ import type {
   MailFolder,
   MetaFolderCriteria,
   MetaFolderCreateInput,
-  MetaFolderExceptionClause
+  MetaFolderExceptionClause,
+  MetaFolderSummary,
+  MetaFolderUpdateInput
 } from '@shared/types'
+
+function compactNonEmptyLines(lines: string[]): string[] {
+  return lines.map((l) => l.trim()).filter((l) => l.length > 0)
+}
 
 function newExcRow(): MetaFolderExcRowState {
   return {
@@ -53,48 +59,132 @@ function validateExceptionRows(rows: MetaFolderExcRowState[]): string | null {
   return null
 }
 
+function criteriaToFullTextLines(c: MetaFolderCriteria): string[] {
+  const lines: string[] = []
+  const t0 = c.textQuery?.trim()
+  if (t0) lines.push(t0)
+  for (const x of c.textQueryOrAlternatives ?? []) {
+    if (typeof x === 'string' && x.trim().length > 0) lines.push(x.trim())
+  }
+  return lines.length > 0 ? lines : ['']
+}
+
+function criteriaToFromLines(c: MetaFolderCriteria): string[] {
+  const lines: string[] = []
+  const f0 = c.fromContains?.trim()
+  if (f0) lines.push(f0)
+  for (const x of c.fromContainsOrAlternatives ?? []) {
+    if (typeof x === 'string' && x.trim().length > 0) lines.push(x.trim())
+  }
+  return lines.length > 0 ? lines : ['']
+}
+
+function clauseToExcRow(cl: MetaFolderExceptionClause): MetaFolderExcRowState {
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    textQuery: cl.textQuery?.trim() ?? '',
+    unread: cl.unreadOnly === true,
+    flagged: cl.flaggedOnly === true,
+    attach: cl.hasAttachmentsOnly === true,
+    from: cl.fromContains?.trim() ?? ''
+  }
+}
+
+function detectPresetFromCriteria(c: MetaFolderCriteria): MetaFolderUiPreset {
+  const hasText =
+    Boolean(c.textQuery?.trim()) ||
+    (c.textQueryOrAlternatives?.some((x) => typeof x === 'string' && x.trim().length > 0) ?? false)
+  const hasFrom =
+    Boolean(c.fromContains?.trim()) ||
+    (c.fromContainsOrAlternatives?.some((x) => typeof x === 'string' && x.trim().length > 0) ?? false)
+  const hasScope = (c.scopeFolderIds?.length ?? 0) > 0
+  const nBool = (c.unreadOnly ? 1 : 0) + (c.flaggedOnly ? 1 : 0) + (c.hasAttachmentsOnly ? 1 : 0)
+
+  if (nBool === 1 && !hasText && !hasFrom && !hasScope) {
+    if (c.unreadOnly) return 'unread'
+    if (c.flaggedOnly) return 'flagged'
+    if (c.hasAttachmentsOnly) return 'attachments'
+  }
+  if (hasText && !hasFrom && nBool === 0 && !hasScope) return 'fulltext'
+  return 'custom'
+}
+
 interface Props {
   open: boolean
+  /** Bearbeitungsmodus; `null` = neuer Meta-Ordner. */
+  editing: MetaFolderSummary | null
   accounts: ConnectedAccount[]
   foldersByAccount: Record<string, MailFolder[]>
   onClose: () => void
   onCreate: (input: MetaFolderCreateInput) => Promise<void>
+  onUpdate: (input: MetaFolderUpdateInput) => Promise<void>
 }
 
 function buildCriteria(
   preset: MetaFolderUiPreset,
-  fullText: string,
+  fullTextLines: string[],
   customUnread: boolean,
   customFlagged: boolean,
   customAttach: boolean,
-  customFrom: string,
+  fromLines: string[],
   useScope: boolean,
   scopeFolderIds: number[]
 ): MetaFolderCriteria {
+  const compact = compactNonEmptyLines(fullTextLines)
+  const fromCompact = compactNonEmptyLines(fromLines)
   if (preset === 'unread') return { unreadOnly: true }
   if (preset === 'flagged') return { flaggedOnly: true }
   if (preset === 'attachments') return { hasAttachmentsOnly: true }
-  if (preset === 'fulltext') return { textQuery: fullText.trim() }
+  if (preset === 'fulltext') {
+    const c: MetaFolderCriteria = {}
+    if (compact[0]) c.textQuery = compact[0]
+    if (compact.length > 1) c.textQueryOrAlternatives = compact.slice(1)
+    return c
+  }
   const c: MetaFolderCriteria = {}
   if (customUnread) c.unreadOnly = true
   if (customFlagged) c.flaggedOnly = true
   if (customAttach) c.hasAttachmentsOnly = true
-  const t = fullText.trim()
-  if (t.length > 0) c.textQuery = t
-  const f = customFrom.trim()
-  if (f.length >= 2) c.fromContains = f
+  if (compact[0]) c.textQuery = compact[0]
+  if (compact.length > 1) c.textQueryOrAlternatives = compact.slice(1)
+  if (fromCompact[0]) c.fromContains = fromCompact[0]
+  if (fromCompact.length > 1) c.fromContainsOrAlternatives = fromCompact.slice(1)
   if (useScope && scopeFolderIds.length > 0) c.scopeFolderIds = scopeFolderIds
   return c
+}
+
+function fullTextLinesValidationError(lines: string[]): string | null {
+  for (const raw of lines) {
+    const t = raw.trim()
+    if (t.length === 1) return 'Volltext: pro Zeile mindestens zwei Zeichen (oder Zeile leeren).'
+  }
+  return null
+}
+
+function fullTextLinesHaveFilter(lines: string[]): boolean {
+  return compactNonEmptyLines(lines).some((l) => l.length >= 2)
+}
+
+function fromLinesValidationError(lines: string[]): string | null {
+  for (const raw of lines) {
+    const t = raw.trim()
+    if (t.length === 1) return 'Absender: pro Zeile mindestens zwei Zeichen (oder Zeile leeren).'
+  }
+  return null
+}
+
+function fromLinesHaveFilter(lines: string[]): boolean {
+  return compactNonEmptyLines(lines).some((l) => l.length >= 2)
 }
 
 function localValidate(
   name: string,
   preset: MetaFolderUiPreset,
-  fullText: string,
+  fullTextLines: string[],
   customUnread: boolean,
   customFlagged: boolean,
   customAttach: boolean,
-  customFrom: string,
+  fromLines: string[],
   useScope: boolean,
   scopeFolderIds: number[],
   exceptionRows: MetaFolderExcRowState[]
@@ -104,19 +194,23 @@ function localValidate(
   if (useScope && scopeFolderIds.length === 0) {
     return 'Ordnerfilter: mindestens einen Ordner auswaehlen oder die Option deaktivieren.'
   }
-  if (preset === 'fulltext' && fullText.trim().length < 2) {
-    return 'Volltext: mindestens zwei Zeichen eingeben.'
+  const ftsLineErr = fullTextLinesValidationError(fullTextLines)
+  if (ftsLineErr) return ftsLineErr
+  const fromLineErr = fromLinesValidationError(fromLines)
+  if (fromLineErr) return fromLineErr
+  if (preset === 'fulltext' && !fullTextLinesHaveFilter(fullTextLines)) {
+    return 'Volltext: mindestens eine Zeile mit mindestens zwei Zeichen.'
   }
   const exErr = validateExceptionRows(exceptionRows)
   if (exErr) return exErr
   if (preset === 'custom') {
     const c = buildCriteria(
       preset,
-      fullText,
+      fullTextLines,
       customUnread,
       customFlagged,
       customAttach,
-      customFrom,
+      fromLines,
       useScope,
       scopeFolderIds
     )
@@ -124,8 +218,8 @@ function localValidate(
       !!c.unreadOnly ||
       !!c.flaggedOnly ||
       !!c.hasAttachmentsOnly ||
-      (c.textQuery?.trim().length ?? 0) >= 2 ||
-      (c.fromContains?.trim().length ?? 0) >= 2 ||
+      fullTextLinesHaveFilter(fullTextLines) ||
+      fromLinesHaveFilter(fromLines) ||
       (c.scopeFolderIds?.length ?? 0) > 0
     if (!has) return 'Benutzerdefiniert: mindestens einen Filter setzen.'
   }
@@ -134,18 +228,21 @@ function localValidate(
 
 export function MetaFolderDialog({
   open,
+  editing,
   accounts,
   foldersByAccount,
   onClose,
-  onCreate
+  onCreate,
+  onUpdate
 }: Props): JSX.Element | null {
+  const isEdit = editing != null
   const [name, setName] = useState('')
   const [preset, setPreset] = useState<MetaFolderUiPreset>('unread')
-  const [fullText, setFullText] = useState('')
+  const [fullTextLines, setFullTextLines] = useState<string[]>([''])
   const [customUnread, setCustomUnread] = useState(false)
   const [customFlagged, setCustomFlagged] = useState(false)
   const [customAttach, setCustomAttach] = useState(false)
-  const [customFrom, setCustomFrom] = useState('')
+  const [fromLines, setFromLines] = useState<string[]>([''])
   const [useScope, setUseScope] = useState(false)
   const [scopeFolderIds, setScopeFolderIds] = useState<number[]>([])
   const [matchCombine, setMatchCombine] = useState<'and' | 'or'>('and')
@@ -155,20 +252,38 @@ export function MetaFolderDialog({
 
   useEffect(() => {
     if (!open) return
+    if (editing) {
+      setName(editing.name)
+      const c = editing.criteria
+      setPreset(detectPresetFromCriteria(c))
+      setFullTextLines(criteriaToFullTextLines(c))
+      setFromLines(criteriaToFromLines(c))
+      setCustomUnread(c.unreadOnly === true)
+      setCustomFlagged(c.flaggedOnly === true)
+      setCustomAttach(c.hasAttachmentsOnly === true)
+      const scope = (c.scopeFolderIds ?? []).filter((id) => Number.isFinite(id) && id > 0)
+      setUseScope(scope.length > 0)
+      setScopeFolderIds(scope)
+      setMatchCombine(c.matchOp === 'or' ? 'or' : 'and')
+      setExceptionRows((c.exceptions ?? []).map(clauseToExcRow))
+      setError(null)
+      setBusy(false)
+      return
+    }
     setName('')
     setPreset('unread')
-    setFullText('')
+    setFullTextLines([''])
     setCustomUnread(false)
     setCustomFlagged(false)
     setCustomAttach(false)
-    setCustomFrom('')
+    setFromLines([''])
     setUseScope(false)
     setScopeFolderIds([])
     setMatchCombine('and')
     setExceptionRows([])
     setError(null)
     setBusy(false)
-  }, [open])
+  }, [open, editing?.id, editing?.updatedAt])
 
   const folderOptions = useMemo(() => {
     const out: Array<{ id: number; label: string }> = []
@@ -196,8 +311,8 @@ export function MetaFolderDialog({
         customUnread,
         customFlagged,
         customAttach,
-        fullText,
-        customFrom,
+        fullTextLines,
+        fromLines,
         exceptionRows
       }),
     [
@@ -209,11 +324,49 @@ export function MetaFolderDialog({
       customUnread,
       customFlagged,
       customAttach,
-      fullText,
-      customFrom,
+      fullTextLines,
+      fromLines,
       exceptionRows
     ]
   )
+
+  function changeFullTextLine(index: number, value: string): void {
+    setFullTextLines((prev) => prev.map((l, i) => (i === index ? value : l)))
+  }
+
+  function addFullTextLine(): void {
+    setFullTextLines((prev) => [...prev, ''])
+  }
+
+  function removeFullTextLine(index: number): void {
+    setFullTextLines((prev) => {
+      if (prev.length <= 1) return ['']
+      return prev.filter((_, i) => i !== index)
+    })
+  }
+
+  function clearAllFullTextLines(): void {
+    setFullTextLines([''])
+  }
+
+  function changeFromLine(index: number, value: string): void {
+    setFromLines((prev) => prev.map((l, i) => (i === index ? value : l)))
+  }
+
+  function addFromLine(): void {
+    setFromLines((prev) => [...prev, ''])
+  }
+
+  function removeFromLine(index: number): void {
+    setFromLines((prev) => {
+      if (prev.length <= 1) return ['']
+      return prev.filter((_, i) => i !== index)
+    })
+  }
+
+  function clearAllFromLines(): void {
+    setFromLines([''])
+  }
 
   if (!open) return null
 
@@ -221,11 +374,11 @@ export function MetaFolderDialog({
     const err = localValidate(
       name,
       preset,
-      fullText,
+      fullTextLines,
       customUnread,
       customFlagged,
       customAttach,
-      customFrom,
+      fromLines,
       useScope,
       scopeFolderIds,
       exceptionRows
@@ -236,11 +389,11 @@ export function MetaFolderDialog({
     }
     const criteriaRaw = buildCriteria(
       preset,
-      fullText,
+      fullTextLines,
       customUnread,
       customFlagged,
       customAttach,
-      customFrom,
+      fromLines,
       useScope,
       scopeFolderIds
     )
@@ -256,7 +409,11 @@ export function MetaFolderDialog({
     setBusy(true)
     setError(null)
     try {
-      await onCreate({ name: name.trim(), criteria })
+      if (isEdit && editing) {
+        await onUpdate({ id: editing.id, name: name.trim(), criteria })
+      } else {
+        await onCreate({ name: name.trim(), criteria })
+      }
       onClose()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -280,7 +437,7 @@ export function MetaFolderDialog({
       >
         <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-3.5">
           <div>
-            <h2 className="text-sm font-semibold">Neuer Meta-Ordner</h2>
+            <h2 className="text-sm font-semibold">{isEdit ? 'Meta-Ordner bearbeiten' : 'Neuer Meta-Ordner'}</h2>
             <p className="mt-0.5 text-[11px] text-muted-foreground">
               Virtuelle Ansicht ueber alle Konten — Mails werden nicht verschoben.
             </p>
@@ -335,14 +492,46 @@ export function MetaFolderDialog({
 
           {preset === 'fulltext' && (
             <div>
-              <label className="mb-1 block text-[11px] font-medium text-muted-foreground">Suchbegriff</label>
-              <input
-                type="text"
-                value={fullText}
-                onChange={(e): void => setFullText(e.target.value)}
-                placeholder="z. B. Rechnung Projektname"
-                className="w-full rounded-md border border-input bg-background px-2.5 py-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              />
+              <label className="mb-1 block text-[11px] font-medium text-muted-foreground">
+                Suchbegriff(e) — Zeilen per ODER verknuepft
+              </label>
+              <div className="space-y-2 rounded-md border border-input bg-background p-2">
+                {fullTextLines.map((line, idx) => (
+                  <Fragment key={idx}>
+                    {idx > 0 && (
+                      <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        oder
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={line}
+                        onChange={(e): void => changeFullTextLine(idx, e.target.value)}
+                        placeholder={idx === 0 ? 'z. B. Pädagogische Hochschule' : 'Alternative…'}
+                        className="min-w-0 flex-1 rounded-md border border-input bg-background px-2.5 py-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                      />
+                      {fullTextLines.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={(): void => removeFullTextLine(idx)}
+                          className="shrink-0 rounded p-2 text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
+                          aria-label="Zeile entfernen"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  </Fragment>
+                ))}
+                <button
+                  type="button"
+                  onClick={addFullTextLine}
+                  className="w-full rounded border border-dashed border-primary/40 py-1.5 text-[11px] font-medium text-primary hover:bg-primary/10"
+                >
+                  + Weitere Volltext-Zeile (ODER)
+                </button>
+              </div>
             </div>
           )}
 
@@ -392,15 +581,21 @@ export function MetaFolderDialog({
             customUnread={customUnread}
             customFlagged={customFlagged}
             customAttach={customAttach}
-            fullText={fullText}
-            customFrom={customFrom}
+            fullTextLines={fullTextLines}
+            fromLines={fromLines}
             exceptionRows={exceptionRows}
             onMatchCombine={setMatchCombine}
             onSetUnread={setCustomUnread}
             onSetFlagged={setCustomFlagged}
             onSetAttach={setCustomAttach}
-            onFullText={setFullText}
-            onCustomFrom={setCustomFrom}
+            onChangeFullTextLine={changeFullTextLine}
+            onAddFullTextLine={addFullTextLine}
+            onRemoveFullTextLine={removeFullTextLine}
+            onClearAllFullTextLines={clearAllFullTextLines}
+            onChangeFromLine={changeFromLine}
+            onAddFromLine={addFromLine}
+            onRemoveFromLine={removeFromLine}
+            onClearAllFromLines={clearAllFromLines}
             onUpdateExc={(id, patch): void =>
               setExceptionRows((prev) => prev.map((x) => (x.id === id ? { ...x, ...patch } : x)))
             }
@@ -439,7 +634,7 @@ export function MetaFolderDialog({
             )}
           >
             {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-            Anlegen
+            {isEdit ? 'Speichern' : 'Anlegen'}
           </button>
         </div>
       </div>

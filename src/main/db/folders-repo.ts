@@ -217,3 +217,14 @@ export function setFolderFavoriteLocal(id: number, value: boolean): void {
   const db = getDb()
   db.prepare('UPDATE folders SET is_favorite = ? WHERE id = ?').run(value ? 1 : 0, id)
 }
+
+/** Fuer Hintergrund-Poll (Stufe-1-Offline): favorisierte Ordner pro Konto, ohne Duplikate zur Reihenfolge. */
+export function listFavoriteFolderIdsForAccount(accountId: string): number[] {
+  const db = getDb()
+  const rows = db
+    .prepare<[string], { id: number }>(
+      'SELECT id FROM folders WHERE account_id = ? AND is_favorite = 1 ORDER BY id ASC'
+    )
+    .all(accountId)
+  return rows.map((r) => r.id)
+}

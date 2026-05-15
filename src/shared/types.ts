@@ -170,6 +170,69 @@ export interface SettingsBackupMailRuleSnapshot {
 export interface SettingsBackupWorkflowBoardSnapshot {
   id: number
   columns: WorkflowColumn[]
+  /** Ab Export mit App-Version die Boards voll mitschreibt; fehlt bei aelteren Dateien. */
+  name?: string
+  sortOrder?: number
+}
+
+/** QuickStep-Zeile fuer Sicherung (IDs bleiben erhalten, Workflow-Spalten verweisen darauf). */
+export interface SettingsBackupQuickStepSnapshot {
+  id: number
+  name: string
+  icon: string | null
+  shortcut: string | null
+  actionsJson: string
+  sortOrder: number
+  enabled: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SettingsBackupTemplateSnapshot {
+  id: number
+  name: string
+  bodyHtml: string
+  bodyText: string | null
+  variablesJson: string | null
+  shortcut: string | null
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SettingsBackupMetaFolderSnapshot {
+  id: number
+  name: string
+  sortOrder: number
+  criteriaJson: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** Nur ausstehende geplante Sends; beim Import werden bestehende Pending-Eintraege ersetzt. */
+export interface SettingsBackupComposeScheduledSnapshot {
+  payloadJson: string
+  sendAtIso: string
+}
+
+/**
+ * Notiz exportiert mit stabilen Schluesseln (Mail: Konto + Remote-Message-Id),
+ * damit sie nach Import wieder an lokale message_id angebunden werden kann.
+ */
+export interface SettingsBackupUserNoteSnapshot {
+  kind: 'mail' | 'calendar' | 'standalone'
+  mailAccountId?: string | null
+  mailRemoteId?: string | null
+  accountId?: string | null
+  calendarSource?: 'microsoft' | 'google' | null
+  calendarRemoteId?: string | null
+  eventRemoteId?: string | null
+  title: string | null
+  body: string
+  createdAt: string
+  updatedAt: string
+  eventTitleSnapshot?: string | null
+  eventStartIsoSnapshot?: string | null
 }
 
 export interface SettingsBackupDatabaseExtras {
@@ -181,11 +244,18 @@ export interface SettingsBackupDatabaseExtras {
     wipFolderRemoteId: string | null
     doneFolderRemoteId: string | null
   }[]
+  /** Fehlt bei aelteren Exporten: QuickSteps bleiben in der DB unveraendert. */
+  quickSteps?: SettingsBackupQuickStepSnapshot[]
+  mailTemplates?: SettingsBackupTemplateSnapshot[]
+  metaFolders?: SettingsBackupMetaFolderSnapshot[]
+  composeScheduledPending?: SettingsBackupComposeScheduledSnapshot[]
+  userNotes?: SettingsBackupUserNoteSnapshot[]
 }
 
 /**
  * Lokale Einstellungs-Sicherung (ohne Mails, ohne Konten-Token).
- * Enthaelt App-Config, Renderer-localStorage, Mail-Regeln, Workflow-Board-Spalten, VIP und Triage-Ordner-Zuordnungen.
+ * Enthaelt App-Config, Renderer-localStorage, Mail-Regeln, Workflow (Boards + QuickSteps),
+ * Vorlagen, Meta-Ordner, VIP, Triage-Ordner, geplanten Versand (pending) und Kernnotizen.
  */
 export interface SettingsBackupPayload {
   formatVersion: typeof SETTINGS_BACKUP_FORMAT_VERSION
@@ -294,6 +364,13 @@ export interface CalendarListEventsInput {
    * Wenn nicht gesetzt: alle Kalender aller verbundenen Konten wie zuvor.
    */
   includeCalendars?: CalendarIncludeCalendarRef[] | null
+}
+
+/** Argumente fuer `calendar.listCalendars` (IPC `calendar:list-calendars`). */
+export interface CalendarListCalendarsInput {
+  accountId: string
+  /** Wenn true: Cache ignorieren und neu von der API laden (nur Google; Microsoft unveraendert). */
+  forceRefresh?: boolean
 }
 
 /** Serienfrequenz beim Anlegen (UI + API-Mapping). */
@@ -713,8 +790,13 @@ export interface MetaFolderExceptionClause {
 /**
  * Filter fuer Meta-Ordner (virtuelle Ansicht, alle Konten, keine Verschiebung).
  *
- * - `matchOp`: Verknuepfung der Positiv-Bedingungen aus den Feldern
- *   `textQuery` / `unreadOnly` / `flaggedOnly` / `hasAttachmentsOnly` / `fromContains`.
+ * - Volltext: `textQuery` und jede Zeile in `textQueryOrAlternatives` bilden eine eigene FTS-Suche;
+ *   Treffer, wenn mindestens eine Zeile passt (ODER). Innerhalb einer Zeile: Woerter per Leerzeichen
+ *   wie bei der globalen Suche (UND).
+ * - Absender: `fromContains` und `fromContainsOrAlternatives` bilden eine ODER-Gruppe (eine Zeile reicht).
+ * - `matchOp`: Verknuepfung der Positiv-Bedingungen aus der **Volltext-ODER-Gruppe** (falls gesetzt),
+ *   der **Absender-ODER-Gruppe** (falls gesetzt) und den Feldern `unreadOnly` / `flaggedOnly` /
+ *   `hasAttachmentsOnly`.
  *   Standard ist `and` (kompatibel mit aelteren Eintraegen ohne Feld).
  * - `exceptions`: Mails, die mindestens eine Ausnahme-Zeile voll erfuellen, werden ausgeschlossen:
  *   `AND NOT ( (Zeile0) OR (Zeile1) OR ... )`, innerhalb einer Zeile UND zwischen den Feldern.
@@ -722,11 +804,20 @@ export interface MetaFolderExceptionClause {
 export interface MetaFolderCriteria {
   /** FTS-Prefixsuche (Betreff/Absender/Body), gleiche Token-Logik wie globale Suche. */
   textQuery?: string
+  /**
+   * Weitere Volltextzeilen; zusammen mit `textQuery` per ODER verknuepft (eine Zeile reicht).
+   * Jede Zeile einzeln wie `textQuery` tokenisiert.
+   */
+  textQueryOrAlternatives?: string[]
   unreadOnly?: boolean
   flaggedOnly?: boolean
   hasAttachmentsOnly?: boolean
   /** Teilstring in Absender-Adresse oder -Name (case-insensitive). */
   fromContains?: string
+  /**
+   * Weitere Absender-Teilstrings; zusammen mit `fromContains` per ODER (eine Zeile reicht).
+   */
+  fromContainsOrAlternatives?: string[]
   /**
    * Wenn nicht leer: nur diese Ordner-IDs (ueber alle Konten).
    * Wenn leer/weggelassen: alle synchronisierten Ordner ausser Papierkorb und Junk.
@@ -869,10 +960,15 @@ export interface UserNoteListFilters {
   limit?: number
 }
 
+export interface AppConnectivityState {
+  online: boolean
+}
+
 export const IPC = {
   app: {
     getVersion: 'app:get-version',
     getPlatform: 'app:get-platform',
+    getConnectivity: 'app:get-connectivity',
     setLaunchOnLogin: 'app:set-launch-on-login',
     showTestNotification: 'app:show-test-notification',
     openExternal: 'app:open-external'
@@ -988,7 +1084,13 @@ export const IPC = {
     send: 'compose:send',
     saveDraft: 'compose:save-draft',
     recipientSuggestions: 'compose:recipient-suggestions',
-    listDriveExplorer: 'compose:list-drive-explorer'
+    listDriveExplorer: 'compose:list-drive-explorer',
+    listDriveExplorerFavorites: 'compose:list-drive-explorer-favorites',
+    addDriveExplorerFavorite: 'compose:add-drive-explorer-favorite',
+    removeDriveExplorerFavorite: 'compose:remove-drive-explorer-favorite',
+    updateDriveExplorerFavoriteCache: 'compose:update-drive-explorer-favorite-cache',
+    renameDriveExplorerFavorite: 'compose:rename-drive-explorer-favorite',
+    reorderDriveExplorerFavorites: 'compose:reorder-drive-explorer-favorites'
   },
   calendar: {
     listEvents: 'calendar:list-events',
@@ -1154,7 +1256,7 @@ export interface ComposeRecipientSuggestion {
 }
 
 /** OneDrive/SharePoint-Explorer: Bereich und optional aktueller Ordner. */
-export type ComposeDriveExplorerScope = 'recent' | 'myfiles' | 'shared'
+export type ComposeDriveExplorerScope = 'recent' | 'myfiles' | 'shared' | 'sharepoint'
 
 export interface ComposeListDriveExplorerInput {
   accountId: string
@@ -1163,6 +1265,11 @@ export interface ComposeListDriveExplorerInput {
   folderId?: string | null
   /** Bei `shared` (und Unterordnern): Ziel-Drive-ID aus Graph `parentReference.driveId`. */
   folderDriveId?: string | null
+  /**
+   * Nur `sharepoint`: Graph-Site-ID, um Dokumentbibliotheken (`/sites/{id}/drives`) zu listen.
+   * Fehlt/leer = Uebersicht (verfolgte Sites + Team-Websites).
+   */
+  siteId?: string | null
 }
 
 /** Eintrag im OneDrive-Explorer (Datei oder Ordner). */
@@ -1175,6 +1282,61 @@ export interface ComposeDriveExplorerEntry {
   isFolder: boolean
   /** Nur bei geteilten Drives fuer Navigation zu Kindern. */
   driveId?: string | null
+  /** Nur SharePoint-Website-Zeilen: Navigation zur Bibliotheken-Liste. */
+  siteId?: string | null
+}
+
+/** Brotkrumen-Pfad im OneDrive/SharePoint-Explorer (Favoriten + Navigation). */
+export interface ComposeDriveExplorerNavCrumb {
+  id: string | null
+  name: string
+  driveId?: string | null
+  siteId?: string | null
+}
+
+/** Lokal gespeicherter Favorit (userData), optional mit Eintrags-Cache. */
+export interface ComposeDriveExplorerFavorite {
+  id: string
+  accountId: string
+  label: string
+  scope: ComposeDriveExplorerScope
+  crumbs: ComposeDriveExplorerNavCrumb[]
+  savedAt: string
+  /** Reihenfolge in der Sidebar (kleiner = weiter oben). Fehlt bei Altbestand -> Fallback `savedAt`. */
+  sortOrder?: number
+  cachedEntries?: ComposeDriveExplorerEntry[] | null
+  cachedAt?: string | null
+}
+
+export interface ComposeAddDriveExplorerFavoriteInput {
+  accountId: string
+  scope: ComposeDriveExplorerScope
+  crumbs: ComposeDriveExplorerNavCrumb[]
+  label?: string | null
+  cachedEntries?: ComposeDriveExplorerEntry[] | null
+}
+
+export interface ComposeRemoveDriveExplorerFavoriteInput {
+  accountId: string
+  id: string
+}
+
+export interface ComposeUpdateDriveExplorerFavoriteCacheInput {
+  accountId: string
+  id: string
+  entries: ComposeDriveExplorerEntry[]
+}
+
+export interface ComposeRenameDriveExplorerFavoriteInput {
+  accountId: string
+  id: string
+  label: string
+}
+
+export interface ComposeReorderDriveExplorerFavoritesInput {
+  accountId: string
+  /** IDs in gewuenschter Reihenfolge (oben -> unten), muss exakt den Favoriten dieses Kontos entsprechen. */
+  orderedIds: string[]
 }
 
 export interface ComposeDriveItemRow {
@@ -1259,3 +1421,6 @@ export interface SnoozedMessageItem extends MailListItem {
   snoozedFromFolderId: number | null
   snoozedFromFolderName: string | null
 }
+
+/** Einheitliche Fehlermeldung bei fehlender Netzwerkverbindung (Main: `assertAppOnline()`). */
+export const OFFLINE_APP_ERROR = 'Keine Netzwerkverbindung.'

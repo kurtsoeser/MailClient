@@ -12,6 +12,7 @@ import {
   type CalendarPatchScheduleInput,
   type CalendarPatchCalendarColorInput,
   type CalendarGraphCalendarRow,
+  type CalendarListCalendarsInput,
   type CalendarListEventsInput,
   type CalendarM365GroupCalendarsPage
 } from '@shared/types'
@@ -30,12 +31,14 @@ import {
   patchCalendarEventCategories,
   buildCalendarSuggestionFromMessage
 } from '../calendar-service'
+import { assertAppOnline } from '../network-status'
 
 export function registerCalendarIpc(): void {
   ipcMain.removeHandler(IPC.calendar.listEvents)
   ipcMain.handle(
     IPC.calendar.listEvents,
     async (_event, args: CalendarListEventsInput): Promise<CalendarEventView[]> => {
+      assertAppOnline()
       const include = args.includeCalendars
       return listMergedCalendarEvents(args.startIso, args.endIso, {
         focus: args.focusCalendar ?? undefined,
@@ -46,8 +49,9 @@ export function registerCalendarIpc(): void {
   ipcMain.removeHandler(IPC.calendar.listCalendars)
   ipcMain.handle(
     IPC.calendar.listCalendars,
-    async (_event, args: { accountId: string }): Promise<CalendarGraphCalendarRow[]> => {
-      return listMicrosoftCalendars(args.accountId)
+    async (_event, args: CalendarListCalendarsInput): Promise<CalendarGraphCalendarRow[]> => {
+      assertAppOnline()
+      return listMicrosoftCalendars(args.accountId, { forceRefresh: args.forceRefresh === true })
     }
   )
   ipcMain.removeHandler(IPC.calendar.listMicrosoft365GroupCalendars)
@@ -57,6 +61,7 @@ export function registerCalendarIpc(): void {
       _event,
       args: { accountId: string; offset?: number; limit?: number }
     ): Promise<CalendarM365GroupCalendarsPage> => {
+      assertAppOnline()
       return listMicrosoft365GroupCalendars(args.accountId, {
         offset: args.offset,
         limit: args.limit
@@ -67,6 +72,7 @@ export function registerCalendarIpc(): void {
   ipcMain.handle(
     IPC.calendar.patchCalendarColor,
     async (_event, args: CalendarPatchCalendarColorInput): Promise<void> => {
+      assertAppOnline()
       if (!args?.accountId?.trim() || !args.graphCalendarId?.trim() || !args.color?.trim()) {
         throw new Error('Ungueltige Parameter fuer Kalenderfarbe.')
       }
@@ -97,6 +103,7 @@ export function registerCalendarIpc(): void {
         attendeeEmails?: string[] | null
       }
     ) => {
+      assertAppOnline()
       return createTeamsMeetingForAccount(args.accountId, {
         subject: args.subject,
         startIso: args.startIso,
@@ -118,12 +125,14 @@ export function registerCalendarIpc(): void {
   ipcMain.handle(
     IPC.calendar.createEvent,
     async (_event, input: CalendarSaveEventInput): Promise<CalendarSaveEventResult> => {
+      assertAppOnline()
       return createSimpleCalendarEventForAccount(input)
     }
   )
 
   ipcMain.removeHandler(IPC.calendar.updateEvent)
   ipcMain.handle(IPC.calendar.updateEvent, async (_event, input: CalendarUpdateEventInput): Promise<void> => {
+    assertAppOnline()
     await updateCalendarEventForAccount(input)
   })
 
@@ -131,6 +140,7 @@ export function registerCalendarIpc(): void {
   ipcMain.handle(
     IPC.calendar.getEvent,
     async (_event, input: CalendarGetEventInput): Promise<CalendarGetEventResult> => {
+      assertAppOnline()
       if (!input?.accountId?.trim() || !input.graphEventId?.trim()) {
         throw new Error('Ungueltige Parameter fuer calendar:get-event.')
       }
@@ -144,6 +154,7 @@ export function registerCalendarIpc(): void {
 
   ipcMain.removeHandler(IPC.calendar.deleteEvent)
   ipcMain.handle(IPC.calendar.deleteEvent, async (_event, input: CalendarDeleteEventInput): Promise<void> => {
+    assertAppOnline()
     await deleteCalendarEventForAccount(input)
   })
 
@@ -151,6 +162,7 @@ export function registerCalendarIpc(): void {
   ipcMain.handle(
     IPC.calendar.patchEventSchedule,
     async (_event, input: CalendarPatchScheduleInput): Promise<void> => {
+      assertAppOnline()
       await patchCalendarEventScheduleForAccount(input)
     }
   )
@@ -162,6 +174,7 @@ export function registerCalendarIpc(): void {
       _event,
       args: { accountId: string; graphEventId: string; categories: string[]; graphCalendarId?: string | null }
     ): Promise<void> => {
+      assertAppOnline()
       await patchCalendarEventCategories(
         args.accountId,
         args.graphEventId,
