@@ -11,9 +11,9 @@ export async function openExternalUrl(url: string): Promise<void> {
   if (raw.startsWith('//')) {
     raw = `https:${raw}`
   }
-  const allowed = /^(https?:\/\/|mailto:|tel:|msteams:\/\/|ms-teams:\/\/)/i
+  const allowed = /^(https?:\/\/|notion:\/\/|mailto:|tel:|msteams:\/\/|ms-teams:\/\/)/i
   if (!allowed.test(raw)) {
-    throw new Error('Nur http(s)-, mailto-, tel- oder Teams-Links duerfen geoeffnet werden.')
+    throw new Error('Nur http(s)-, notion-, mailto-, tel- oder Teams-Links duerfen geoeffnet werden.')
   }
 
   const fn = window.mailClient?.app?.openExternal

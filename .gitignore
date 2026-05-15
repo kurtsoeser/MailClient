@@ -9,6 +9,9 @@ npm-install.log
 .env.*
 !.env.example
 
+# Lokale Cursor-Pläne (können versehentlich Secrets enthalten)
+.cursor/plans/
+
 .DS_Store
 Thumbs.db
 

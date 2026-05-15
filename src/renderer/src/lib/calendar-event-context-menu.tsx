@@ -1,8 +1,8 @@
-import { addDays, format, parseISO } from 'date-fns'
 import type { Locale } from 'date-fns'
 import type { TFunction } from 'i18next'
-import { Copy, ExternalLink, Files, Pencil, StickyNote, Tag, Trash2, Video } from 'lucide-react'
+import { Copy, ExternalLink, Files, Pencil, SquareArrowOutUpRight, StickyNote, Tag, Trash2, Video } from 'lucide-react'
 import type { CalendarEventView } from '@shared/types'
+import { formatCalendarEventClipboardText as formatCalendarEventClipboardTextShared } from '@shared/calendar-event-clipboard'
 import type { ContextMenuItem } from '@/components/ContextMenu'
 
 export function formatCalendarEventClipboardText(
@@ -11,50 +11,27 @@ export function formatCalendarEventClipboardText(
   locale: Locale,
   isDe: boolean
 ): string {
-  const title = ev.title?.trim() ? ev.title : t('calendar.eventPreview.noTitle')
-  const lines: string[] = [title]
-  const allDayPrefix = t('calendar.eventClipboard.allDayPrefix')
-  try {
-    if (ev.isAllDay) {
-      const s = parseISO(ev.startIso.length <= 10 ? `${ev.startIso}T12:00:00` : ev.startIso)
-      const endEx = parseISO(ev.endIso.length <= 10 ? `${ev.endIso}T12:00:00` : ev.endIso)
-      const last = addDays(endEx, -1)
-      if (format(s, 'yyyy-MM-dd') === format(last, 'yyyy-MM-dd')) {
-        lines.push(
-          `${allDayPrefix} ${format(s, isDe ? 'EEEE, d. MMMM yyyy' : 'EEEE, MMMM d, yyyy', { locale })}`
-        )
-      } else {
-        lines.push(
-          `${allDayPrefix} ${format(s, isDe ? 'd. MMM yyyy' : 'MMM d, yyyy', { locale })} – ${format(last, isDe ? 'd. MMM yyyy' : 'MMM d, yyyy', { locale })}`
-        )
-      }
-    } else {
-      const s = parseISO(ev.startIso)
-      const e = parseISO(ev.endIso)
-      if (isDe) {
-        lines.push(
-          `${format(s, 'EEEE, d. MMMM yyyy, HH:mm', { locale })} – ${format(e, 'HH:mm', { locale })} Uhr`
-        )
-      } else {
-        lines.push(
-          `${format(s, 'EEEE, MMMM d, yyyy, h:mm a', { locale })} – ${format(e, 'h:mm a', { locale })}`
-        )
-      }
-    }
-  } catch {
-    lines.push(`${ev.startIso} – ${ev.endIso}`)
-  }
-  if (ev.location?.trim()) lines.push(`${t('calendar.eventClipboard.location')} ${ev.location}`)
-  if (ev.organizer?.trim()) lines.push(`${t('calendar.eventClipboard.organizer')} ${ev.organizer}`)
-  if (ev.joinUrl?.trim()) lines.push(`${t('calendar.eventClipboard.teams')} ${ev.joinUrl}`)
-  else if (ev.webLink?.trim()) lines.push(`${t('calendar.eventClipboard.link')} ${ev.webLink}`)
-  return lines.join('\n')
+  return formatCalendarEventClipboardTextShared(
+    ev,
+    {
+      noTitle: t('calendar.eventPreview.noTitle'),
+      allDayPrefix: t('calendar.eventClipboard.allDayPrefix'),
+      location: t('calendar.eventClipboard.location'),
+      organizer: t('calendar.eventClipboard.organizer'),
+      teams: t('calendar.eventClipboard.teams'),
+      link: t('calendar.eventClipboard.link')
+    },
+    locale,
+    isDe
+  )
 }
 
 export interface CalendarEventContextHandlers {
   onEdit: () => void
   onDuplicate: () => void
   onOpenNote: () => void
+  onSendToNotion?: () => void
+  onSendToNotionAsNewPage?: () => void
   onCopyDetails: () => void
   onCopyWebLink: () => void
   onCopyJoinUrl: () => void
@@ -138,6 +115,30 @@ export function buildCalendarEventContextItems(
       disabled: !ev.graphEventId?.trim(),
       onSelect: h.onOpenNote
     },
+    ...(h.onSendToNotion || h.onSendToNotionAsNewPage
+      ? [
+          ...(h.onSendToNotion
+            ? [
+                {
+                  id: 'notion',
+                  label: t('notion.contextSend'),
+                  icon: SquareArrowOutUpRight,
+                  onSelect: h.onSendToNotion
+                }
+              ]
+            : []),
+          ...(h.onSendToNotionAsNewPage
+            ? [
+                {
+                  id: 'notion-new-page',
+                  label: t('notion.contextSendEventAsNewPage'),
+                  icon: SquareArrowOutUpRight,
+                  onSelect: h.onSendToNotionAsNewPage
+                }
+              ]
+            : [])
+        ]
+      : []),
     ...(extra?.categorySubmenu && extra.categorySubmenu.length > 0
       ? [
           { id: 'sep-cat', label: '', separator: true },

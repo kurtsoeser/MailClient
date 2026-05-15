@@ -80,6 +80,10 @@ export interface AppConfig {
    * Optional wenn PKCE ohne Geheimnis (Desktop-Client / verifizierte App); sonst fuer Refresh noetig.
    */
   googleClientSecret: string | null
+  /** Notion Public Integration — OAuth Client ID. */
+  notionClientId: string | null
+  /** Notion Public Integration — OAuth Client secret. */
+  notionClientSecret: string | null
   /**
    * Wie weit (Tage) zurueck synchronisiert wird. `null` = keine Begrenzung.
    * Bereits lokal vorhandene aeltere Mails bleiben erhalten.
@@ -964,6 +968,92 @@ export interface AppConnectivityState {
   online: boolean
 }
 
+export type NotionAuthMode = 'none' | 'oauth' | 'internal'
+
+export interface NotionConnectionStatus {
+  connected: boolean
+  authMode: NotionAuthMode
+  hasCredentials: boolean
+  workspaceName: string | null
+  workspaceIcon: string | null
+  ownerName: string | null
+  botId?: string
+  workspaceId?: string
+}
+
+export interface NotionSearchPageHit {
+  id: string
+  title: string
+  url: string | null
+  icon: string | null
+  kind: 'page' | 'database'
+}
+
+export interface NotionSavedDestination {
+  id: string
+  title: string
+  icon: string | null
+  kind: 'page' | 'database'
+  addedAt: string
+  lastUsedAt?: string
+}
+
+export interface NotionDestinationsConfig {
+  favorites: NotionSavedDestination[]
+  defaultMailPageId: string | null
+  defaultCalendarPageId: string | null
+  lastUsedPageId: string | null
+  /** Optional: neue Seiten werden als Unterseite hier angelegt (sonst Workspace oder Standard). */
+  newPageParentId: string | null
+}
+
+export interface NotionCreatePageInput {
+  title: string
+  parentPageId?: string | null
+  kind?: 'mail' | 'calendar'
+}
+
+export interface NotionCreatePageResult {
+  pageId: string
+  pageUrl: string
+}
+
+export interface NotionAppendResult {
+  pageId: string
+  pageUrl: string
+}
+
+export interface NotionAppendMailInput {
+  messageId: number
+  pageId?: string | null
+  webLink?: string | null
+}
+
+export interface NotionCreateMailPageInput {
+  messageId: number
+  title: string
+  parentPageId?: string | null
+  webLink?: string | null
+}
+
+export interface NotionCreateEventPageInput {
+  event: CalendarEventView
+  title: string
+  parentPageId?: string | null
+  localeCode?: 'de' | 'en'
+}
+
+/** Ergebnis des Ziel-Pickers: an bestehende Seite anhaengen oder neue Seite bereits befuellt. */
+export type NotionPickResult =
+  | { mode: 'append'; pageId: string }
+  | { mode: 'created'; pageId: string; pageUrl: string }
+
+export interface NotionAppendEventInput {
+  event: CalendarEventView
+  pageId?: string | null
+  localeCode?: 'de' | 'en'
+}
+
 export const IPC = {
   app: {
     getVersion: 'app:get-version',
@@ -982,7 +1072,8 @@ export const IPC = {
     setCalendarTimeZone: 'config:set-calendar-time-zone',
     setWeatherLocation: 'config:set-weather-location',
     setWorkflowMailFoldersIntroDismissed: 'config:set-workflow-mail-folders-intro-dismissed',
-    setFirstRunSetupCompleted: 'config:set-first-run-setup-completed'
+    setFirstRunSetupCompleted: 'config:set-first-run-setup-completed',
+    setNotionCredentials: 'config:set-notion-credentials'
   },
   auth: {
     addMicrosoft: 'auth:add-microsoft',
@@ -1156,6 +1247,22 @@ export const IPC = {
   weather: {
     geocode: 'weather:geocode',
     forecast: 'weather:forecast'
+  },
+  notion: {
+    getStatus: 'notion:get-status',
+    connect: 'notion:connect',
+    connectInternal: 'notion:connect-internal',
+    disconnect: 'notion:disconnect',
+    searchPages: 'notion:search-pages',
+    getDestinations: 'notion:get-destinations',
+    setDestinations: 'notion:set-destinations',
+    appendMail: 'notion:append-mail',
+    appendEvent: 'notion:append-event',
+    addFavorite: 'notion:add-favorite',
+    removeFavorite: 'notion:remove-favorite',
+    createPage: 'notion:create-page',
+    createMailPage: 'notion:create-mail-page',
+    createEventPage: 'notion:create-event-page'
   }
 } as const
 

@@ -26,6 +26,10 @@ import {
   buildMailCategorySubmenuItems,
   type MailContextHandlers
 } from '@/lib/mail-context-menu'
+import {
+  createMailSendAsNewNotionPageHandler,
+  createMailSendToNotionHandler
+} from '@/lib/notion-ui'
 import { MailMoveSubmenuPanel } from '@/components/MailMoveSubmenuPanel'
 import { MailDestinationFolderDialog } from '@/components/MailDestinationFolderDialog'
 import { ObjectNoteDialog, type ObjectNoteTarget } from '@/components/ObjectNoteEditor'
@@ -169,7 +173,9 @@ export function MailList(): JSX.Element {
       setWaitingForMessage,
       clearWaitingForMessage,
       openSnoozePicker,
-      refreshNow
+      refreshNow,
+      sendToNotion: createMailSendToNotionHandler(),
+      sendToNotionAsNewPage: createMailSendAsNewNotionPageHandler()
     }),
     [
       openReply,
@@ -254,7 +260,6 @@ export function MailList(): JSX.Element {
         threadMessagesForContext: opts?.threadMessagesForContext
       }
       const cat = await buildMailCategorySubmenuItems(message, ui, refreshNow)
-
       const ctxMsgs = resolveContextMsgs(message, opts?.threadMessagesForContext)
       const targetIds = resolveContextTargetIds(message, opts?.applyToMessageIds)
       const ctxAccountIds = new Set(ctxMsgs.map((m) => m.accountId))

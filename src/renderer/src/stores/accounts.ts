@@ -28,6 +28,7 @@ interface AccountsState {
   initialize: () => Promise<void>
   setMicrosoftClientId: (clientId: string) => Promise<void>
   setGoogleClientId: (clientId: string, clientSecret?: string | null) => Promise<void>
+  setNotionCredentials: (clientId: string, clientSecret?: string | null) => Promise<void>
   setSyncWindowDays: (days: number | null) => Promise<void>
   setAutoLoadImages: (value: boolean) => Promise<void>
   setCalendarTimeZone: (iana: string | null) => Promise<void>
@@ -87,6 +88,17 @@ export const useAccountsStore = create<AccountsState>((set, get) => ({
     set({ error: null })
     try {
       const config = await safeSetGoogleClientId(clientId, clientSecret)
+      set({ config })
+    } catch (e) {
+      set({ error: e instanceof Error ? e.message : String(e) })
+      throw e
+    }
+  },
+
+  async setNotionCredentials(clientId: string, clientSecret?: string | null): Promise<void> {
+    set({ error: null })
+    try {
+      const config = await window.mailClient.config.setNotionCredentials(clientId, clientSecret)
       set({ config })
     } catch (e) {
       set({ error: e instanceof Error ? e.message : String(e) })

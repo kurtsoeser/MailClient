@@ -15,6 +15,8 @@ const PERSISTED_CONFIG_KEYS: (keyof AppConfig)[] = [
   'microsoftClientId',
   'googleClientId',
   'googleClientSecret',
+  'notionClientId',
+  'notionClientSecret',
   'syncWindowDays',
   'autoLoadImages',
   'launchOnLogin',
@@ -31,6 +33,8 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
   microsoftClientId: null,
   googleClientId: null,
   googleClientSecret: null,
+  notionClientId: null,
+  notionClientSecret: null,
   syncWindowDays: 90,
   autoLoadImages: true,
   launchOnLogin: false,
@@ -86,7 +90,10 @@ function mergePublisherIntoOAuth(
   persisted: Partial<AppConfig>,
   remote: PublisherRemoteOAuthPayload,
   env: PublisherRemoteOAuthPayload
-): Pick<AppConfig, 'microsoftClientId' | 'googleClientId' | 'googleClientSecret'> {
+): Pick<
+  AppConfig,
+  'microsoftClientId' | 'googleClientId' | 'googleClientSecret' | 'notionClientId' | 'notionClientSecret'
+> {
   return {
     microsoftClientId: pickEffectiveOAuthField(
       persisted.microsoftClientId,
@@ -102,6 +109,16 @@ function mergePublisherIntoOAuth(
       persisted.googleClientSecret,
       remote.googleClientSecret,
       env.googleClientSecret ?? undefined
+    ),
+    notionClientId: pickEffectiveOAuthField(
+      persisted.notionClientId,
+      remote.notionClientId,
+      env.notionClientId ?? undefined
+    ),
+    notionClientSecret: pickEffectiveOAuthField(
+      persisted.notionClientSecret,
+      remote.notionClientSecret,
+      env.notionClientSecret ?? undefined
     )
   }
 }

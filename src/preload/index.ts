@@ -85,7 +85,18 @@ import {
   type PeopleSetContactPhotoInput,
   type PeopleSetFavoriteInput,
   type PeopleSyncAccountResult,
-  type PeopleUpdateContactInput
+  type PeopleUpdateContactInput,
+  type NotionAppendEventInput,
+  type NotionAppendMailInput,
+  type NotionAppendResult,
+  type NotionConnectionStatus,
+  type NotionCreateEventPageInput,
+  type NotionCreateMailPageInput,
+  type NotionCreatePageInput,
+  type NotionCreatePageResult,
+  type NotionDestinationsConfig,
+  type NotionSearchPageHit,
+  type NotionSavedDestination
 } from '@shared/types'
 import type {
   MailRuleDefinition,
@@ -123,7 +134,9 @@ const api = {
     setWorkflowMailFoldersIntroDismissed: (value: boolean): Promise<AppConfig> =>
       ipcRenderer.invoke(IPC.config.setWorkflowMailFoldersIntroDismissed, value),
     setFirstRunSetupCompleted: (value: boolean): Promise<AppConfig> =>
-      ipcRenderer.invoke(IPC.config.setFirstRunSetupCompleted, value)
+      ipcRenderer.invoke(IPC.config.setFirstRunSetupCompleted, value),
+    setNotionCredentials: (clientId: string, clientSecret?: string | null): Promise<AppConfig> =>
+      ipcRenderer.invoke(IPC.config.setNotionCredentials, clientId, clientSecret)
   },
   settingsBackup: {
     exportToFile: (localStorage: Record<string, string>): Promise<SettingsBackupExportResult> =>
@@ -142,6 +155,33 @@ const api = {
       timeZone: string | null
     ): Promise<OpenMeteoForecast | null> =>
       ipcRenderer.invoke(IPC.weather.forecast, { latitude, longitude, timeZone })
+  },
+  notion: {
+    getStatus: (): Promise<NotionConnectionStatus> => ipcRenderer.invoke(IPC.notion.getStatus),
+    connect: (): Promise<NotionConnectionStatus> => ipcRenderer.invoke(IPC.notion.connect),
+    connectInternal: (token: string): Promise<NotionConnectionStatus> =>
+      ipcRenderer.invoke(IPC.notion.connectInternal, token),
+    disconnect: (): Promise<NotionConnectionStatus> => ipcRenderer.invoke(IPC.notion.disconnect),
+    searchPages: (query: string): Promise<NotionSearchPageHit[]> =>
+      ipcRenderer.invoke(IPC.notion.searchPages, query),
+    getDestinations: (): Promise<NotionDestinationsConfig> =>
+      ipcRenderer.invoke(IPC.notion.getDestinations),
+    setDestinations: (config: NotionDestinationsConfig): Promise<void> =>
+      ipcRenderer.invoke(IPC.notion.setDestinations, config),
+    appendMail: (input: NotionAppendMailInput): Promise<NotionAppendResult> =>
+      ipcRenderer.invoke(IPC.notion.appendMail, input),
+    appendEvent: (input: NotionAppendEventInput): Promise<NotionAppendResult> =>
+      ipcRenderer.invoke(IPC.notion.appendEvent, input),
+    addFavorite: (hit: NotionSearchPageHit): Promise<NotionSavedDestination[]> =>
+      ipcRenderer.invoke(IPC.notion.addFavorite, hit),
+    removeFavorite: (pageId: string): Promise<NotionSavedDestination[]> =>
+      ipcRenderer.invoke(IPC.notion.removeFavorite, pageId),
+    createPage: (input: NotionCreatePageInput): Promise<NotionCreatePageResult> =>
+      ipcRenderer.invoke(IPC.notion.createPage, input),
+    createMailPage: (input: NotionCreateMailPageInput): Promise<NotionAppendResult> =>
+      ipcRenderer.invoke(IPC.notion.createMailPage, input),
+    createEventPage: (input: NotionCreateEventPageInput): Promise<NotionAppendResult> =>
+      ipcRenderer.invoke(IPC.notion.createEventPage, input)
   },
   auth: {
     listAccounts: (): Promise<ConnectedAccount[]> => ipcRenderer.invoke(IPC.auth.listAccounts),

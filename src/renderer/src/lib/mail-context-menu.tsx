@@ -31,7 +31,8 @@ import {
 
   Tag,
   StickyNote,
-  FolderInput
+  FolderInput,
+  SquareArrowOutUpRight
 
 } from 'lucide-react'
 
@@ -59,6 +60,10 @@ export interface MailContextHandlers {
   openForward: (message: MailFull) => void
 
   openNote?: (message: MailListItem) => void
+
+  sendToNotion?: (message: MailListItem) => void | Promise<void>
+
+  sendToNotionAsNewPage?: (message: MailListItem) => void | Promise<void>
 
   setMessageRead: (messageId: number, isRead: boolean) => void | Promise<void>
 
@@ -427,6 +432,34 @@ export function buildMailContextItems(
             icon: StickyNote,
             onSelect: (): void => h.openNote?.(msg)
           }
+        ]
+      : []),
+    ...(h.sendToNotion || h.sendToNotionAsNewPage
+      ? [
+          ...(h.sendToNotion
+            ? [
+                {
+                  id: 'notion',
+                  label: tr ? tr('notion.contextSend') : 'Nach Notion…',
+                  icon: SquareArrowOutUpRight,
+                  onSelect: (): void => {
+                    void h.sendToNotion?.(msg)
+                  }
+                }
+              ]
+            : []),
+          ...(h.sendToNotionAsNewPage
+            ? [
+                {
+                  id: 'notion-new-page',
+                  label: tr ? tr('notion.contextSendAsNewPage') : 'Als neue Notion-Seite…',
+                  icon: SquareArrowOutUpRight,
+                  onSelect: (): void => {
+                    void h.sendToNotionAsNewPage?.(msg)
+                  }
+                }
+              ]
+            : [])
         ]
       : []),
 

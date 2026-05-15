@@ -5,7 +5,7 @@ export function normalizeExternalOpenUrl(url: string): string | null {
   let raw = url.trim()
   if (!raw) return null
   if (raw.startsWith('//')) raw = `https:${raw}`
-  const allowed = /^(https?:\/\/|mailto:|tel:|msteams:\/\/|ms-teams:\/\/)/i
+  const allowed = /^(https?:\/\/|notion:\/\/|mailto:|tel:|msteams:\/\/|ms-teams:\/\/)/i
   if (!allowed.test(raw)) return null
   return raw
 }

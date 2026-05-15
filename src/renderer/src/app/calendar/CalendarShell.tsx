@@ -20,7 +20,7 @@ import {
 } from 'date-fns'
 import { de as deFns, enUS as enUSFns } from 'date-fns/locale'
 import type { Locale } from 'date-fns'
-import { Eye, EyeOff, Mails, PanelLeftClose, PanelRightClose, Plus, Search, SquareArrowOutUpRight } from 'lucide-react'
+import { Eye, EyeOff, Mails, PanelLeftClose, PanelRightClose, Search, SquareArrowOutUpRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useAccountsStore } from '@/stores/accounts'
 import { useCalendarPendingFocusStore } from '@/stores/calendar-pending-focus'
@@ -62,6 +62,11 @@ import {
   buildCalendarEventContextItems,
   formatCalendarEventClipboardText
 } from '@/lib/calendar-event-context-menu'
+import {
+  pickAndSendCalendarEventToNotion,
+  runNotionSendWithErrorHandling,
+  sendCalendarEventAsNewNotionPage
+} from '@/lib/notion-ui'
 import {
   buildMailCategorySubmenuItems,
   buildMailContextItems,
@@ -1763,31 +1768,6 @@ export function CalendarShell(): JSX.Element {
                 />
                 </div>
 
-                <div className="space-y-2 border-t border-border p-3">
-                  <button
-                    type="button"
-                    disabled={calendarLinkedAccounts.length === 0}
-                    onClick={(ev): void => {
-                      if (calendarLinkedAccounts.length === 0) {
-                        setError(t('calendar.shell.noLinkedAccount'))
-                        return
-                      }
-                      setError(null)
-                      setPreviewCalendarEvent(null)
-                      setEventDialog({
-                        mode: 'create',
-                        range: null
-                      })
-                    }}
-                    className={cn(
-                      'flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2.5 text-[12px] font-medium text-primary-foreground hover:bg-primary/90',
-                      calendarLinkedAccounts.length === 0 && 'cursor-not-allowed opacity-45'
-                    )}
-                  >
-                    <Plus className="h-4 w-4" />
-                    {t('calendar.shell.newEvent')}
-                  </button>
-                </div>
             </aside>
           ) : null}
 
@@ -1968,6 +1948,22 @@ export function CalendarShell(): JSX.Element {
                               eventStartIsoSnapshot: calEv.startIso
                             })
                           },
+                          onSendToNotion: (): void => {
+                            void runNotionSendWithErrorHandling(() =>
+                              pickAndSendCalendarEventToNotion(
+                                calEv,
+                                isDeCalendar ? 'de' : 'en'
+                              )
+                            )
+                          },
+                          onSendToNotionAsNewPage: (): void => {
+                            void runNotionSendWithErrorHandling(() =>
+                              sendCalendarEventAsNewNotionPage(
+                                calEv,
+                                isDeCalendar ? 'de' : 'en'
+                              )
+                            )
+                          },
                           onCopyDetails: (): void => {
                             const text = formatCalendarEventClipboardText(
                               calEv,
@@ -2049,7 +2045,9 @@ export function CalendarShell(): JSX.Element {
                           }
                         },
                         t,
-                        { categorySubmenu: cat.length > 0 ? cat : undefined }
+                        {
+                          categorySubmenu: cat.length > 0 ? cat : undefined,
+                        }
                       )
                       setCalendarFolderContextMenu(null)
                       setEventContextMenu({ x: e.clientX, y: e.clientY, items })

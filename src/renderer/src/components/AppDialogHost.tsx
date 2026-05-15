@@ -19,6 +19,7 @@ export function AppDialogHost(): JSX.Element | null {
   const okLabel = useAppDialogStore((s) => s.okLabel)
   const inputValue = useAppDialogStore((s) => s.inputValue)
   const placeholder = useAppDialogStore((s) => s.placeholder)
+  const choiceActions = useAppDialogStore((s) => s.choiceActions)
   const setInputValue = useAppDialogStore((s) => s.setInputValue)
   const resolveAndClose = useAppDialogStore((s) => s._resolveAndClose)
 
@@ -50,7 +51,7 @@ export function AppDialogHost(): JSX.Element | null {
       if (e.key === 'Escape') {
         e.preventDefault()
         if (kind === 'alert') resolveAndClose(undefined)
-        else if (kind === 'confirm') resolveAndClose(false)
+        else if (kind === 'confirm' || kind === 'choice') resolveAndClose(false)
         else if (kind === 'prompt') resolveAndClose(null)
       }
     },
@@ -72,7 +73,7 @@ export function AppDialogHost(): JSX.Element | null {
       role="presentation"
       onClick={(): void => {
         if (kind === 'alert') resolveAndClose(undefined)
-        else if (kind === 'confirm') resolveAndClose(false)
+        else if (kind === 'confirm' || kind === 'choice') resolveAndClose(false)
         else resolveAndClose(null)
       }}
     >
@@ -168,6 +169,33 @@ export function AppDialogHost(): JSX.Element | null {
               >
                 {confirmLabel}
               </button>
+            </>
+          ) : kind === 'choice' ? (
+            <>
+              <button
+                type="button"
+                onClick={(): void => resolveAndClose(null)}
+                className="rounded-lg border border-border bg-secondary/80 px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+              >
+                {cancelLabel}
+              </button>
+              {choiceActions.map((action) => (
+                <button
+                  key={action.id}
+                  type="button"
+                  onClick={(): void => resolveAndClose(action.id)}
+                  className={cn(
+                    'rounded-lg px-4 py-2 text-sm font-medium transition-colors',
+                    action.variant === 'primary'
+                      ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                      : action.variant === 'secondary'
+                        ? 'border border-border bg-background text-foreground hover:bg-secondary/60'
+                        : 'border border-border bg-secondary/80 text-foreground hover:bg-secondary'
+                  )}
+                >
+                  {action.label}
+                </button>
+              ))}
             </>
           ) : (
             <>

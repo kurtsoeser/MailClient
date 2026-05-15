@@ -13,6 +13,7 @@ export function registerConfigIpc(): void {
   ipcMain.removeHandler(IPC.config.setWeatherLocation)
   ipcMain.removeHandler(IPC.config.setWorkflowMailFoldersIntroDismissed)
   ipcMain.removeHandler(IPC.config.setFirstRunSetupCompleted)
+  ipcMain.removeHandler(IPC.config.setNotionCredentials)
 
   ipcMain.handle(IPC.config.get, async (): Promise<AppConfig> => {
     return loadConfig()
@@ -118,6 +119,28 @@ export function registerConfigIpc(): void {
     IPC.config.setFirstRunSetupCompleted,
     async (_event, value: boolean): Promise<AppConfig> => {
       return updateConfig({ firstRunSetupCompleted: Boolean(value) })
+    }
+  )
+
+  ipcMain.handle(
+    IPC.config.setNotionCredentials,
+    async (
+      _event,
+      clientId: string,
+      clientSecret?: string | null
+    ): Promise<AppConfig> => {
+      const trimmedId = typeof clientId === 'string' ? clientId.trim() : ''
+      if (!trimmedId) {
+        return updateConfig({ notionClientId: null, notionClientSecret: null })
+      }
+      if (clientSecret === undefined) {
+        return updateConfig({ notionClientId: trimmedId })
+      }
+      const sec =
+        typeof clientSecret === 'string' && clientSecret.trim() !== ''
+          ? clientSecret.trim()
+          : null
+      return updateConfig({ notionClientId: trimmedId, notionClientSecret: sec })
     }
   )
 }

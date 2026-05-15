@@ -39,6 +39,10 @@ export default defineConfig(({ mode }) => {
     'process.env.MAILCLIENT_MICROSOFT_CLIENT_ID': JSON.stringify(env.MAILCLIENT_MICROSOFT_CLIENT_ID ?? ''),
     'process.env.MAILCLIENT_GOOGLE_CLIENT_ID': JSON.stringify(env.MAILCLIENT_GOOGLE_CLIENT_ID ?? ''),
     'process.env.MAILCLIENT_GOOGLE_CLIENT_SECRET': JSON.stringify(env.MAILCLIENT_GOOGLE_CLIENT_SECRET ?? ''),
+    'process.env.MAILCLIENT_NOTION_CLIENT_ID': JSON.stringify(env.MAILCLIENT_NOTION_CLIENT_ID ?? ''),
+    'process.env.MAILCLIENT_NOTION_CLIENT_SECRET': JSON.stringify(
+      env.MAILCLIENT_NOTION_CLIENT_SECRET ?? ''
+    ),
     'process.env.MAILCLIENT_REMOTE_OAUTH_CONFIG_URL': JSON.stringify(
       env.MAILCLIENT_REMOTE_OAUTH_CONFIG_URL ?? ''
     ),

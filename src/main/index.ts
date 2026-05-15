@@ -17,6 +17,8 @@ import {
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 const isDev = !app.isPackaged
 
+let mainWindow: BrowserWindow | null = null
+
 let mailFrameRedirectRegistered = false
 
 /**
@@ -80,8 +82,6 @@ app.on('web-contents-created', (_event, contents) => {
   if (contents.getType() === 'webview') return
   attachExternalNavigationGuards(contents)
 })
-
-let mainWindow: BrowserWindow | null = null
 
 function createMainWindow(): void {
   mainWindow = new BrowserWindow({

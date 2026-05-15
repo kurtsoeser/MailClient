@@ -29,6 +29,7 @@ import {
 } from '@/lib/calendar-visibility-storage'
 import { SIDEBAR_DEFAULT_CAL_ID } from '@/app/calendar/calendar-shell-storage'
 import { AccountPropertiesMenu } from '@/components/AccountPropertiesMenu'
+import { NotionSettingsPanel } from '@/components/NotionSettingsPanel'
 import { accountColorToCssBackground } from '@/lib/avatar-color'
 import {
   DASHBOARD_GRID_STEP_DEFAULT_PX,
@@ -275,6 +276,7 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
           { id: 'dashboard', label: t('settings.dashboardGridHeading') },
           { id: 'weather', label: t('settings.weatherHeading') },
           { id: 'oauth', label: t('settings.oauthSummary') },
+          { id: 'notion', label: t('settings.notionHeading') },
           { id: 'backup', label: t('settings.backupHeading') }
         ]
       case 'accounts':
@@ -1153,6 +1155,18 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
                 </div>
               </details>
               </>
+              )}
+
+              {subNavId.general === 'notion' && (
+                <NotionSettingsPanel
+                  config={config}
+                  busy={busy}
+                  onBusy={setBusy}
+                  onError={setLocalError}
+                  onConfigSaved={(c): void => {
+                    useAccountsStore.setState({ config: c })
+                  }}
+                />
               )}
 
               {subNavId.general === 'backup' && (

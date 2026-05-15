@@ -2,7 +2,15 @@ import { create } from 'zustand'
 
 export type AppDialogVariant = 'default' | 'danger'
 
-export type AppDialogKind = 'alert' | 'confirm' | 'prompt'
+export type AppDialogKind = 'alert' | 'confirm' | 'prompt' | 'choice'
+
+export type AppDialogChoiceVariant = 'default' | 'primary' | 'secondary'
+
+export interface AppDialogChoiceAction {
+  id: string
+  label: string
+  variant?: AppDialogChoiceVariant
+}
 
 export interface AppDialogOpenState {
   open: boolean
@@ -16,16 +24,28 @@ export interface AppDialogOpenState {
   defaultValue: string
   placeholder: string
   inputValue: string
+  choiceActions: AppDialogChoiceAction[]
 }
 
 interface AppDialogStore extends AppDialogOpenState {
-  _finish: (() => void) | ((b: boolean) => void) | ((s: string | null) => void) | null
+  _finish:
+    | (() => void)
+    | ((b: boolean) => void)
+    | ((s: string | null) => void)
+    | ((id: string | null) => void)
+    | null
   setInputValue: (v: string) => void
   _resolveAndClose: (value?: boolean | string | null | void) => void
 }
 
 const initial: AppDialogOpenState & {
-  _finish: (() => void) | ((b: boolean) => void) | ((s: string | null) => void) | null
+  _finish:
+    | (() => void)
+    | ((b: boolean) => void)
+    | ((s: string | null) => void)
+    | ((id: string | null) => void)
+    | null
+  choiceActions: AppDialogChoiceAction[]
 } = {
   open: false,
   kind: null,
@@ -38,6 +58,7 @@ const initial: AppDialogOpenState & {
   defaultValue: '',
   placeholder: '',
   inputValue: '',
+  choiceActions: [],
   _finish: null
 }
 
@@ -61,6 +82,12 @@ export const useAppDialogStore = create<AppDialogStore>((set, get) => ({
     }
     if (k === 'confirm') {
       ;(fn as (ok: boolean) => void)(value === true)
+      return
+    }
+    if (k === 'choice') {
+      ;(fn as (id: string | null) => void)(
+        typeof value === 'string' && value.length > 0 ? value : null
+      )
       return
     }
     const out =
@@ -116,6 +143,32 @@ export function showAppConfirm(
       cancelLabel: opts?.cancelLabel?.trim() || 'Abbrechen',
       _finish: (ok: boolean): void => {
         resolve(ok)
+      }
+    })
+  })
+}
+
+export function showAppChoice(
+  message: string,
+  opts: {
+    title?: string
+    cancelLabel?: string
+    actions: AppDialogChoiceAction[]
+  }
+): Promise<string | null> {
+  const actions = opts.actions.filter((a) => a.id.trim() && a.label.trim())
+  return new Promise((resolve) => {
+    useAppDialogStore.setState({
+      ...initial,
+      open: true,
+      kind: 'choice',
+      title: opts?.title?.trim() ? opts.title.trim() : null,
+      message,
+      variant: 'default',
+      cancelLabel: opts.cancelLabel?.trim() || 'Schließen',
+      choiceActions: actions,
+      _finish: (id: string | null): void => {
+        resolve(id)
       }
     })
   })

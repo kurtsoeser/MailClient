@@ -10,6 +10,7 @@ import { registerWorkflowVipRulesIpc } from './ipc/register-workflow-vip-rules-i
 import { registerSettingsBackupIpc } from './ipc/register-settings-backup-ipc'
 import { registerWeatherIpc } from './ipc/register-weather-ipc'
 import { registerPeopleIpc } from './ipc/register-people-ipc'
+import { registerNotionIpc } from './ipc/register-notion-ipc'
 import { ensureAccountProfilePhotosForMissing } from './ipc/ipc-helpers'
 import { broadcastSyncStatus, broadcastMailChanged, broadcastNotesChanged } from './ipc/ipc-broadcasts'
 
@@ -26,6 +27,7 @@ export function registerIpcHandlers(): void {
   registerSettingsBackupIpc()
   registerWeatherIpc()
   registerPeopleIpc()
+  registerNotionIpc()
 
   setImmediate(() => {
     void ensureAccountProfilePhotosForMissing().catch((e) =>

@@ -7,6 +7,7 @@ import { WorkflowMailFoldersIntro } from './components/WorkflowMailFoldersIntro'
 import { ComposerStack } from './components/Composer'
 import { ToastStack } from './components/ToastStack'
 import { AppDialogHost } from './components/AppDialogHost'
+import { NotionDestinationPickerDialog } from './components/NotionDestinationPickerDialog'
 import { SnoozePickerHost } from './components/SnoozePickerHost'
 import { useAccountsStore } from './stores/accounts'
 import { useMailStore } from './stores/mail'
@@ -174,6 +175,7 @@ export function App(): JSX.Element {
       <SnoozePickerHost />
       <ToastStack />
       <AppDialogHost />
+      <NotionDestinationPickerDialog />
     </div>
   )
 }

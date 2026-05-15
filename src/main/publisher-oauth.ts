@@ -7,6 +7,8 @@ export type PublisherRemoteOAuthPayload = {
   microsoftClientId?: string | null
   googleClientId?: string | null
   googleClientSecret?: string | null
+  notionClientId?: string | null
+  notionClientSecret?: string | null
 }
 
 function trimOrNull(v: string | undefined): string | null {
@@ -19,7 +21,9 @@ export function getPublisherEnvOAuthDefaults(): PublisherRemoteOAuthPayload {
   return {
     microsoftClientId: trimOrNull(process.env.MAILCLIENT_MICROSOFT_CLIENT_ID),
     googleClientId: trimOrNull(process.env.MAILCLIENT_GOOGLE_CLIENT_ID),
-    googleClientSecret: trimOrNull(process.env.MAILCLIENT_GOOGLE_CLIENT_SECRET)
+    googleClientSecret: trimOrNull(process.env.MAILCLIENT_GOOGLE_CLIENT_SECRET),
+    notionClientId: trimOrNull(process.env.MAILCLIENT_NOTION_CLIENT_ID),
+    notionClientSecret: trimOrNull(process.env.MAILCLIENT_NOTION_CLIENT_SECRET)
   }
 }
 
@@ -64,7 +68,10 @@ export async function fetchPublisherRemoteOAuthOnce(): Promise<PublisherRemoteOA
         typeof o.microsoftClientId === 'string' ? trimOrNull(o.microsoftClientId) : null,
       googleClientId: typeof o.googleClientId === 'string' ? trimOrNull(o.googleClientId) : null,
       googleClientSecret:
-        typeof o.googleClientSecret === 'string' ? trimOrNull(o.googleClientSecret) : null
+        typeof o.googleClientSecret === 'string' ? trimOrNull(o.googleClientSecret) : null,
+      notionClientId: typeof o.notionClientId === 'string' ? trimOrNull(o.notionClientId) : null,
+      notionClientSecret:
+        typeof o.notionClientSecret === 'string' ? trimOrNull(o.notionClientSecret) : null
     }
   } catch {
     return {}
