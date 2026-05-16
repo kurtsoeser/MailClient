@@ -31,6 +31,15 @@ import {
 } from '../account-photo'
 import { broadcastAccountsChanged } from './ipc-broadcasts'
 import { parseGoogleIdToken, tryAttachGoogleProfilePhoto } from './ipc-helpers'
+import { deleteCalendarDataForAccount } from '../db/calendar-events-repo'
+import { deleteCalendarFoldersDataForAccount } from '../db/calendar-folders-repo'
+import { deleteCalendarEventDetailsForAccount } from '../db/calendar-event-details-repo'
+import { deleteCloudTasksDataForAccount } from '../db/cloud-tasks-repo'
+import {
+  beginTasksAccountRemoval,
+  endTasksAccountRemoval
+} from '../tasks-cache-service'
+import { deleteMasterCategoriesDataForAccount } from '../db/master-categories-repo'
 import { deletePeopleDataForAccount } from '../db/people-repo'
 
 const MAX_SIGNATURE_TEMPLATES = 40
@@ -322,36 +331,71 @@ export function registerAuthIpc(): void {
     const target = current.find((a) => a.id === id)
     if (!target) return current
 
-    if (target.provider === 'microsoft') {
-      const config = await loadConfig()
-      if (config.microsoftClientId) {
-        const homeAccountId = id.replace(/^ms:/, '')
+    await beginTasksAccountRemoval(id)
+    try {
+      if (target.provider === 'microsoft') {
+        const config = await loadConfig()
+        if (config.microsoftClientId) {
+          const homeAccountId = id.replace(/^ms:/, '')
+          try {
+            await removeMsalAccount(config.microsoftClientId, homeAccountId)
+          } catch (e) {
+            console.warn('[ipc] MSAL-Account konnte nicht entfernt werden:', e)
+          }
+        }
+      } else if (target.provider === 'google') {
         try {
-          await removeMsalAccount(config.microsoftClientId, homeAccountId)
+          await removeGoogleCredentials(id)
+          await clearGoogleSyncMetaForAccount(id)
         } catch (e) {
-          console.warn('[ipc] MSAL-Account konnte nicht entfernt werden:', e)
+          console.warn('[ipc] Google-Credentials konnten nicht entfernt werden:', e)
         }
       }
-    } else if (target.provider === 'google') {
+
+      await deleteAccountProfilePhoto(target.profilePhotoFile, target.id)
+
       try {
-        await removeGoogleCredentials(id)
-        await clearGoogleSyncMetaForAccount(id)
+        deletePeopleDataForAccount(id)
       } catch (e) {
-        console.warn('[ipc] Google-Credentials konnten nicht entfernt werden:', e)
+        console.warn('[ipc] Kontakte-Cache konnte nicht geloescht werden:', e)
       }
+
+      try {
+        deleteCalendarDataForAccount(id)
+      } catch (e) {
+        console.warn('[ipc] Kalender-Cache konnte nicht geloescht werden:', e)
+      }
+
+      try {
+        deleteCloudTasksDataForAccount(id)
+      } catch (e) {
+        console.warn('[ipc] Aufgaben-Cache konnte nicht geloescht werden:', e)
+      }
+
+      try {
+        deleteCalendarFoldersDataForAccount(id)
+      } catch (e) {
+        console.warn('[ipc] Kalender-Ordner-Cache konnte nicht geloescht werden:', e)
+      }
+
+      try {
+        deleteMasterCategoriesDataForAccount(id)
+      } catch (e) {
+        console.warn('[ipc] Masterkategorien-Cache konnte nicht geloescht werden:', e)
+      }
+
+      try {
+        deleteCalendarEventDetailsForAccount(id)
+      } catch (e) {
+        console.warn('[ipc] Termin-Details-Cache konnte nicht geloescht werden:', e)
+      }
+
+      const next = await removeAccount(id)
+      broadcastAccountsChanged(next)
+      return next
+    } finally {
+      endTasksAccountRemoval(id)
     }
-
-    await deleteAccountProfilePhoto(target.profilePhotoFile, target.id)
-
-    try {
-      deletePeopleDataForAccount(id)
-    } catch (e) {
-      console.warn('[ipc] Kontakte-Cache konnte nicht geloescht werden:', e)
-    }
-
-    const next = await removeAccount(id)
-    broadcastAccountsChanged(next)
-    return next
   })
 
   ipcMain.handle(IPC.auth.reorderAccounts, async (_event, accountIds: string[]): Promise<ConnectedAccount[]> => {

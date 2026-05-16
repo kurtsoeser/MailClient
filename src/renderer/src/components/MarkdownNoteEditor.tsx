@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import MDEditor from '@uiw/react-md-editor'
 import { useTranslation } from 'react-i18next'
 import '@uiw/react-md-editor/markdown-editor.css'
 import '@uiw/react-markdown-preview/markdown.css'
 import { cn } from '@/lib/utils'
+import { hrefForExternalOpen, openExternalUrl } from '@/lib/open-external'
 
 type MarkdownPreviewMode = 'live' | 'edit' | 'preview'
 export type MarkdownNoteEditorLayout = 'live' | 'toggle'
@@ -30,6 +31,7 @@ export function MarkdownNoteEditor({
   className
 }: MarkdownNoteEditorProps): JSX.Element {
   const { t } = useTranslation()
+  const rootRef = useRef<HTMLDivElement>(null)
   const [colorMode, setColorMode] = useState<'light' | 'dark'>(() =>
     document.documentElement.classList.contains('dark') ? 'dark' : 'light'
   )
@@ -44,8 +46,33 @@ export function MarkdownNoteEditor({
     return () => observer.disconnect()
   }, [])
 
+  useEffect(() => {
+    const root = rootRef.current
+    if (!root) return
+    const onLinkNav = (e: MouseEvent): void => {
+      if (e.defaultPrevented) return
+      if (e.type === 'auxclick' && e.button !== 1) return
+      if (e.type === 'click' && e.button !== 0) return
+      const tEl = e.target
+      if (!(tEl instanceof Element)) return
+      const a = tEl.closest('a')
+      if (!a) return
+      const href = hrefForExternalOpen(a.getAttribute('href'))
+      if (!href) return
+      e.preventDefault()
+      e.stopPropagation()
+      void openExternalUrl(href).catch((err) => console.warn('[markdown-note] Link extern:', err))
+    }
+    root.addEventListener('click', onLinkNav, true)
+    root.addEventListener('auxclick', onLinkNav, true)
+    return (): void => {
+      root.removeEventListener('click', onLinkNav, true)
+      root.removeEventListener('auxclick', onLinkNav, true)
+    }
+  }, [])
+
   return (
-    <div className={cn('markdown-note-editor', className)} data-color-mode={colorMode}>
+    <div ref={rootRef} className={cn('markdown-note-editor', className)} data-color-mode={colorMode}>
       {layout === 'toggle' ? (
         <div className="mb-2 flex justify-end">
           <div

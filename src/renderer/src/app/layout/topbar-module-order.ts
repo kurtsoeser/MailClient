@@ -4,12 +4,11 @@ import type { AppShellMode } from '@/stores/app-mode'
 export const DEFAULT_TOPBAR_MODULE_ORDER: AppShellMode[] = [
   'home',
   'mail',
-  'workflow',
   'calendar',
   'tasks',
+  'work',
   'people',
   'notes',
-  'rules',
   'chat'
 ]
 

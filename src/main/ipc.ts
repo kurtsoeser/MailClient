@@ -11,6 +11,7 @@ import { registerSettingsBackupIpc } from './ipc/register-settings-backup-ipc'
 import { registerWeatherIpc } from './ipc/register-weather-ipc'
 import { registerPeopleIpc } from './ipc/register-people-ipc'
 import { registerNotionIpc } from './ipc/register-notion-ipc'
+import { registerTeamsChatPopoutIpc } from './ipc/register-teams-chat-popout-ipc'
 import { ensureAccountProfilePhotosForMissing } from './ipc/ipc-helpers'
 import { broadcastSyncStatus, broadcastMailChanged, broadcastNotesChanged } from './ipc/ipc-broadcasts'
 
@@ -28,6 +29,7 @@ export function registerIpcHandlers(): void {
   registerWeatherIpc()
   registerPeopleIpc()
   registerNotionIpc()
+  registerTeamsChatPopoutIpc()
 
   setImmediate(() => {
     void ensureAccountProfilePhotosForMissing().catch((e) =>

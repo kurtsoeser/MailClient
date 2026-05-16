@@ -48,17 +48,29 @@ export function InlineReplyBar({
             antworten
           </span>{' '}
           oder{' '}
-          <button
-            type="button"
+          <span
+            role="button"
+            tabIndex={disabled ? -1 : 0}
             onClick={(e): void => {
               e.preventDefault()
               e.stopPropagation()
               if (!disabled) onForward()
             }}
-            className="font-medium text-foreground/90 underline decoration-dotted underline-offset-2 hover:text-foreground"
+            onKeyDown={(e): void => {
+              if (disabled) return
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                e.stopPropagation()
+                onForward()
+              }
+            }}
+            className={cn(
+              'font-medium text-foreground/90 underline decoration-dotted underline-offset-2 outline-none hover:text-foreground',
+              !disabled && 'cursor-pointer focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-1'
+            )}
           >
             weiterzuleiten
-          </button>
+          </span>
           .
         </span>
       </button>

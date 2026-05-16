@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { isMailClientRuntimeComplete, warnMailClientMissingOnce } from '@/lib/mail-client-runtime'
 import type {
   MailFolder,
   MailListItem,
@@ -33,6 +34,28 @@ import {
   todoDueKindShortLabel
 } from './mail-store-helpers'
 import { touchRecentMailMoveFolder } from '@/lib/mail-move-recent'
+
+const FLAGGED_MAILBOX_FILTER_STORAGE_KEY = 'mailclient.mail.flaggedExcludeDeletedJunk'
+
+function readFlaggedFilterExcludeDeletedJunkFromStorage(): boolean {
+  if (typeof localStorage === 'undefined') return true
+  try {
+    const v = localStorage.getItem(FLAGGED_MAILBOX_FILTER_STORAGE_KEY)
+    if (v === null) return true
+    return v !== '0'
+  } catch {
+    return true
+  }
+}
+
+function writeFlaggedFilterExcludeDeletedJunkToStorage(value: boolean): void {
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(FLAGGED_MAILBOX_FILTER_STORAGE_KEY, value ? '1' : '0')
+  } catch {
+    /* ignore */
+  }
+}
 
 export type { MailFilter, MailListKind, AccountListMetaEntry } from './mail-store-types'
 export { mailListUsesCrossAccountThreadScope } from './mail-store-types'
@@ -122,6 +145,7 @@ interface MailState {
     opts?: { skipSelectedRefresh?: boolean }
   ) => Promise<void>
   completeTodoForMessage: (messageId: number) => Promise<void>
+  removeMailTodoRecordsForMessage: (messageId: number) => Promise<void>
   setWaitingForMessage: (messageId: number, days?: number) => Promise<void>
   clearWaitingForMessage: (messageId: number) => Promise<void>
   createFolder: (
@@ -143,6 +167,12 @@ interface MailState {
   mailListChronoOrder: MailListChronoOrder
   setMailListArrangeBy: (v: MailListArrangeBy) => void
   setMailListChronoOrder: (v: MailListChronoOrder) => void
+  /**
+   * Filter „Kennzeichnung (Postfach)“: Kennzeichnungen nur in Geloescht/Junk
+   * ausblenden (aehnlicher Fokus wie Outlook/To Do, nicht das ganze Archiv).
+   */
+  flaggedFilterExcludeDeletedJunk: boolean
+  setFlaggedFilterExcludeDeletedJunk: (value: boolean) => void
   /** Waehlt die naechste/vorige Mail in der gefilterten, ggf. aufgeklappten Mailliste. */
   selectNextMessage: () => void
   selectPrevMessage: () => void
@@ -173,13 +203,24 @@ export const useMailStore = create<MailState>((set, get) => ({
   accountListMeta: {},
   mailListArrangeBy: 'date_conversations',
   mailListChronoOrder: 'newest_on_top',
+  flaggedFilterExcludeDeletedJunk: readFlaggedFilterExcludeDeletedJunkFromStorage(),
 
   initialize(): void {
     for (const u of unsubscribers) u()
     unsubscribers = []
 
+    if (typeof window === 'undefined' || !isMailClientRuntimeComplete()) {
+      warnMailClientMissingOnce(
+        'mail-store-init',
+        '[mail-store] `window.mailClient` unvollständig — Mail-Sync und Events sind ohne Preload nicht verfügbar. Nach einer fehlerhaften Fenster-Navigation: MailClient neu starten.'
+      )
+      return
+    }
+
+    const events = window.mailClient.events
+
     unsubscribers.push(
-      window.mailClient.events.onSyncStatus((status) => {
+      events.onSyncStatus((status) => {
         set((s) => ({
           syncByAccount: { ...s.syncByAccount, [status.accountId]: status }
         }))
@@ -187,7 +228,7 @@ export const useMailStore = create<MailState>((set, get) => ({
     )
 
     unsubscribers.push(
-      window.mailClient.events.onMailChanged(async ({ accountId }) => {
+      events.onMailChanged(async ({ accountId }) => {
         const folders = await window.mailClient.mail.listFolders(accountId)
         set((s) => ({
           foldersByAccount: { ...s.foldersByAccount, [accountId]: folders }
@@ -921,9 +962,9 @@ export const useMailStore = create<MailState>((set, get) => ({
     const state = get()
     const item = state.messages.find((m) => m.id === messageId)
     const subject = item?.subject ?? '(Mail)'
-    advanceSelectionAfterRemoval(messageId, set, get)
     try {
       await window.mailClient.mail.archive(messageId)
+      advanceSelectionAfterRemoval(messageId, set, get)
       useUndoStore.getState().pushToast({
         label: `Archiviert: ${shorten(subject)}`,
         variant: 'success',
@@ -941,16 +982,17 @@ export const useMailStore = create<MailState>((set, get) => ({
     const subject = item?.subject ?? '(Mail)'
     const permanent =
       item != null && isMailInDeletedItemsFolder(item.folderId, state.foldersByAccount)
-    advanceSelectionAfterRemoval(messageId, set, get)
     try {
       if (permanent) {
         await window.mailClient.mail.permanentDeleteMessage(messageId)
+        advanceSelectionAfterRemoval(messageId, set, get)
         useUndoStore.getState().pushToast({
           label: `Endgueltig geloescht: ${shorten(subject)}`,
           variant: 'success'
         })
       } else {
         await window.mailClient.mail.moveToTrash(messageId)
+        advanceSelectionAfterRemoval(messageId, set, get)
         useUndoStore.getState().pushToast({
           label: `Geloescht: ${shorten(subject)}`,
           variant: 'success',
@@ -1003,9 +1045,9 @@ export const useMailStore = create<MailState>((set, get) => ({
       }
       if (item.folderId === targetFolderId) continue
 
-      advanceSelectionAfterRemoval(id, set, get)
       try {
         await window.mailClient.mail.moveToFolder({ messageId: id, targetFolderId })
+        advanceSelectionAfterRemoval(id, set, get)
         moved++
       } catch (e) {
         console.error('[mail-store] moveMessagesToFolder failed', e)
@@ -1151,6 +1193,25 @@ export const useMailStore = create<MailState>((set, get) => ({
     }
   },
 
+  async removeMailTodoRecordsForMessage(messageId: number): Promise<void> {
+    const state = get()
+    const item = state.messages.find((m) => m.id === messageId) ?? state.selectedMessage
+    const subject = item?.subject ?? '(Mail)'
+    advanceSelectionAfterRemoval(messageId, set, get)
+    try {
+      const { removed } = await window.mailClient.mail.removeMailTodoRecordsForMessage(messageId)
+      if (removed > 0) {
+        useUndoStore.getState().pushToast({
+          label: `ToDo-Eintrag entfernt (Mail bleibt): ${shorten(subject)}`,
+          variant: 'success'
+        })
+      }
+    } catch (e) {
+      console.error('[mail-store] removeMailTodoRecordsForMessage failed', e)
+      set({ error: e instanceof Error ? e.message : String(e) })
+    }
+  },
+
   async setWaitingForMessage(messageId: number, days = 7): Promise<void> {
     const state = get()
     const item = state.messages.find((m) => m.id === messageId) ?? state.selectedMessage
@@ -1241,6 +1302,11 @@ export const useMailStore = create<MailState>((set, get) => ({
 
   setMailListChronoOrder(v: MailListChronoOrder): void {
     set({ mailListChronoOrder: v, collapsedMailListGroupKeys: new Set<string>() })
+  },
+
+  setFlaggedFilterExcludeDeletedJunk(value: boolean): void {
+    writeFlaggedFilterExcludeDeletedJunkToStorage(value)
+    set({ flaggedFilterExcludeDeletedJunk: value })
   },
 
   selectNextMessage(): void {

@@ -44,12 +44,31 @@ import {
   Type
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { hrefForExternalOpen, openExternalUrl } from '@/lib/open-external'
+
+function handleTipTapExternalLinkMouse(ev: MouseEvent): boolean {
+  if (ev.defaultPrevented) return false
+  if (ev.type === 'auxclick' && ev.button !== 1) return false
+  if (ev.type === 'click' && ev.button !== 0) return false
+  const el = ev.target
+  if (!(el instanceof Element)) return false
+  const a = el.closest('a')
+  if (!a) return false
+  const href = hrefForExternalOpen(a.getAttribute('href'))
+  if (!href) return false
+  void openExternalUrl(href).catch((err) => console.warn('[tiptap] Link extern:', err))
+  ev.preventDefault()
+  ev.stopPropagation()
+  return true
+}
 
 interface Props {
   valueHtml: string
   onChangeHtml: (html: string) => void
   autoFocus?: boolean
   className?: string
+  /** Platzhalter im leeren Editor (Standard: Nachricht schreiben…). */
+  placeholder?: string
   /**
    * Optional: wird aufgerufen, wenn der Nutzer Bilder ueber den Toolbar-Button
    * einfuegt. Wird nichts uebergeben, wird intern ein <input type=file> verwendet
@@ -58,6 +77,11 @@ interface Props {
   onPickImages?: () => Promise<Array<{ src: string; alt?: string }>>
   /** Kompakter Editor (z.B. Signatur). */
   variant?: 'default' | 'compact'
+  /**
+   * Mindesthoehe des Editor-Inhalts (nur `variant === 'default'`).
+   * Standard: `min-h-[220px]`.
+   */
+  editorMinHeightClass?: string
 }
 
 const TEXT_COLORS: Array<{ value: string; label: string }> = [
@@ -85,7 +109,9 @@ export function TipTapBody({
   onChangeHtml,
   autoFocus,
   className,
+  placeholder,
   variant = 'default',
+  editorMinHeightClass,
   onPickImages
 }: Props): JSX.Element {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -99,10 +125,10 @@ export function TipTapBody({
         link: {
           openOnClick: false,
           autolink: true,
-          HTMLAttributes: { rel: 'noopener noreferrer', target: '_blank' }
+          HTMLAttributes: { rel: 'noopener noreferrer' }
         }
       }),
-      Placeholder.configure({ placeholder: 'Nachricht schreiben…' }),
+      Placeholder.configure({ placeholder: placeholder ?? 'Nachricht schreiben…' }),
       Image.configure({
         inline: false,
         allowBase64: true,
@@ -125,7 +151,7 @@ export function TipTapBody({
       attributes: {
         class: cn(
           'max-w-none px-4 py-3 text-sm leading-relaxed text-foreground focus:outline-none',
-          variant === 'compact' ? 'min-h-[88px]' : 'min-h-[220px]',
+          variant === 'compact' ? 'min-h-[88px]' : editorMinHeightClass ?? 'min-h-[220px]',
           '[&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5',
           '[&_h1]:text-2xl [&_h1]:font-bold [&_h1]:mt-3 [&_h1]:mb-2',
           '[&_h2]:text-xl  [&_h2]:font-bold [&_h2]:mt-3 [&_h2]:mb-2',
@@ -134,6 +160,10 @@ export function TipTapBody({
           '[&_a]:text-primary [&_a]:underline [&_img]:rounded [&_img]:my-2 [&_hr]:my-3 [&_hr]:border-border',
           '[&_table_td>p]:mb-0 [&_table_td>p]:mt-0 [&_table_th>p]:mb-0 [&_table_th>p]:mt-0'
         )
+      },
+      handleDOMEvents: {
+        click: (_view, event): boolean => handleTipTapExternalLinkMouse(event as MouseEvent),
+        auxclick: (_view, event): boolean => handleTipTapExternalLinkMouse(event as MouseEvent)
       }
     },
     onUpdate({ editor: ed }): void {
@@ -158,7 +188,7 @@ export function TipTapBody({
       <div
         className={cn(
           'animate-pulse rounded bg-muted/40',
-          variant === 'compact' ? 'min-h-[88px]' : 'min-h-[220px]'
+          variant === 'compact' ? 'min-h-[88px]' : editorMinHeightClass ?? 'min-h-[220px]'
         )}
       />
     )

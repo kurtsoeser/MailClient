@@ -16,6 +16,9 @@ import {
   googlePatchTask,
   googleUpdateTask
 } from './google/tasks-google'
+import { cloudTaskStableKey } from '@shared/work-item-keys'
+import { clearMailCloudTaskLinksForDeletedTask } from './mail-cloud-task-link-service'
+import { clearTaskPlannedSchedule } from './task-planned-schedule-service'
 
 async function resolveConnectedAccount(accountId: string): Promise<ConnectedAccount> {
   const accounts = await listAccounts()
@@ -96,7 +99,9 @@ export async function deleteTaskForAccount(accountId: string, listId: string, ta
   const acc = await resolveConnectedAccount(accountId)
   if (acc.provider === 'google') {
     await googleDeleteTask(accountId, listId, taskId)
-    return
+  } else {
+    await graphDeleteTodoTask(accountId, listId, taskId)
   }
-  await graphDeleteTodoTask(accountId, listId, taskId)
+  clearTaskPlannedSchedule(cloudTaskStableKey(accountId, listId, taskId))
+  clearMailCloudTaskLinksForDeletedTask(accountId, listId, taskId)
 }

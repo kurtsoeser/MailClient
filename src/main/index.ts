@@ -5,6 +5,7 @@ import { registerIpcHandlers } from './ipc'
 import { getDb, closeDb } from './db'
 import { listAccounts } from './accounts'
 import { runInitialSync } from './sync-runner'
+import { startCalendarSync, stopCalendarSync } from './calendar-sync-runner'
 import { startMailPolling, stopMailPolling } from './mail-poll-runner'
 import { loadConfig } from './config'
 import { isAppOnline, startConnectivityMonitoring, stopConnectivityMonitoring } from './network-status'
@@ -13,6 +14,7 @@ import {
   normalizeExternalOpenUrl,
   openExternalIfAllowedSync
 } from './open-external'
+import { closeAllTeamsChatPopouts } from './teams-chat-popout'
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 const isDev = !app.isPackaged
@@ -150,6 +152,7 @@ app.whenReady().then(async () => {
   }
 
   startMailPolling()
+  startCalendarSync()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -159,12 +162,15 @@ app.whenReady().then(async () => {
 })
 
 app.on('before-quit', () => {
+  closeAllTeamsChatPopouts()
   stopMailPolling()
+  stopCalendarSync()
   stopConnectivityMonitoring()
 })
 
 app.on('window-all-closed', () => {
   stopMailPolling()
+  stopCalendarSync()
   stopConnectivityMonitoring()
   closeDb()
   if (process.platform !== 'darwin') {

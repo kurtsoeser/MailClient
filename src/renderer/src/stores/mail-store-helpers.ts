@@ -7,6 +7,10 @@ import {
   type MailListChronoOrder
 } from '@/lib/mail-list-arrange'
 import { indexMessagesByThread } from '@/lib/thread-group'
+import {
+  buildMailboxFlagExcludedFolderIds,
+  threadMatchesMailboxFlaggedFilter
+} from '@/lib/mail-flagged-mailbox-view'
 import { writeLastMailNav } from './mail-nav-persist'
 import {
   mailListUsesCrossAccountThreadScope,
@@ -38,6 +42,8 @@ export interface MailNavigableLayoutState {
   /** Eingeklappte Gruppen in der Mailliste (Schluessel via `mailListGroupCollapseKey`). */
   collapsedMailListGroupKeys: Set<string>
   accountListMeta: Record<string, AccountListMetaEntry>
+  /** Filter „Kennzeichnung (Postfach)“: Geloescht/Junk ausblenden. */
+  flaggedFilterExcludeDeletedJunk: boolean
 }
 
 export function pickInitialMessageId(
@@ -122,9 +128,16 @@ export function buildNavigableMessageIds(state: MailNavigableLayoutState): numbe
     state.threadMessages,
     scoped
   )
+  const excludedFolderIds = buildMailboxFlagExcludedFolderIds(state.foldersByAccount)
   const filtered = threads.filter((t) => {
     if (filter === 'unread') return t.unreadCount > 0
-    if (filter === 'flagged') return t.isFlagged
+    if (filter === 'flagged')
+      return threadMatchesMailboxFlaggedFilter(
+        t,
+        messagesByThread,
+        excludedFolderIds,
+        state.flaggedFilterExcludeDeletedJunk
+      )
     if (filter === 'with_todo') return t.openTodoDueKind != null
     return true
   })

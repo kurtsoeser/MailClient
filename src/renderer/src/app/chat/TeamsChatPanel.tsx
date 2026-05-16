@@ -1,68 +1,28 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { RefreshCw, Search, SendHorizonal } from 'lucide-react'
+import { PanelRightOpen, RefreshCw, Search, SendHorizonal } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
+  ModuleColumnHeaderIconButton,
   moduleColumnHeaderIconGlyphClass,
   moduleColumnHeaderOutlineSmClass,
   moduleColumnHeaderShellBarClass
 } from '@/components/ModuleColumnHeader'
 import { useAccountsStore } from '@/stores/accounts'
 import type { TeamsChatMessageView, TeamsChatSummary } from '@shared/types'
+import { TeamsChatMessageRow, type TeamsChatMessageRowCtx } from './TeamsChatMessageRow'
+import {
+  chatTitle,
+  dayKey,
+  formatDay,
+  formatTime,
+  titleBucketKey
+} from './teams-chat-helpers'
+import { useTeamsChatPopoutState } from './use-teams-chat-popout-state'
+import { TeamsChatPopoutDock } from './TeamsChatPopoutDock'
 
 interface GraphMe {
   id: string
   displayName?: string
-}
-
-function chatTitle(c: TeamsChatSummary): string {
-  const t = c.topic?.trim()
-  if (t) return t
-  const peer = c.peerDisplayName?.trim()
-  if (c.chatType === 'oneOnOne' && peer) return peer
-  if (c.chatType === 'oneOnOne') return 'Direktnachricht'
-  if (c.chatType === 'group') return 'Gruppenchat'
-  if (c.chatType === 'meeting') return 'Besprechungschat'
-  return 'Chat'
-}
-
-function formatTime(iso: string): string {
-  if (!iso) return ''
-  const d = Date.parse(iso)
-  if (!Number.isFinite(d)) return ''
-  return new Intl.DateTimeFormat('de-DE', { timeStyle: 'short' }).format(d)
-}
-
-function formatDay(iso: string): string {
-  if (!iso) return ''
-  const d = Date.parse(iso)
-  if (!Number.isFinite(d)) return ''
-  return new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(d)
-}
-
-function initialsFromName(name: string | null | undefined): string {
-  const s = name?.trim() || '?'
-  const parts = s.split(/\s+/).filter(Boolean)
-  if (parts.length >= 2) return (parts[0]![0]! + parts[1]![0]!).toUpperCase()
-  return s.slice(0, 2).toUpperCase()
-}
-
-function isOwnMessage(
-  m: TeamsChatMessageView,
-  myGraphUserId: string | null,
-  accountDisplayName: string | null
-): boolean {
-  if (myGraphUserId && m.fromUserId != null && m.fromUserId === myGraphUserId) return true
-  if (!m.fromUserId && m.fromDisplayName?.trim() && accountDisplayName?.trim()) {
-    return m.fromDisplayName.trim().toLowerCase() === accountDisplayName.trim().toLowerCase()
-  }
-  return false
-}
-
-function dayKey(iso: string): string {
-  if (!iso) return ''
-  const d = Date.parse(iso)
-  if (!Number.isFinite(d)) return ''
-  return new Date(d).toDateString()
 }
 
 type TeamsChatListFilter = 'all' | 'oneOnOne' | 'group' | 'meeting'
@@ -131,16 +91,6 @@ function buildChatListDateGroups(chats: TeamsChatSummary[]): {
   })
 }
 
-/** Gruppierung nach Anzeigetitel (bei 1:1 typischerweise Personenname), A–Z. */
-function titleBucketKey(c: TeamsChatSummary): string {
-  const t = chatTitle(c).trim()
-  if (!t) return '#'
-  const u = t.charAt(0).toLocaleUpperCase('de-DE')
-  if (/^[A-ZÄÖÜ]$/.test(u)) return u
-  if (/^\d$/.test(u)) return '0–9'
-  return '#'
-}
-
 function buildChatListTitleGroups(chats: TeamsChatSummary[]): { bucket: string; items: TeamsChatSummary[] }[] {
   const byBucket = new Map<string, TeamsChatSummary[]>()
   for (const c of chats) {
@@ -168,114 +118,15 @@ function buildChatListTitleGroups(chats: TeamsChatSummary[]): { bucket: string; 
   }))
 }
 
-interface MessageRowCtx {
-  myGraphUserId: string | null
-  accountLabel: string
-}
-
-function TeamsChatMessageRow({
-  m,
-  prev,
-  ctx
-}: {
-  m: TeamsChatMessageView
-  prev?: TeamsChatMessageView
-  ctx: MessageRowCtx
-}): JSX.Element {
-  const showDay =
-    !prev || (m.createdDateTime && dayKey(m.createdDateTime) !== dayKey(prev.createdDateTime))
-  const text = m.bodyPreview?.trim() || ''
-
-  if (m.messageKind === 'system') {
-    return (
-      <div>
-        {showDay && m.createdDateTime ? (
-          <div className="mb-3 flex justify-center">
-            <span className="rounded-full bg-muted px-3 py-0.5 text-[10px] font-medium text-muted-foreground">
-              {formatDay(m.createdDateTime)}
-            </span>
-          </div>
-        ) : null}
-        <div className="flex justify-center px-4 py-1">
-          <div className="max-w-xl rounded-lg border border-dashed border-border/80 bg-muted/30 px-3 py-2 text-center shadow-sm">
-            <p className="text-xs leading-relaxed text-foreground/90">{text}</p>
-            <p className="mt-0.5 text-[10px] tabular-nums text-muted-foreground">{formatTime(m.createdDateTime)}</p>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  const own = isOwnMessage(m, ctx.myGraphUserId, ctx.accountLabel || null)
-  const label = m.fromDisplayName?.trim() || 'Unbekannt'
-
-  return (
-    <div>
-      {showDay && m.createdDateTime ? (
-        <div className="mb-3 flex justify-center">
-          <span className="rounded-full bg-muted px-3 py-0.5 text-[10px] font-medium text-muted-foreground">
-            {formatDay(m.createdDateTime)}
-          </span>
-        </div>
-      ) : null}
-      <div className={cn('flex w-full gap-2', own ? 'justify-end' : 'justify-start')}>
-        {!own && (
-          <div
-            className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-secondary text-[11px] font-semibold text-secondary-foreground shadow-inner"
-            aria-hidden
-          >
-            {initialsFromName(label)}
-          </div>
-        )}
-        <div
-          className={cn(
-            'max-w-[min(85%,28rem)] rounded-2xl px-3 py-2 shadow-sm',
-            own
-              ? 'rounded-tr-sm bg-primary text-primary-foreground'
-              : 'rounded-tl-sm border border-border/80 bg-card text-card-foreground'
-          )}
-        >
-          {!own && (
-            <div className="mb-0.5 flex items-baseline justify-between gap-2">
-              <span className="text-[11px] font-semibold text-foreground/90">{label}</span>
-              <span className="shrink-0 text-[10px] text-muted-foreground">{formatTime(m.createdDateTime)}</span>
-            </div>
-          )}
-          {own && (
-            <div className="mb-0.5 flex justify-end">
-              <span className="text-[10px] text-primary-foreground/80">{formatTime(m.createdDateTime)}</span>
-            </div>
-          )}
-          <p
-            className={cn(
-              'whitespace-pre-wrap break-words text-sm leading-relaxed',
-              own ? 'text-primary-foreground' : 'text-foreground',
-              !text && 'italic text-muted-foreground'
-            )}
-          >
-            {text || '(Inhalt nicht als Vorschau verfuegbar)'}
-          </p>
-        </div>
-        {own && (
-          <div
-            className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/20 text-[11px] font-semibold text-primary"
-            aria-hidden
-          >
-            {initialsFromName(ctx.accountLabel)}
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
 function TeamsChatListRow({
   c,
   active,
+  poppedOut,
   onSelect
 }: {
   c: TeamsChatSummary
   active: boolean
+  poppedOut?: boolean
   onSelect: () => void
 }): JSX.Element {
   return (
@@ -285,10 +136,18 @@ function TeamsChatListRow({
         onClick={onSelect}
         className={cn(
           'flex w-full flex-col items-start gap-0.5 border-b border-border/60 px-3 py-2 text-left text-xs transition-colors',
-          active ? 'bg-primary/15 text-foreground' : 'hover:bg-muted/50'
+          active ? 'bg-primary/15 text-foreground' : 'hover:bg-muted/50',
+          poppedOut && !active && 'opacity-80'
         )}
       >
-        <span className="line-clamp-2 font-medium">{chatTitle(c)}</span>
+        <span className="flex w-full items-start gap-1.5">
+          <span className="line-clamp-2 min-w-0 flex-1 font-medium">{chatTitle(c)}</span>
+          {poppedOut && (
+            <span title="In eigenem Fenster geoeffnet" aria-hidden>
+              <PanelRightOpen className="mt-0.5 h-3 w-3 shrink-0 text-primary" />
+            </span>
+          )}
+        </span>
         {c.lastUpdatedDateTime != null && (
           <span className="text-[10px] text-muted-foreground">
             {formatDay(c.lastUpdatedDateTime)} · {formatTime(c.lastUpdatedDateTime)}
@@ -499,10 +358,15 @@ export function TeamsChatPanel({ onOpenAccountDialog }: Props): JSX.Element {
     })
   }, [messages, messageSearchQuery])
 
-  const msgRowCtx = useMemo<MessageRowCtx>(
+  const { isPoppedOut, openPopouts, openPopout, closePopout, closeAllPopouts, focusPopout } =
+    useTeamsChatPopoutState()
+
+  const msgRowCtx = useMemo<TeamsChatMessageRowCtx>(
     () => ({ myGraphUserId, accountLabel: rowAccountLabel }),
     [myGraphUserId, rowAccountLabel]
   )
+
+  const currentChatPoppedOut = isPoppedOut(accountId, selectedChatId)
 
   useLayoutEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
@@ -593,6 +457,21 @@ export function TeamsChatPanel({ onOpenAccountDialog }: Props): JSX.Element {
         </div>
       )}
 
+      <TeamsChatPopoutDock
+        accountId={accountId}
+        selectedChatId={selectedChatId}
+        openPopouts={openPopouts}
+        onFocus={(aid, cid): void => {
+          void focusPopout(aid, cid)
+        }}
+        onClose={(aid, cid): void => {
+          void closePopout(aid, cid)
+        }}
+        onCloseAll={(): void => {
+          void closeAllPopouts()
+        }}
+      />
+
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(200px,280px)_1fr] divide-x divide-border">
         <div className="flex min-h-0 flex-col overflow-hidden bg-card/40">
           <div className="shrink-0 border-b border-border px-2 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -658,6 +537,7 @@ export function TeamsChatPanel({ onOpenAccountDialog }: Props): JSX.Element {
                     key={c.id}
                     c={c}
                     active={c.id === selectedChatId}
+                    poppedOut={isPoppedOut(accountId, c.id)}
                     onSelect={(): void => setSelectedChatId(c.id)}
                   />
                 ))}
@@ -677,6 +557,7 @@ export function TeamsChatPanel({ onOpenAccountDialog }: Props): JSX.Element {
                           key={c.id}
                           c={c}
                           active={c.id === selectedChatId}
+                          poppedOut={isPoppedOut(accountId, c.id)}
                           onSelect={(): void => setSelectedChatId(c.id)}
                         />
                       ))}
@@ -699,6 +580,7 @@ export function TeamsChatPanel({ onOpenAccountDialog }: Props): JSX.Element {
                           key={c.id}
                           c={c}
                           active={c.id === selectedChatId}
+                          poppedOut={isPoppedOut(accountId, c.id)}
                           onSelect={(): void => setSelectedChatId(c.id)}
                         />
                       ))}
@@ -712,17 +594,45 @@ export function TeamsChatPanel({ onOpenAccountDialog }: Props): JSX.Element {
 
         <div className="flex min-h-0 flex-col overflow-hidden bg-background">
           <div className="shrink-0 space-y-2 border-b border-border bg-muted/20 px-3 py-2">
-            <div>
-              <h2 className="text-sm font-semibold text-foreground">
-                {selectedChat != null ? chatTitle(selectedChat) : 'Kein Chat'}
-              </h2>
-              <p className="text-[11px] text-muted-foreground">
-                {selectedChatId != null
-                  ? 'Nachrichten ueber Microsoft Graph — unten schreiben und senden.'
-                  : 'Waehle links einen Chat.'}
-              </p>
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <h2 className="text-sm font-semibold text-foreground">
+                  {selectedChat != null ? chatTitle(selectedChat) : 'Kein Chat'}
+                </h2>
+                <p className="text-[11px] text-muted-foreground">
+                  {selectedChatId != null
+                    ? currentChatPoppedOut
+                      ? 'Chat laeuft in einem eigenen Fenster.'
+                      : 'Nachrichten ueber Microsoft Graph — unten schreiben und senden.'
+                    : 'Waehle links einen Chat.'}
+                </p>
+              </div>
+              {selectedChat != null && accountId != null && selectedChatId != null && (
+                <ModuleColumnHeaderIconButton
+                  type="button"
+                  onClick={(): void => {
+                    if (currentChatPoppedOut) {
+                      void focusPopout(accountId, selectedChatId)
+                    } else {
+                      void openPopout(accountId, selectedChatId, chatTitle(selectedChat))
+                    }
+                  }}
+                  title={
+                    currentChatPoppedOut
+                      ? 'Schwebendes Fenster in den Vordergrund'
+                      : 'Chat in eigenes Fenster auslagern'
+                  }
+                  aria-label={
+                    currentChatPoppedOut
+                      ? 'Schwebendes Fenster in den Vordergrund'
+                      : 'Chat in eigenes Fenster auslagern'
+                  }
+                >
+                  <PanelRightOpen className={moduleColumnHeaderIconGlyphClass} aria-hidden />
+                </ModuleColumnHeaderIconButton>
+              )}
             </div>
-            {selectedChatId != null && (
+            {selectedChatId != null && !currentChatPoppedOut && (
               <div className="relative max-w-md">
                 <Search
                   className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
@@ -745,6 +655,37 @@ export function TeamsChatPanel({ onOpenAccountDialog }: Props): JSX.Element {
             )}
           </div>
 
+          {currentChatPoppedOut ? (
+            <>
+            <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+              <p className="max-w-sm text-sm text-muted-foreground">
+                Dieser Chat ist in einem eigenen Fenster geoeffnet und bleibt beim Wechsel in andere Module
+                sichtbar.
+              </p>
+              <div className="flex flex-wrap justify-center gap-2">
+                <button
+                  type="button"
+                  className={moduleColumnHeaderOutlineSmClass}
+                  onClick={(): void => {
+                    if (accountId && selectedChatId) void focusPopout(accountId, selectedChatId)
+                  }}
+                >
+                  Fenster anzeigen
+                </button>
+                <button
+                  type="button"
+                  className={moduleColumnHeaderOutlineSmClass}
+                  onClick={(): void => {
+                    if (accountId && selectedChatId) void closePopout(accountId, selectedChatId)
+                  }}
+                >
+                  Zurueck ins Modul
+                </button>
+              </div>
+            </div>
+            </>
+          ) : (
+            <>
           <div className="min-h-0 flex-1 overflow-y-auto bg-gradient-to-b from-muted/15 to-background px-3 py-3">
             {messagesLoading && messages.length === 0 ? (
               <p className="py-8 text-center text-xs text-muted-foreground">Nachrichten laden …</p>
@@ -805,6 +746,8 @@ export function TeamsChatPanel({ onOpenAccountDialog }: Props): JSX.Element {
               </button>
             </div>
           </div>
+            </>
+          )}
         </div>
       </div>
     </div>

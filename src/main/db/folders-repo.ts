@@ -218,6 +218,20 @@ export function setFolderFavoriteLocal(id: number, value: boolean): void {
   db.prepare('UPDATE folders SET is_favorite = ? WHERE id = ?').run(value ? 1 : 0, id)
 }
 
+/** Nach Server-Abgleich: Zaehler aus Graph/Gmail in die Ordner-Zeile schreiben. */
+export function setFolderMailboxCountsLocal(
+  id: number,
+  unreadCount: number,
+  totalCount: number
+): void {
+  const db = getDb()
+  db.prepare('UPDATE folders SET unread_count = ?, total_count = ? WHERE id = ?').run(
+    Math.max(0, unreadCount),
+    Math.max(0, totalCount),
+    id
+  )
+}
+
 /** Fuer Hintergrund-Poll (Stufe-1-Offline): favorisierte Ordner pro Konto, ohne Duplikate zur Reihenfolge. */
 export function listFavoriteFolderIdsForAccount(accountId: string): number[] {
   const db = getDb()

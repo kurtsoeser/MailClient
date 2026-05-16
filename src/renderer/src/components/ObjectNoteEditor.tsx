@@ -204,7 +204,9 @@ export function ObjectNoteEditor({
     <div
       className={cn(
         'rounded-lg border border-border bg-card p-3 shadow-lg',
-        variant === 'button' ? 'absolute right-0 top-full z-50 mt-2 w-[min(360px,calc(100vw-32px))]' : 'shadow-none',
+        variant === 'button'
+          ? 'absolute right-0 top-full mt-2 w-[min(360px,calc(100vw-32px))]'
+          : 'shadow-none',
         className
       )}
     >
@@ -285,7 +287,13 @@ export function ObjectNoteEditor({
   }
 
   return (
-    <div className="relative">
+    <div
+      className={cn(
+        'relative',
+        /** Ueber App-Modals (z-[300]) und Kontextmenues (~280), damit das Notiz-Pop-up nie verdeckt wird. */
+        open && 'z-[320]'
+      )}
+    >
       <button
         type="button"
         onClick={(): void => setOpen((v) => !v)}
@@ -301,6 +309,143 @@ export function ObjectNoteEditor({
         {t('notes.editor.shortLabel')}
       </button>
       {open ? editor : null}
+    </div>
+  )
+}
+
+/** Schreibgeschützte Markdown-Vorschau einer Mail- oder Kalender-Notiz (lädt wie `ObjectNoteEditor`). */
+export function ObjectNotePreview(props: {
+  target: ObjectNoteTarget
+  className?: string
+  /** Höhe des Markdown-Viewers (Pixel). */
+  previewHeight?: number
+}): JSX.Element | null {
+  const { target, className, previewHeight = 200 } = props
+  const { t, i18n } = useTranslation()
+  const [note, setNote] = useState<UserNote | null>(null)
+  const [body, setBody] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const key = useMemo(() => targetKey(target), [target])
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    const load =
+      target.kind === 'mail'
+        ? window.mailClient.notes.getMail(target.messageId)
+        : window.mailClient.notes.getCalendar({
+            accountId: target.accountId,
+            calendarSource: target.calendarSource,
+            calendarRemoteId: target.calendarRemoteId,
+            eventRemoteId: target.eventRemoteId
+          })
+    void load
+      .then((loaded) => {
+        if (cancelled) return
+        setNote(loaded)
+        setBody(loaded?.body ?? '')
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e))
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return (): void => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
+
+  useEffect(() => {
+    const off = window.mailClient.events.onNotesChanged((payload) => {
+      if (target.kind === 'mail' && payload.messageId !== target.messageId) return
+      if (target.kind === 'calendar' && payload.kind && payload.kind !== 'calendar') return
+      void (async (): Promise<void> => {
+        try {
+          const loaded =
+            target.kind === 'mail'
+              ? await window.mailClient.notes.getMail(target.messageId)
+              : await window.mailClient.notes.getCalendar({
+                  accountId: target.accountId,
+                  calendarSource: target.calendarSource,
+                  calendarRemoteId: target.calendarRemoteId,
+                  eventRemoteId: target.eventRemoteId
+                })
+          setNote(loaded)
+          setBody(loaded?.body ?? '')
+        } catch {
+          // stiller Refresh
+        }
+      })()
+    })
+    return off
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
+
+  const updatedLabel = formatUpdatedAt(note?.updatedAt ?? null, i18n.language)
+
+  if (loading) {
+    return (
+      <div
+        className={cn(
+          'flex shrink-0 items-center gap-2 border-b border-border bg-secondary/10 px-4 py-2 text-[11px] text-muted-foreground',
+          className
+        )}
+      >
+        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+        {t('notes.preview.loading')}
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div
+        className={cn(
+          'shrink-0 border-b border-border bg-destructive/5 px-4 py-2 text-[11px] text-destructive',
+          className
+        )}
+        role="status"
+      >
+        {error}
+      </div>
+    )
+  }
+
+  if (!body.trim()) return null
+
+  return (
+    <div
+      className={cn(
+        'shrink-0 space-y-2 border-b border-border bg-secondary/10 px-4 py-3',
+        className
+      )}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <StickyNote className="h-3.5 w-3.5 shrink-0 fill-amber-300 text-amber-500" aria-hidden />
+          {t('notes.editor.title')}
+        </div>
+        {updatedLabel ? (
+          <span className="text-[10px] text-muted-foreground">
+            {t('notes.editor.updatedAt', { date: updatedLabel })}
+          </span>
+        ) : null}
+      </div>
+      <div className="max-h-[min(40vh,360px)] overflow-y-auto rounded-md border border-border/80 bg-background">
+        <MarkdownNoteEditor
+          value={body}
+          onChange={(): void => undefined}
+          disabled
+          preview="preview"
+          layout="live"
+          height={previewHeight}
+          placeholder=""
+        />
+      </div>
     </div>
   )
 }

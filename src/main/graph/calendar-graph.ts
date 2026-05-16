@@ -42,6 +42,7 @@ interface GraphEvent {
   organizer?: { emailAddress?: { name?: string | null; address?: string | null } } | null
   categories?: string[] | null
   attendees?: GraphAttendee[] | null
+  body?: { contentType?: string | null; content?: string | null } | null
   /** Nur mit `$expand=calendar(...)` in calendarView. */
   calendar?: { id?: string | null; color?: string | null; hexColor?: string | null } | null
 }
@@ -546,6 +547,28 @@ export interface GraphCalendarEventDetail {
   attendeeEmails: string[]
   joinUrl: string | null
   isOnlineMeeting: boolean
+  bodyHtml: string | null
+}
+
+function escapeHtmlPlain(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+/** Graph-Body (HTML oder Text) fuer Editor / Anzeige. */
+export function normalizeGraphEventBodyHtml(
+  body: { contentType?: string | null; content?: string | null } | null | undefined
+): string | null {
+  const raw = body?.content?.trim()
+  if (!raw) return null
+  const ct = (body?.contentType || '').toLowerCase()
+  if (ct === 'html' || raw.includes('<')) {
+    return raw
+  }
+  return `<p>${escapeHtmlPlain(raw).replace(/\n/g, '<br>')}</p>`
 }
 
 async function graphEventDateFields(input: GraphEventWriteFields): Promise<{
@@ -625,11 +648,18 @@ function eventPostPath(graphCalendarId?: string | null): string {
   return calId ? `/me/calendars/${encodeURIComponent(calId)}/events` : '/me/events'
 }
 
-/** PATCH/DELETE fuer Termine: persoenlich (`/me/events/...`) oder Gruppenkalender (`/groups/{id}/events/...`). */
+/**
+ * GET/PATCH/DELETE fuer Termine.
+ * Mit `graphCalendarId`: kalenderbezogener Pfad (wichtig fuer Abos, freigegebene und Group-Kalender).
+ */
 function graphEventInstancePath(graphEventId: string, graphCalendarId?: string | null): string {
-  const gid = parseM365GroupIdFromCalendarRef(graphCalendarId?.trim() ?? '')
+  const calId = graphCalendarId?.trim() ?? ''
+  const gid = parseM365GroupIdFromCalendarRef(calId)
   if (gid) {
     return `/groups/${encodeURIComponent(gid)}/events/${encodeURIComponent(graphEventId)}`
+  }
+  if (calId) {
+    return `/me/calendars/${encodeURIComponent(calId)}/events/${encodeURIComponent(graphEventId)}`
   }
   return `/me/events/${encodeURIComponent(graphEventId)}`
 }
@@ -642,7 +672,7 @@ export async function graphGetCalendarEvent(
   const client = await getClientFor(accountId)
   const path = graphEventInstancePath(graphEventId, graphCalendarId)
   const sel = encodeURIComponent(
-    'id,subject,attendees,isOnlineMeeting,onlineMeeting,onlineMeetingProvider,start,end,isAllDay'
+    'id,subject,body,attendees,isOnlineMeeting,onlineMeeting,onlineMeetingProvider,start,end,isAllDay'
   )
   const ev = (await client.api(`${path}?$select=${sel}`).get()) as GraphEvent
   const emails: string[] = []
@@ -657,7 +687,8 @@ export async function graphGetCalendarEvent(
     subject: ev.subject ?? null,
     attendeeEmails: emails.slice(0, MAX_GRAPH_EVENT_ATTENDEES),
     joinUrl: ev.onlineMeeting?.joinUrl?.trim() || null,
-    isOnlineMeeting: !!ev.isOnlineMeeting
+    isOnlineMeeting: !!ev.isOnlineMeeting,
+    bodyHtml: normalizeGraphEventBodyHtml(ev.body ?? null)
   }
 }
 

@@ -36,18 +36,19 @@ import { useSnoozeUiStore } from '@/stores/snooze-ui'
 import { useUndoStore } from '@/stores/undo'
 import { showAppAlert } from '@/stores/app-dialog'
 import {
-  buildIframeSrcDoc,
+  buildMailShadowRootInnerHtml,
   replaceInlineCidImages,
   sanitizeMailHtml,
   type MailViewerTheme
 } from '@/lib/sanitize'
-import { openExternalUrl } from '@/lib/open-external'
+import { isMailClientRuntimeComplete } from '@/lib/mail-client-runtime'
+import { useSanitizedHtmlShadowRoot } from '@/lib/use-sanitized-html-shadow-root'
 import { cn } from '@/lib/utils'
 import { Avatar } from '@/components/Avatar'
 import { profilePhotoSrcForEmail } from '@/lib/contact-avatar'
 import { InlineReplyBar } from '@/components/InlineReplyBar'
 import { MailCategoriesPopover } from '@/components/MailCategoriesPopover'
-import { ObjectNoteEditor } from '@/components/ObjectNoteEditor'
+import { ObjectNoteEditor, ObjectNotePreview } from '@/components/ObjectNoteEditor'
 import type { AttachmentMeta, MailFull, ConnectedAccount, MailQuickStep } from '@shared/types'
 import { outlookCategoryDotClass } from '@/lib/outlook-category-colors'
 
@@ -97,6 +98,8 @@ export type ReadingPaneProps = {
   /** Wenn keine Mail gewaehlt: eigener Titel (z. B. Kalender-Vorspalte). */
   emptySelectionTitle?: string
   emptySelectionBody?: string
+  /** Ohne Mail-Auswahl keine Mail-Toolbar (z. B. Kalender-Vorschau). */
+  hideChromeWhenEmpty?: boolean
   /** Mail-Arbeitsbereich: Vorschau als schwebendes Fenster loesen. */
   onRequestUndock?: () => void
 }
@@ -104,17 +107,20 @@ export type ReadingPaneProps = {
 export function ReadingPane({
   emptySelectionTitle,
   emptySelectionBody,
+  hideChromeWhenEmpty = false,
   onRequestUndock
 }: ReadingPaneProps = {}): JSX.Element {
   const { t, i18n } = useTranslation()
   const selectedMessage = useMailStore((s) => s.selectedMessage)
   const selectedMessageId = useMailStore((s) => s.selectedMessageId)
+  const listKind = useMailStore((s) => s.listKind)
   const foldersByAccount = useMailStore((s) => s.foldersByAccount)
   const messageLoading = useMailStore((s) => s.messageLoading)
   const setMessageRead = useMailStore((s) => s.setMessageRead)
   const toggleMessageFlag = useMailStore((s) => s.toggleMessageFlag)
   const archiveMessage = useMailStore((s) => s.archiveMessage)
   const deleteMessage = useMailStore((s) => s.deleteMessage)
+  const removeMailTodoRecordsForMessage = useMailStore((s) => s.removeMailTodoRecordsForMessage)
   const setTodoForMessage = useMailStore((s) => s.setTodoForMessage)
   const setTodoScheduleForMessage = useMailStore((s) => s.setTodoScheduleForMessage)
   const completeTodoForMessage = useMailStore((s) => s.completeTodoForMessage)
@@ -166,6 +172,10 @@ export function ReadingPane({
   ])
 
   useEffect(() => {
+    if (!isMailClientRuntimeComplete()) {
+      setQuickSteps([])
+      return
+    }
     void window.mailClient.mail
       .listQuickSteps()
       .then(setQuickSteps)
@@ -240,7 +250,9 @@ export function ReadingPane({
 
   const actions: TriageAction[] = useMemo(() => {
     let deleteLabel = t('mail.readingPane.delete')
-    if (selectedMessage?.folderId != null) {
+    if (listKind === 'todo') {
+      deleteLabel = t('mail.contextMenu.removeTodoOnly')
+    } else if (selectedMessage?.folderId != null) {
       for (const folders of Object.values(foldersByAccount)) {
         const f = folders.find((x) => x.id === selectedMessage.folderId)
         if (f?.wellKnown === 'deleteditems') {
@@ -311,7 +323,7 @@ export function ReadingPane({
         destructive: true
       }
     ]
-  }, [selectedMessage, foldersByAccount, t])
+  }, [selectedMessage, foldersByAccount, t, listKind])
 
   async function runAction(actionId: string, anchor?: { x: number; y: number }): Promise<void> {
     if (!selectedMessage) return
@@ -339,7 +351,11 @@ export function ReadingPane({
         await useMailStore.getState().refreshNow()
         break
       case 'delete':
-        await deleteMessage(selectedMessage.id)
+        if (listKind === 'todo') {
+          await removeMailTodoRecordsForMessage(selectedMessage.id)
+        } else {
+          await deleteMessage(selectedMessage.id)
+        }
         break
       case 'snooze':
         openSnoozePicker(
@@ -386,8 +402,19 @@ export function ReadingPane({
       .filter((a): a is TriageAction => Boolean(a))
   ]
 
+  if (!selectedMessageId && hideChromeWhenEmpty) {
+    return (
+      <section className="glass-fill flex min-h-0 flex-1 flex-col overflow-hidden">
+        <EmptyState
+          title={emptySelectionTitle ?? t('mail.readingPane.emptyNoSelectionTitle')}
+          body={emptySelectionBody ?? t('mail.readingPane.emptyNoSelectionBody')}
+        />
+      </section>
+    )
+  }
+
   return (
-    <section className="glass-fill flex flex-1 flex-col">
+    <section className="glass-fill flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-x-1 gap-y-1 border-b border-border px-2 py-1">
         <IconButton
           icon={viewerTheme === 'light' ? Sun : Moon}
@@ -539,7 +566,7 @@ export function ReadingPane({
           body={t('mail.readingPane.notFoundBody')}
         />
       ) : (
-        <>
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {conversationThreadStrip}
           <MailReader
             message={selectedMessage}
@@ -551,7 +578,7 @@ export function ReadingPane({
             onReply={(): void => openReply('reply', selectedMessage)}
             onForward={(): void => openForward(selectedMessage)}
           />
-        </>
+        </div>
       )}
     </section>
   )
@@ -581,7 +608,7 @@ function MailReader({
   const [inlineImages, setInlineImages] = useState<Record<string, string>>({})
   const [attachments, setAttachments] = useState<AttachmentMeta[]>([])
   const [attachmentsLoading, setAttachmentsLoading] = useState(false)
-  const iframeRef = useRef<HTMLIFrameElement>(null)
+  const shadowHostRef = useRef<HTMLDivElement>(null)
   const [categoryOpen, setCategoryOpen] = useState(false)
   const [categoryAnchor, setCategoryAnchor] = useState({ x: 0, y: 0 })
 
@@ -672,113 +699,19 @@ function MailReader({
     }
     if (message.bodyText) {
       const escaped = escapeHtml(message.bodyText).replace(/\n/g, '<br>')
-      const color = viewerTheme === 'light' ? '#1f1f23' : '#e6e6e8'
+      // Dunkel: invert()-Filter im Shadow-Root — dunkle Vorschlagsfarbe wird hell dargestellt.
+      const color = viewerTheme === 'light' ? '#1f1f23' : '#1a1a1a'
       return `<pre style="white-space:pre-wrap;font-family:inherit;font-size:14px;color:${color};">${escaped}</pre>`
     }
-    const muted = viewerTheme === 'light' ? '#6b6b73' : '#9a9aa3'
+    const muted = viewerTheme === 'light' ? '#6b6b73' : '#5c5c5c'
     return `<p style="color:${muted};font-style:italic;">${t('mail.readingPane.noContent')}</p>`
   }, [message.bodyHtml, message.bodyText, loadImages, viewerTheme, inlineImages, t])
 
-  const srcDoc = useMemo(() => buildIframeSrcDoc(safeHtml, viewerTheme), [safeHtml, viewerTheme])
-
-  // Mail-HTML laeuft in einem sandboxed srcdoc-Iframe: Top-`window.open`-Handler
-  // des Hauptfensters greifen hier nicht. Klicks auf <a> abfangen und per
-  // `shell.openExternal` im Systembrowser bzw. Standard-App oeffnen.
-  useEffect(() => {
-    function externalHref(raw: string | null | undefined): string | null {
-      if (!raw) return null
-      let href = raw.trim()
-      if (!href) return null
-      if (href === '#' || href.startsWith('#')) return null
-      // Newsletter-Links oft protokoll-relativ: //tracker.example/... — sonst kein
-      // preventDefault und das iframe laedt in Electron (ERR_BLOCKED_BY_CSP).
-      if (href.startsWith('//')) href = `https:${href}`
-      if (/^https?:\/\//i.test(href)) return href
-      if (/^mailto:/i.test(href)) return href
-      if (/^tel:/i.test(href)) return href
-      if (/^(msteams|ms-teams):\/\//i.test(href)) return href
-      return null
-    }
-
-    function attachHandlers(): (() => void) | undefined {
-      const frame = iframeRef.current
-      if (!frame) return undefined
-      const doc = frame.contentDocument
-      if (!doc?.body) return undefined
-
-      const openFromEvent = (e: MouseEvent): void => {
-        if (e.defaultPrevented) return
-        if (e.type === 'auxclick' && e.button !== 1) return
-        if (e.type === 'click' && e.button !== 0) return
-        const rawTarget = e.target
-        const start =
-          rawTarget instanceof Element
-            ? rawTarget
-            : rawTarget instanceof Node && rawTarget.parentElement != null
-              ? rawTarget.parentElement
-              : null
-        if (!start) return
-        const a = start.closest('a')
-        if (!a) return
-        const rawHref =
-          a.getAttribute('data-mail-external')?.trim() ||
-          a.getAttribute('href') ||
-          a.getAttribute('xlink:href')
-        const url = externalHref(rawHref)
-        if (!url) return
-        e.preventDefault()
-        e.stopPropagation()
-        void openExternalUrl(url).catch((err) => {
-          console.warn('[mail] Link konnte nicht geoeffnet werden:', err)
-        })
-      }
-
-      const keyOpen = (e: KeyboardEvent): void => {
-        if (e.defaultPrevented) return
-        if (e.key !== 'Enter') return
-        const t = e.target
-        if (!(t instanceof Element)) return
-        const a = t.closest('a')
-        if (!a) return
-        const ae = doc.activeElement
-        if (ae && ae !== a && !a.contains(ae)) return
-        const rawHref =
-          a.getAttribute('data-mail-external')?.trim() ||
-          a.getAttribute('href') ||
-          a.getAttribute('xlink:href')
-        const url = externalHref(rawHref)
-        if (!url) return
-        e.preventDefault()
-        e.stopPropagation()
-        void openExternalUrl(url).catch((err) => {
-          console.warn('[mail] Link konnte nicht geoeffnet werden:', err)
-        })
-      }
-
-      doc.addEventListener('click', openFromEvent, true)
-      doc.addEventListener('auxclick', openFromEvent, true)
-      doc.addEventListener('keydown', keyOpen, true)
-      return (): void => {
-        doc.removeEventListener('click', openFromEvent, true)
-        doc.removeEventListener('auxclick', openFromEvent, true)
-        doc.removeEventListener('keydown', keyOpen, true)
-      }
-    }
-
-    const frame0 = iframeRef.current
-    if (!frame0) return
-
-    let detach = attachHandlers()
-    const onLoad = (): void => {
-      detach?.()
-      detach = attachHandlers()
-    }
-    frame0.addEventListener('load', onLoad)
-    return (): void => {
-      frame0.removeEventListener('load', onLoad)
-      detach?.()
-    }
-  }, [srcDoc])
+  const shadowInnerHtml = useMemo(
+    () => buildMailShadowRootInnerHtml(safeHtml, viewerTheme),
+    [safeHtml, viewerTheme]
+  )
+  useSanitizedHtmlShadowRoot(shadowHostRef, shadowInnerHtml, 'mail')
 
   useEffect(() => {
     setLoadImages(autoLoadImages)
@@ -791,8 +724,8 @@ function MailReader({
   const categories = message.categories ?? []
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
-      <header className="space-y-3 border-b border-border px-6 py-4">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <header className="shrink-0 space-y-3 border-b border-border px-6 py-4">
         <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1 space-y-1.5">
             <h1 className="text-base font-semibold leading-snug text-foreground">
@@ -954,12 +887,21 @@ function MailReader({
         )}
       </header>
 
-      <iframe
-        ref={iframeRef}
-        title={t('mail.readingPane.contentIframeTitle')}
-        sandbox="allow-same-origin"
-        srcDoc={srcDoc}
-        className="flex-1 w-full border-0 bg-transparent"
+      <ObjectNotePreview
+        className="shrink-0 border-b border-border bg-secondary/5 px-6"
+        previewHeight={180}
+        target={{
+          kind: 'mail',
+          messageId: message.id,
+          title: message.subject || t('common.noSubject')
+        }}
+      />
+
+      <div
+        ref={shadowHostRef}
+        className="mail-reading-shadow-host flex min-h-0 min-w-0 flex-1 flex-col overflow-auto bg-transparent"
+        role="document"
+        aria-label={t('mail.readingPane.contentIframeTitle')}
       />
 
       <InlineReplyBar onReply={onReply} onForward={onForward} onAttach={onReply} />

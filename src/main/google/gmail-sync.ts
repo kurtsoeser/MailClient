@@ -4,9 +4,14 @@ import {
   upsertFolders,
   findFolderByRemoteId,
   findFolderByWellKnown,
+  setFolderMailboxCountsLocal,
   type UpsertFolderInput
 } from '../db/folders-repo'
-import { upsertMessages, type UpsertMessageInput } from '../db/messages-repo'
+import {
+  deleteAllMessagesInFolderLocal,
+  type UpsertMessageInput
+} from '../db/messages-repo'
+import { upsertMailMessagesReconcilingTodos } from '../mail-upsert-with-todo-reconcile'
 import { getFolderSyncState, upsertFolderSyncState } from '../db/sync-state-repo'
 import { getGoogleApis } from './google-auth-client'
 import { getGmailHistoryId, updateGmailHistoryId } from './google-sync-meta-store'
@@ -182,6 +187,7 @@ function gmailMessageToUpsert(
   const listUnsubPost = headerMap.get('list-unsubscribe-post') ?? null
   const listId = headerMap.get('list-id') ?? null
 
+  const starred = labelIds.includes('STARRED')
   return {
     accountId,
     folderId,
@@ -200,7 +206,8 @@ function gmailMessageToUpsert(
     sentAt,
     receivedAt,
     isRead: labelIds.includes('UNREAD') ? 0 : 1,
-    isFlagged: labelIds.includes('STARRED') ? 1 : 0,
+    isFlagged: starred ? 1 : 0,
+    followUpFlagStatus: starred ? 'flagged' : 'notFlagged',
     hasAttachments: hasRealAttachments(msg.payload) ? 1 : 0,
     importance: null,
     changeKey: msg.historyId ?? null,
@@ -221,6 +228,21 @@ export async function syncGoogleMessagesInFolder(
     throw new Error(`Ordner ${folderRemoteId} nicht in DB gefunden.`)
   }
   const config = await loadConfig()
+
+  const labelMeta = await gmail.users.labels.get({ userId: 'me', id: folderRemoteId })
+  const msgTotal = labelMeta.data.messagesTotal ?? 0
+  if (msgTotal === 0) {
+    deleteAllMessagesInFolderLocal(folder.id)
+    setFolderMailboxCountsLocal(folder.id, 0, 0)
+    upsertFolderSyncState({
+      accountId,
+      folderId: folder.id,
+      deltaToken: null,
+      lastSyncedAt: null
+    })
+    return 0
+  }
+
   const q = gmailQueryFromSyncWindow(config.syncWindowDays)
 
   const listRes = await gmail.users.messages.list({
@@ -250,7 +272,13 @@ export async function syncGoogleMessagesInFolder(
       }
     }
   }
-  upsertMessages(inputs)
+  upsertMailMessagesReconcilingTodos(accountId, inputs)
+
+  setFolderMailboxCountsLocal(
+    folder.id,
+    labelMeta.data.messagesUnread ?? 0,
+    msgTotal
+  )
 
   if (maxInternal) {
     upsertFolderSyncState({
@@ -354,7 +382,7 @@ export async function pollGoogleInbox(accountId: string): Promise<{
           if (!primaryFolder) continue
           const f = findFolderByRemoteId(accountId, primaryFolder)
           if (!f) continue
-          upsertMessages([gmailMessageToUpsert(full.data, accountId, f.id)])
+          upsertMailMessagesReconcilingTodos(accountId, [gmailMessageToUpsert(full.data, accountId, f.id)])
           remoteIds.push(id)
           totalFetched += 1
         }

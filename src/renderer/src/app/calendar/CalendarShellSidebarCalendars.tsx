@@ -34,6 +34,8 @@ import { graphCalendarColorToDisplayHex } from '@shared/graph-calendar-colors'
 import { cn } from '@/lib/utils'
 import { resolvedAccountColorCss } from '@/lib/avatar-color'
 import { Avatar } from '@/components/Avatar'
+import { AccountSyncStatusButton } from '@/components/AccountSyncStatusButton'
+import type { SyncStatus } from '@shared/types'
 import { AccountColorStripe } from '@/components/AccountColorStripe'
 import { calendarVisibilityKey } from '@/lib/calendar-visibility-storage'
 import {
@@ -56,9 +58,13 @@ import {
   parseCalSidebarKey,
   persistSidebarLayout,
   readSidebarLayoutFromStorage,
+  removeGlobalSection,
+  renameGlobalSection,
+  setGlobalSectionIcon,
   type CalendarSidebarLayoutV1,
   type SectionBucketsView
 } from '@/lib/calendar-sidebar-layout'
+import { CalendarSidebarSectionHeader } from '@/app/calendar/CalendarSidebarSectionHeader'
 
 const CAL_DRAG_PREFIX = 'cal-drag:'
 
@@ -164,6 +170,10 @@ export interface CalendarShellSidebarCalendarsProps {
   m365GroupCalPaging: Record<string, { total: number; nextOffset: number }>
   fetchMicrosoft365GroupCalendarsIfNeeded: (accountId: string) => Promise<void>
   fetchMoreMicrosoft365GroupCalendars: (accountId: string, offset: number) => Promise<void>
+  /** Rechtsklick auf Konto-Zeile: Kontofarbe, neuer Termin, … */
+  onAccountHeaderContextMenu?: (clientX: number, clientY: number, account: ConnectedAccount) => void
+  syncByAccount: Record<string, SyncStatus>
+  onAccountSync: (accountId: string) => void
 }
 
 function filterCalendarsForSidebar(
@@ -190,7 +200,10 @@ export function CalendarShellSidebarCalendars({
   groupCalendarsLoading,
   m365GroupCalPaging,
   fetchMicrosoft365GroupCalendarsIfNeeded,
-  fetchMoreMicrosoft365GroupCalendars
+  fetchMoreMicrosoft365GroupCalendars,
+  onAccountHeaderContextMenu,
+  syncByAccount,
+  onAccountSync
 }: CalendarShellSidebarCalendarsProps): JSX.Element {
   const { t } = useTranslation()
   const [layout, setLayout] = useState<CalendarSidebarLayoutV1>(() => readSidebarLayoutFromStorage())
@@ -411,6 +424,12 @@ export function CalendarShellSidebarCalendars({
           <div key={a.id} className="mb-2">
             <div
               className={cn('group flex items-center gap-1 rounded-md px-1 py-1', open ? '' : 'hover:bg-secondary/40')}
+              onContextMenu={(e): void => {
+                if (!onAccountHeaderContextMenu) return
+                e.preventDefault()
+                e.stopPropagation()
+                onAccountHeaderContextMenu(e.clientX, e.clientY, a)
+              }}
             >
               <button
                 type="button"
@@ -452,6 +471,14 @@ export function CalendarShellSidebarCalendars({
                   <span className="block truncate text-[10px] text-muted-foreground">{a.email}</span>
                 </span>
               </button>
+              <AccountSyncStatusButton
+                sync={syncByAccount[a.id]}
+                onSync={(): void => onAccountSync(a.id)}
+                syncedTitle={t('calendar.shell.accountSyncSyncedTitle')}
+                syncingTitle={t('calendar.shell.accountSyncSyncingTitle')}
+                syncTitle={t('calendar.shell.accountSyncTitle')}
+                errorTitlePrefix={t('calendar.shell.accountSyncErrorTitle')}
+              />
             </div>
 
             {open && (
@@ -716,46 +743,28 @@ export function CalendarShellSidebarCalendars({
         const sectionBranchOpen = globalSectionsOpen[section.id] !== false
         return (
           <div key={section.id}>
-            <div className="mb-1 flex items-center gap-0.5 px-1">
-              <button
-                type="button"
-                onClick={(): void => {
-                  setGlobalSectionsOpen((prev) => {
-                    const next = { ...prev }
-                    const open = next[section.id] !== false
-                    if (open) next[section.id] = false
-                    else delete next[section.id]
-                    return next
-                  })
-                }}
-                className="flex h-5 w-4 shrink-0 items-center justify-center text-muted-foreground/70 hover:text-foreground"
-                aria-label={
-                  sectionBranchOpen
-                    ? t('calendar.shell.sidebarNamedGroupCollapseAria', { name: section.name })
-                    : t('calendar.shell.sidebarNamedGroupExpandAria', { name: section.name })
-                }
-              >
-                {sectionBranchOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-              </button>
-              <button
-                type="button"
-                onClick={(): void => {
-                  setGlobalSectionsOpen((prev) => {
-                    const next = { ...prev }
-                    const open = next[section.id] !== false
-                    if (open) next[section.id] = false
-                    else delete next[section.id]
-                    return next
-                  })
-                }}
-                className="min-w-0 flex-1 rounded-md py-0.5 text-left hover:bg-secondary/40"
-                title={section.name}
-              >
-                <p className="truncate px-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  {section.name}
-                </p>
-              </button>
-            </div>
+            <CalendarSidebarSectionHeader
+              section={section}
+              branchOpen={sectionBranchOpen}
+              onToggleBranch={(): void => {
+                setGlobalSectionsOpen((prev) => {
+                  const next = { ...prev }
+                  const open = next[section.id] !== false
+                  if (open) next[section.id] = false
+                  else delete next[section.id]
+                  return next
+                })
+              }}
+              onRename={(name): void => {
+                setLayout((prev) => renameGlobalSection(prev, section.id, name))
+              }}
+              onDelete={(): void => {
+                setLayout((prev) => removeGlobalSection(prev, section.id))
+              }}
+              onIconChange={(icon): void => {
+                setLayout((prev) => setGlobalSectionIcon(prev, section.id, icon))
+              }}
+            />
             {sectionBranchOpen ? (
               <DroppableBucket
                 id={secDropId(section.id)}

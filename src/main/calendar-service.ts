@@ -22,7 +22,8 @@ import {
   googleCreateEvent,
   googleUpdateEvent,
   googlePatchEventTimes,
-  googleDeleteEvent
+  googleDeleteEvent,
+  googleGetCalendarEventDetail
 } from './google/calendar-google'
 import { addDays, min as minDate, startOfDay } from 'date-fns'
 import { getMessageById } from './db/messages-repo'
@@ -51,6 +52,8 @@ export type CalendarListEventsFocus =
 export interface ListMergedCalendarEventsOptions {
   focus?: CalendarListEventsFocus
   includeCalendars?: CalendarIncludeCalendarRef[] | null
+  /** Google: `syncToken`-Delta statt Zeitfenster (Hintergrund-Sync). Standard: false. */
+  googleIncremental?: boolean
 }
 
 const DEFAULT_CALENDAR_LOAD_AHEAD_DAYS = 365
@@ -98,13 +101,14 @@ async function fetchGoogleCalendarViews(
   acc: ConnectedAccount,
   calendarIds: string[],
   start: Date,
-  end: Date
+  end: Date,
+  useIncremental: boolean
 ): Promise<GraphCalendarEventRow[]> {
   if (calendarIds.length === 0) return []
   const batches = await Promise.all(
     calendarIds.map(async (calId) => {
       try {
-        return await googleListEventsInCalendar(acc.id, calId, start, end, true)
+        return await googleListEventsInCalendar(acc.id, calId, start, end, useIncremental)
       } catch (e) {
         console.warn('[calendar-service] Google Kalender konnte nicht geladen werden:', acc.id, calId, e)
         return [] as GraphCalendarEventRow[]
@@ -157,6 +161,7 @@ export async function listMergedCalendarEvents(
   const out: CalendarEventView[] = []
   const focus = options?.focus
   const includeCalendars = options?.includeCalendars
+  const googleIncremental = options?.googleIncremental === true
 
   if (focus?.accountId && focus.graphCalendarId) {
     const acc = accounts.find((a) => a.id === focus.accountId)
@@ -180,7 +185,13 @@ export async function listMergedCalendarEvents(
     } else if (acc.provider === 'google') {
       let rows: GraphCalendarEventRow[] = []
       try {
-        rows = await googleListEventsInCalendar(acc.id, focus.graphCalendarId, start, effEnd, false)
+        rows = await googleListEventsInCalendar(
+          acc.id,
+          focus.graphCalendarId,
+          start,
+          effEnd,
+          googleIncremental
+        )
       } catch (e) {
         console.warn('[calendar-service] Google Kalender fehlgeschlagen:', acc.id, focus.graphCalendarId, e)
       }
@@ -216,7 +227,7 @@ export async function listMergedCalendarEvents(
           out.push(rowToView(acc, r, 'microsoft'))
         }
       } else {
-        const rows = await fetchGoogleCalendarViews(acc, ids, start, effEnd)
+        const rows = await fetchGoogleCalendarViews(acc, ids, start, effEnd, googleIncremental)
         for (const r of rows) {
           out.push(rowToView(acc, r, 'google'))
         }
@@ -259,7 +270,8 @@ export async function listMergedCalendarEvents(
           acc,
           calendars.map((c) => c.id),
           start,
-          effEnd
+          effEnd,
+          googleIncremental
         )
       } catch (e) {
         console.warn('[calendar-service] Google-Kalender fehlgeschlagen:', acc.id, e)
@@ -331,16 +343,17 @@ export async function getCalendarEventForAccount(input: CalendarGetEventInput): 
   if (!acc) {
     throw new Error('Konto nicht gefunden.')
   }
+  if (acc.provider === 'google') {
+    const calId = input.graphCalendarId?.trim()
+    if (!calId) {
+      throw new Error('Google: Kalender-ID fehlt (graphCalendarId).')
+    }
+    return googleGetCalendarEventDetail(input.accountId, calId, input.graphEventId.trim())
+  }
   if (acc.provider !== 'microsoft') {
-    throw new Error('Termin-Details (Teilnehmer/Teams) sind nur fuer Microsoft-365-Konten verfuegbar.')
+    throw new Error('Kalender-Termin-Details werden fuer dieses Konto nicht unterstuetzt.')
   }
-  const d = await graphGetCalendarEvent(input.accountId, input.graphEventId, input.graphCalendarId ?? null)
-  return {
-    subject: d.subject,
-    attendeeEmails: d.attendeeEmails,
-    joinUrl: d.joinUrl,
-    isOnlineMeeting: d.isOnlineMeeting
-  }
+  return graphGetCalendarEvent(input.accountId, input.graphEventId, input.graphCalendarId ?? null)
 }
 
 export async function createSimpleCalendarEventForAccount(

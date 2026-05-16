@@ -2,6 +2,41 @@ import type { tasks_v1 } from 'googleapis'
 import type { TaskItemRow, TaskListRow } from '@shared/types'
 import { getGoogleApis } from './google-auth-client'
 
+interface GoogleTasksApiErrLike {
+  message?: string
+  errors?: Array<{ reason?: string; message?: string }>
+}
+
+function formatGoogleTasksError(err: unknown): Error {
+  if (err && typeof err === 'object') {
+    const e = err as GoogleTasksApiErrLike
+    const sub = e.errors?.[0]
+    if (sub?.reason === 'accessNotConfigured') {
+      return new Error(
+        'Google Tasks API ist im Google-Cloud-Projekt nicht aktiviert. ' +
+          'In der Google Cloud Console unter «APIs & Dienste» die «Google Tasks API» aktivieren, ' +
+          'einige Minuten warten und das Konto ggf. erneut verbinden.'
+      )
+    }
+    if (typeof sub?.message === 'string' && sub.message.trim()) {
+      return new Error(sub.message.trim())
+    }
+    if (typeof e.message === 'string' && e.message.trim()) {
+      const m = e.message.trim()
+      return new Error(m.length > 240 ? `${m.slice(0, 240)}…` : m)
+    }
+  }
+  return err instanceof Error ? err : new Error(String(err))
+}
+
+async function withGoogleTasksApi<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn()
+  } catch (e) {
+    throw formatGoogleTasksError(e)
+  }
+}
+
 function rowFromGoogleTask(listId: string, t: tasks_v1.Schema$Task): TaskItemRow | null {
   if (!t.id) return null
   const completed = t.status === 'completed'
@@ -20,6 +55,7 @@ function rowFromGoogleTask(listId: string, t: tasks_v1.Schema$Task): TaskItemRow
 }
 
 export async function googleListTaskLists(accountId: string): Promise<TaskListRow[]> {
+  return withGoogleTasksApi(async () => {
   const { tasks } = await getGoogleApis(accountId)
   const res = await tasks.tasklists.list({ maxResults: 100 })
   const items = res.data.items ?? []
@@ -31,6 +67,7 @@ export async function googleListTaskLists(accountId: string): Promise<TaskListRo
       isDefault: Boolean(x.id === '@default'),
       provider: 'google' as const
     }))
+  })
 }
 
 export async function googleListTasksInList(

@@ -6,9 +6,9 @@ import {
   Layers,
   ListChecks,
   Move,
-  Palette,
   Pencil,
   Plus,
+  RefreshCw,
   ScanSearch,
   Star,
   StarOff,
@@ -34,8 +34,7 @@ import { sidebarIsProtectedWellKnownFolder } from '@/lib/sidebar-well-known'
 import { ContextMenu, type ContextMenuItem } from '@/components/ContextMenu'
 import { MoveFolderDialog } from '@/components/MoveFolderDialog'
 import { MetaFolderDialog } from '@/components/MetaFolderDialog'
-import { accountColorToCssBackground } from '@/lib/avatar-color'
-import { ACCOUNT_COLOR_PRESET_OPTIONS, isPresetAccountColorClass } from '@shared/account-colors'
+import { buildAccountColorAndNewContextItems } from '@/lib/account-sidebar-context-menu'
 import type { ConnectedAccount, MailFolder, MailListItem, MetaFolderSummary } from '@shared/types'
 import type { SidebarInlineEditState } from '@/app/layout/sidebar/sidebar-types'
 import {
@@ -56,6 +55,7 @@ import {
 import { SidebarSortableAccountFolderSection } from '@/app/layout/sidebar/SidebarSortableAccount'
 import { SidebarFooter } from '@/app/layout/sidebar/SidebarFooter'
 import { useUndoStore } from '@/stores/undo'
+import { useConnectivityStore } from '@/stores/connectivity'
 import { readDraggedWorkflowMessageIds } from '@/lib/workflow-dnd'
 import {
   SIDEBAR_HIDDEN_MAIL_FOLDER_KEYS_STORAGE_KEY,
@@ -140,6 +140,7 @@ export function Sidebar({ onOpenAccountDialog }: Props): JSX.Element {
     .flat()
     .filter((f) => f.wellKnown === 'inbox')
     .reduce((sum, f) => sum + (f.unreadCount ?? 0), 0)
+  const online = useConnectivityStore((s) => s.online)
   const [contextMenu, setContextMenu] = useState<ContextState | null>(null)
   const [inlineEdit, setInlineEdit] = useState<SidebarInlineEditState | null>(null)
   const [moveDialogFor, setMoveDialogFor] = useState<MailFolder | null>(null)
@@ -287,33 +288,26 @@ export function Sidebar({ onOpenAccountDialog }: Props): JSX.Element {
     await moveFolder(moveDialogFor.id, destinationFolderId)
   }
 
-  function openNativeColorPickerForAccount(accountId: string, currentStored: string): void {
-    const el = document.createElement('input')
-    el.type = 'color'
-    el.value = accountColorToCssBackground(currentStored) ?? '#64748b'
-    el.setAttribute('aria-hidden', 'true')
-    Object.assign(el.style, {
-      position: 'fixed',
-      opacity: '0',
-      width: '1px',
-      height: '1px',
-      left: '0',
-      top: '0',
-      pointerEvents: 'none'
-    })
-    document.body.appendChild(el)
-    const cleanup = (): void => {
-      el.remove()
-    }
-    el.addEventListener('change', () => {
-      void patchAccountColor(accountId, el.value).catch((e) => {
-        setError(e instanceof Error ? e.message : String(e))
+  async function handleSyncFolder(folder: MailFolder): Promise<void> {
+    if (!online) {
+      useUndoStore.getState().pushToast({
+        label: t('sidebar.syncFolderOffline'),
+        variant: 'error'
       })
-      cleanup()
-    })
-    window.setTimeout(() => {
-      el.click()
-    }, 0)
+      return
+    }
+    setError(null)
+    try {
+      await window.mailClient.mail.syncFolder(folder.id)
+      useUndoStore.getState().pushToast({
+        label: t('sidebar.syncFolderDone', { name: folder.name }),
+        variant: 'success'
+      })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setError(msg)
+      useUndoStore.getState().pushToast({ label: msg, variant: 'error' })
+    }
   }
 
   function buildContextItems(folder: MailFolder | null, accountId: string): ContextMenuItem[] {
@@ -322,44 +316,17 @@ export function Sidebar({ onOpenAccountDialog }: Props): JSX.Element {
       if (!acc) {
         return []
       }
-      const colorSubmenu: ContextMenuItem[] = [
-        ...ACCOUNT_COLOR_PRESET_OPTIONS.map((o) => ({
-          id: `acc-color-${o.value}`,
-          label: o.label,
-          swatchHex: accountColorToCssBackground(o.value),
-          selected: acc.color === o.value,
-          onSelect: (): void => {
-            void patchAccountColor(accountId, o.value).catch((e) => {
-              setError(e instanceof Error ? e.message : String(e))
-            })
-          }
-        })),
-        {
-          id: 'acc-color-custom',
-          label: 'Eigene Farbe…',
-          swatchHex: accountColorToCssBackground(acc.color) ?? '#64748b',
-          selected: !isPresetAccountColorClass(acc.color),
-          onSelect: (): void => {
-            const cur = acc.color
-            window.setTimeout(() => openNativeColorPickerForAccount(accountId, cur), 0)
-          }
-        }
-      ]
-      return [
-        {
-          id: 'acc-color-menu',
-          label: 'Kontofarbe',
-          icon: Palette,
-          submenu: colorSubmenu
-        },
-        { id: 'acc-sep-new', label: '', separator: true },
-        {
+      return buildAccountColorAndNewContextItems({
+        account: acc,
+        patchAccountColor,
+        onPatchError: (msg) => setError(msg),
+        newItem: {
           id: 'new-top',
           label: acc.provider === 'google' ? 'Neues Label' : 'Neuer Ordner (oberste Ebene)',
           icon: FolderPlus,
           onSelect: (): void => startCreate(accountId, null)
         }
-      ]
+      })
     }
 
     const protectedFolder = sidebarIsProtectedWellKnownFolder(folder.wellKnown)
@@ -373,6 +340,15 @@ export function Sidebar({ onOpenAccountDialog }: Props): JSX.Element {
         icon: folder.isFavorite ? StarOff : Star,
         onSelect: (): void => {
           void toggleFolderFavorite(folder.id, !folder.isFavorite)
+        }
+      },
+      {
+        id: 'sync-folder',
+        label: t('sidebar.syncFolder'),
+        icon: RefreshCw,
+        disabled: !online,
+        onSelect: (): void => {
+          void handleSyncFolder(folder)
         }
       },
       {

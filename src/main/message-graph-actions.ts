@@ -29,6 +29,7 @@ import {
   gmailEmptyTrash,
   gmailMoveMessageForFolderMove
 } from './google/gmail-actions'
+import { isGraphItemNotFound } from './graph/graph-request-errors'
 import { runFolderSync } from './sync-runner'
 import { listAccounts } from './accounts'
 import { listTagsForMessage, replaceMessageTags } from './db/message-tags-repo'
@@ -42,15 +43,6 @@ function broadcastMailChanged(accountId: string): void {
 function truncate(text: string, max: number): string {
   if (text.length <= max) return text
   return text.slice(0, max - 1) + '...'
-}
-
-function isGraphMessageNotFound(e: unknown): boolean {
-  if (!e || typeof e !== 'object') return false
-  const o = e as { statusCode?: number; code?: string; body?: unknown }
-  if (o.statusCode === 404) return true
-  if (o.code === 'ErrorItemNotFound') return true
-  if (typeof o.body === 'string' && o.body.includes('ErrorItemNotFound')) return true
-  return false
 }
 
 export async function applySetReadForMessage(
@@ -90,7 +82,7 @@ export async function applySetReadForMessage(
       }
     })
   } catch (e) {
-    if (isGraphMessageNotFound(e)) {
+    if (isGraphItemNotFound(e)) {
       console.warn(
         `[message-graph-actions] setRead: Nachricht ${messageId} (remote ${msg.remoteId}) existiert auf dem Server nicht mehr — lokaler Lesestatus bleibt.`
       )
@@ -119,14 +111,21 @@ export async function applySetReadForMessage(
 export async function applySetFlaggedForMessage(
   messageId: number,
   flagged: boolean,
-  opts?: { source?: string; ruleId?: number | null }
+  opts?: {
+    source?: string
+    ruleId?: number | null
+    /** Kein `mail:changed` pro Mail (Batch-Ende sendet ein Event). */
+    skipBroadcast?: boolean
+    /** Kein Eintrag in `message_actions` (Massen-Entkennung). */
+    skipActionRecord?: boolean
+  }
 ): Promise<void> {
   const msg = getMessageById(messageId)
   if (!msg) throw new Error('Mail nicht gefunden.')
   if (msg.isFlagged === flagged) return
 
   setMessageFlaggedLocal(messageId, flagged)
-  broadcastMailChanged(msg.accountId)
+  if (!opts?.skipBroadcast) broadcastMailChanged(msg.accountId)
 
   const source = opts?.source ?? 'ui'
   const accounts = await listAccounts()
@@ -138,20 +137,22 @@ export async function applySetFlaggedForMessage(
     } else {
       await graphSetFlagged(msg.accountId, msg.remoteId, flagged)
     }
-    recordAction({
-      messageId,
-      accountId: msg.accountId,
-      actionType: 'set-flagged',
-      source,
-      ruleId: opts?.ruleId,
-      payload: {
-        previousIsFlagged: msg.isFlagged,
-        label: flagged ? 'Stern gesetzt' : 'Stern entfernt'
-      }
-    })
+    if (!opts?.skipActionRecord) {
+      recordAction({
+        messageId,
+        accountId: msg.accountId,
+        actionType: 'set-flagged',
+        source,
+        ruleId: opts?.ruleId,
+        payload: {
+          previousIsFlagged: msg.isFlagged,
+          label: flagged ? 'Stern gesetzt' : 'Stern entfernt'
+        }
+      })
+    }
   } catch (e) {
     setMessageFlaggedLocal(messageId, msg.isFlagged)
-    broadcastMailChanged(msg.accountId)
+    if (!opts?.skipBroadcast) broadcastMailChanged(msg.accountId)
     throw e
   }
 }
@@ -171,54 +172,51 @@ export async function applyMoveMessageToWellKnownAlias(
   const targetFolder = findFolderByWellKnown(msg.accountId, destinationAlias)
   const previousFolder = msg.folderId != null ? findFolderById(msg.folderId) : null
 
+  const source = opts?.source ?? 'ui'
+  const accounts = await listAccounts()
+  const acc = accounts.find((a) => a.id === msg.accountId)
+
+  /** Zuerst Server: sonst ist lokal weg/Push erfolgt, Graph aber fehlgeschlagen → OWA und App auseinander. */
+  let newRemoteId: string | undefined
+  if (acc?.provider === 'google') {
+    if (destinationAlias === 'deleteditems') {
+      newRemoteId = await gmailTrashMessage(msg.accountId, msg.remoteId)
+    } else {
+      newRemoteId = await gmailArchiveMessage(msg.accountId, msg.remoteId)
+    }
+  } else {
+    const destFolder = findFolderByWellKnown(msg.accountId, destinationAlias)
+    const destId = destFolder?.remoteId ?? destinationAlias
+    newRemoteId = await graphMoveMessage(msg.accountId, msg.remoteId, destId)
+  }
+
   deleteMessageLocal(messageId)
   if (msg.folderId != null && !msg.isRead) {
     adjustFolderUnread(msg.folderId, -1)
   }
   broadcastMailChanged(msg.accountId)
 
-  const source = opts?.source ?? 'ui'
-  const accounts = await listAccounts()
-  const acc = accounts.find((a) => a.id === msg.accountId)
-
-  try {
-    let newRemoteId: string | undefined
-    if (acc?.provider === 'google') {
-      if (destinationAlias === 'deleteditems') {
-        newRemoteId = await gmailTrashMessage(msg.accountId, msg.remoteId)
-      } else {
-        newRemoteId = await gmailArchiveMessage(msg.accountId, msg.remoteId)
-      }
-    } else {
-      newRemoteId = await graphMoveMessage(msg.accountId, msg.remoteId, destinationAlias)
-    }
-    if (targetFolder) {
-      void runFolderSync(targetFolder.id).catch((e) =>
-        console.warn('[message-graph-actions] Sync Ziel-Ordner fehlgeschlagen:', e)
-      )
-    }
-    recordAction({
-      messageId: null,
-      accountId: msg.accountId,
-      actionType: destinationAlias === 'archive' ? 'archive' : 'move-to-trash',
-      source,
-      ruleId: opts?.ruleId,
-      payload: {
-        previousFolderId: previousFolder?.id ?? null,
-        previousFolderRemoteId: previousFolder?.remoteId ?? null,
-        newRemoteId,
-        label:
-          destinationAlias === 'archive'
-            ? `Archiviert: ${truncate(msg.subject ?? '(Kein Betreff)', 60)}`
-            : `Geloescht: ${truncate(msg.subject ?? '(Kein Betreff)', 60)}`
-      }
-    })
-  } catch (e) {
-    if (msg.folderId != null) {
-      void runFolderSync(msg.folderId).catch(() => undefined)
-    }
-    throw e
+  if (targetFolder) {
+    void runFolderSync(targetFolder.id).catch((e) =>
+      console.warn('[message-graph-actions] Sync Ziel-Ordner fehlgeschlagen:', e)
+    )
   }
+  recordAction({
+    messageId: null,
+    accountId: msg.accountId,
+    actionType: destinationAlias === 'archive' ? 'archive' : 'move-to-trash',
+    source,
+    ruleId: opts?.ruleId,
+    payload: {
+      previousFolderId: previousFolder?.id ?? null,
+      previousFolderRemoteId: previousFolder?.remoteId ?? null,
+      newRemoteId,
+      label:
+        destinationAlias === 'archive'
+          ? `Archiviert: ${truncate(msg.subject ?? '(Kein Betreff)', 60)}`
+          : `Geloescht: ${truncate(msg.subject ?? '(Kein Betreff)', 60)}`
+    }
+  })
 }
 
 /**
@@ -296,46 +294,40 @@ export async function applyMoveMessageToFolder(
     throw new Error('Verschieben in andere Ordner wird fuer dieses Konto nicht unterstuetzt.')
   }
 
+  const source = opts?.source ?? 'ui'
+
+  const newRemoteId = await graphMoveMessage(
+    msg.accountId,
+    msg.remoteId,
+    targetFolder.remoteId
+  )
+
   deleteMessageLocal(messageId)
   if (msg.folderId != null && !msg.isRead) {
     adjustFolderUnread(msg.folderId, -1)
   }
   broadcastMailChanged(msg.accountId)
 
-  const source = opts?.source ?? 'ui'
-
-  try {
-    const newRemoteId = await graphMoveMessage(
-      msg.accountId,
-      msg.remoteId,
-      targetFolder.remoteId
-    )
-    void runFolderSync(targetFolder.id).catch((e) =>
-      console.warn('[message-graph-actions] Sync Ziel-Ordner fehlgeschlagen:', e)
-    )
-    recordAction({
-      messageId: null,
-      accountId: msg.accountId,
-      actionType: 'move-message',
-      source,
-      ruleId: opts?.ruleId ?? null,
-      payload: {
-        previousFolderId: previousFolder?.id ?? null,
-        previousFolderRemoteId: previousFolder?.remoteId ?? null,
-        newRemoteId,
-        targetFolderId: targetFolder.id,
-        label:
-          source === 'workflow-mail-folders'
-            ? `Triage: nach „${truncate(targetFolder.name, 40)}“ — ${truncate(msg.subject ?? '(Kein Betreff)', 50)}`
-            : `Regel: verschoben nach „${truncate(targetFolder.name, 40)}“ — ${truncate(msg.subject ?? '(Kein Betreff)', 50)}`
-      }
-    })
-  } catch (e) {
-    if (msg.folderId != null) {
-      void runFolderSync(msg.folderId).catch(() => undefined)
+  void runFolderSync(targetFolder.id).catch((e) =>
+    console.warn('[message-graph-actions] Sync Ziel-Ordner fehlgeschlagen:', e)
+  )
+  recordAction({
+    messageId: null,
+    accountId: msg.accountId,
+    actionType: 'move-message',
+    source,
+    ruleId: opts?.ruleId ?? null,
+    payload: {
+      previousFolderId: previousFolder?.id ?? null,
+      previousFolderRemoteId: previousFolder?.remoteId ?? null,
+      newRemoteId,
+      targetFolderId: targetFolder.id,
+      label:
+        source === 'workflow-mail-folders'
+          ? `Triage: nach „${truncate(targetFolder.name, 40)}“ — ${truncate(msg.subject ?? '(Kein Betreff)', 50)}`
+          : `Regel: verschoben nach „${truncate(targetFolder.name, 40)}“ — ${truncate(msg.subject ?? '(Kein Betreff)', 50)}`
     }
-    throw e
-  }
+  })
 }
 
 const MAX_MESSAGE_CATEGORIES = 25
@@ -395,12 +387,6 @@ export async function applyPermanentDeleteMessage(messageId: number): Promise<vo
   const accounts = await listAccounts()
   const acc = accounts.find((a) => a.id === accountId)
 
-  deleteMessageLocal(messageId)
-  if (wasUnread) {
-    adjustFolderUnread(folderId, -1)
-  }
-  broadcastMailChanged(accountId)
-
   try {
     if (acc?.provider === 'google') {
       await gmailDeleteMessageForever(accountId, remoteId)
@@ -408,13 +394,23 @@ export async function applyPermanentDeleteMessage(messageId: number): Promise<vo
       await graphDeleteMessageRemote(accountId, remoteId)
     }
   } catch (e) {
-    if (isGraphMessageNotFound(e)) {
+    if (isGraphItemNotFound(e)) {
+      deleteMessageLocal(messageId)
+      if (wasUnread) {
+        adjustFolderUnread(folderId, -1)
+      }
+      broadcastMailChanged(accountId)
       void runFolderSync(folderId).catch(() => undefined)
       return
     }
-    void runFolderSync(folderId).catch(() => undefined)
     throw e
   }
+
+  deleteMessageLocal(messageId)
+  if (wasUnread) {
+    adjustFolderUnread(folderId, -1)
+  }
+  broadcastMailChanged(accountId)
 
   void runFolderSync(folderId).catch((err) =>
     console.warn('[message-graph-actions] Sync Papierkorb nach endgueltigem Loeschen:', err)

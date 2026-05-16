@@ -23,7 +23,7 @@ export function registerAppIpc(): void {
     const raw = typeof url === 'string' ? url.trim() : ''
     if (!raw) throw new Error('Keine URL.')
     if (!normalizeExternalOpenUrl(raw)) {
-      throw new Error('Nur http(s)-, mailto-, tel- oder Teams-Links duerfen geoeffnet werden.')
+      throw new Error('Diese URL darf nicht extern geoeffnet werden (nicht in der erlaubten Liste).')
     }
     await openExternalDeduped(raw)
     const win = BrowserWindow.fromWebContents(event.sender)

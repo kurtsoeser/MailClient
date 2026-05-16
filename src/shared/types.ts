@@ -323,6 +323,16 @@ export interface CalendarEventView {
   categories?: string[]
   /** false: Kalender erlaubt keine Aenderungen (z. B. Google `reader`). */
   calendarCanEdit?: boolean
+  /** Lokales Anzeige-Icon (`calendar-event-icons`), nicht mit Graph/Google synchronisiert. */
+  icon?: string | null
+}
+
+/** Lokales Termin-Icon setzen/entfernen. */
+export interface CalendarPatchEventIconInput {
+  accountId: string
+  graphEventId: string
+  /** `calendar-event-icons` ID oder null/leer = Standard (kein Icon). */
+  iconId?: string | null
 }
 
 /** Kalender-Ordner unter einem Konto (Graph `GET /me/calendars` oder Google `calendarList`). */
@@ -368,6 +378,8 @@ export interface CalendarListEventsInput {
    * Wenn nicht gesetzt: alle Kalender aller verbundenen Konten wie zuvor.
    */
   includeCalendars?: CalendarIncludeCalendarRef[] | null
+  /** Cache ignorieren und von der Cloud neu laden (wenn online). */
+  forceRefresh?: boolean
 }
 
 /** Argumente fuer `calendar.listCalendars` (IPC `calendar:list-calendars`). */
@@ -375,6 +387,12 @@ export interface CalendarListCalendarsInput {
   accountId: string
   /** Wenn true: Cache ignorieren und neu von der API laden (nur Google; Microsoft unveraendert). */
   forceRefresh?: boolean
+}
+
+/** Lokaler Kalender-Sync-Stand pro Konto (`calendar:get-account-sync-states`). */
+export interface CalendarAccountSyncStateRow {
+  accountId: string
+  hasSynced: boolean
 }
 
 /** Serienfrequenz beim Anlegen (UI + API-Mapping). */
@@ -428,6 +446,8 @@ export interface CalendarGetEventInput {
   accountId: string
   graphEventId: string
   graphCalendarId?: string | null
+  /** Cache ignorieren und von Graph neu laden (wenn online). */
+  forceRefresh?: boolean
 }
 
 export interface CalendarGetEventResult {
@@ -435,6 +455,30 @@ export interface CalendarGetEventResult {
   attendeeEmails: string[]
   joinUrl: string | null
   isOnlineMeeting: boolean
+  /** Roh-HTML aus Graph (`body.contentType=html`) bzw. Google `description` (oft HTML). */
+  bodyHtml: string | null
+}
+
+/** Termin in anderen Kalender / anderes Konto kopieren oder verschieben. */
+export interface CalendarTransferEventInput {
+  source: {
+    accountId: string
+    graphEventId: string
+    graphCalendarId?: string | null
+    title: string
+    startIso: string
+    endIso: string
+    isAllDay: boolean
+    location?: string | null
+    categories?: string[] | null
+    /** false bei Abo/Feed oder reinem Lesezugriff — Verschieben nicht moeglich. */
+    calendarCanEdit?: boolean
+  }
+  targetAccountId: string
+  targetGraphCalendarId?: string | null
+  mode: 'copy' | 'move'
+  /** Bei Bearbeiten+Verschieben: aktuelle Formularwerte fuer den Zieltermin. */
+  payloadOverride?: Omit<CalendarSaveEventInput, 'accountId' | 'graphCalendarId'>
 }
 
 /** Termin loeschen (Graph oder Google). */
@@ -497,6 +541,10 @@ export interface TaskItemRow {
 
 export interface TasksListListsInput {
   accountId: string
+  /** Cache ignorieren und von der Cloud neu laden (wenn online). */
+  forceRefresh?: boolean
+  /** Nur lokaler Cache — kein Hintergrund-Sync (z. B. nach tasks-changed-Broadcast). */
+  cacheOnly?: boolean
 }
 
 export interface TasksListTasksInput {
@@ -505,6 +553,10 @@ export interface TasksListTasksInput {
   /** Standard: true (wie Google API-Default). */
   showCompleted?: boolean
   showHidden?: boolean
+  /** Cache ignorieren und von der Cloud neu laden (wenn online). */
+  forceRefresh?: boolean
+  /** Nur lokaler Cache — kein Hintergrund-Sync (z. B. nach tasks-changed-Broadcast). */
+  cacheOnly?: boolean
 }
 
 export interface TasksCreateTaskInput {
@@ -535,6 +587,57 @@ export interface TasksDeleteTaskInput {
   accountId: string
   listId: string
   taskId: string
+}
+
+/** Microsoft 365: alle **erledigten** Aufgaben in der Built-in-Liste `flaggedEmails` (Gekennzeichnete E-Mail) per Graph löschen. */
+export interface TasksBulkDeleteCompletedFlaggedEmailInput {
+  accountId: string
+}
+
+export interface TasksBulkDeleteCompletedFlaggedEmailResult {
+  /** `false`, wenn Graph keine Liste `flaggedEmails` liefert. */
+  listFound: boolean
+  /** Erfolgreich von Graph entfernt und lokal bereinigt. */
+  deleted: number
+  /** Einzel-Löschungen mit Fehler (z. B. Throttling). */
+  failed: number
+}
+
+/** Lokale Planungszeit für Cloud-Aufgaben (Kalender-Blöcke). */
+export interface TaskPlannedScheduleDto {
+  taskKey: string
+  plannedStartIso: string
+  plannedEndIso: string
+}
+
+export interface TasksListPlannedSchedulesInput {
+  taskKeys: string[]
+}
+
+export interface TasksSetPlannedScheduleInput {
+  taskKey: string
+  plannedStartIso: string
+  plannedEndIso: string
+}
+
+export interface TasksClearPlannedScheduleInput {
+  taskKey: string
+}
+
+export interface MailCloudTaskLinkDto {
+  messageId: number
+  accountId: string
+  listId: string
+  taskId: string
+}
+
+export interface TasksCreateMailCloudTaskFromMessageInput {
+  messageId: number
+  accountId: string
+  listId: string
+  title: string
+  notes?: string | null
+  dueIso?: string | null
 }
 
 /** Kontakte-Modul: Navigations-/Listenfilter. */
@@ -863,6 +966,51 @@ export interface AttachmentMeta {
   contentId: string | null
 }
 
+/** IPC `mail:clear-local-mail-cache` — lokaler Mail-Sync-Cache neu aufbauen. */
+export interface ClearLocalMailCacheResult {
+  /** True, wenn direkt danach ein vollständiger Erst-Sync lief (Online). */
+  resynced: boolean
+  folders?: number
+  inboxMessages?: number
+}
+
+export interface MailBulkUnflagInput {
+  accountId: string
+  excludeDeletedJunk: boolean
+  dryRun: boolean
+}
+
+export interface MailBulkUnflagDryRunResult {
+  dryRun: true
+  count: number
+}
+
+export interface MailBulkUnflagExecuteResult {
+  dryRun: false
+  processed: number
+  failed: number
+  firstError: string | null
+}
+
+export type MailBulkUnflagResult = MailBulkUnflagDryRunResult | MailBulkUnflagExecuteResult
+
+export interface MailBulkUnflagProgressPayload {
+  accountId: string
+  done: number
+  total: number
+}
+
+/** Nach `removeMailTodoRecordsForMessage`: lokale `todos`-Zeilen entfernt (Mail bleibt). */
+export interface RemoveMailTodoRecordsResult {
+  removed: number
+}
+
+/** IPC `tasks:clear-local-tasks-cache` — lokaler To-Do-/Aufgaben-Cache neu aufbauen. */
+export interface ClearLocalTasksCacheResult {
+  /** Online: vollständiger Listen-/Task-Sync wurde im Hintergrund angestoßen (kein Warten bis fertig). Offline: false. */
+  resynced: boolean
+}
+
 export interface SyncStatus {
   accountId: string
   state: 'idle' | 'syncing-folders' | 'syncing-messages' | 'error'
@@ -891,6 +1039,27 @@ export interface TeamsChatMessageView {
   fromUserId: string | null
   /** `system`: Teams-Systemereignis (`systemEventMessage` / eventDetail). */
   messageKind: TeamsChatMessageKind
+}
+
+/** Interner Schluessel fuer Teams-Chat-Popout-Fenster (`accountId::chatId`). */
+export type TeamsChatPopoutKey = string
+
+export interface TeamsChatPopoutOpenInput {
+  accountId: string
+  chatId: string
+  title?: string
+  /** Beim Oeffnen; ohne Angabe wird der gespeicherte Standard aus dem Renderer genutzt. */
+  alwaysOnTop?: boolean
+}
+
+export interface TeamsChatPopoutRef {
+  accountId: string
+  chatId: string
+}
+
+export interface TeamsChatPopoutListItem extends TeamsChatPopoutRef {
+  title: string
+  alwaysOnTop: boolean
 }
 
 export type UserNoteKind = 'mail' | 'calendar' | 'standalone'
@@ -1092,6 +1261,16 @@ export const IPC = {
     listTeamsChatMessages: 'graph:list-teams-chat-messages',
     sendTeamsChatMessage: 'graph:send-teams-chat-message'
   },
+  teamsChatPopout: {
+    open: 'teams-chat-popout:open',
+    close: 'teams-chat-popout:close',
+    closeAll: 'teams-chat-popout:close-all',
+    focus: 'teams-chat-popout:focus',
+    isOpen: 'teams-chat-popout:is-open',
+    listOpen: 'teams-chat-popout:list-open',
+    getAlwaysOnTop: 'teams-chat-popout:get-always-on-top',
+    setAlwaysOnTop: 'teams-chat-popout:set-always-on-top'
+  },
   notes: {
     getMail: 'notes:get-mail',
     upsertMail: 'notes:upsert-mail',
@@ -1120,7 +1299,9 @@ export const IPC = {
     search: 'mail:search',
     getMessage: 'mail:get-message',
     syncAccount: 'mail:sync-account',
+    clearLocalMailCache: 'mail:clear-local-mail-cache',
     syncFolder: 'mail:sync-folder',
+    bulkUnflagFlaggedMessages: 'mail:bulk-unflag-flagged-messages',
     setRead: 'mail:set-read',
     setFlagged: 'mail:set-flagged',
     archive: 'mail:archive',
@@ -1138,6 +1319,7 @@ export const IPC = {
     setTodoForMessage: 'mail:set-todo-for-message',
     setTodoScheduleForMessage: 'mail:set-todo-schedule-for-message',
     completeTodoForMessage: 'mail:complete-todo-for-message',
+    removeMailTodoRecordsForMessage: 'mail:remove-mail-todo-records-for-message',
     listTemplates: 'mail:list-templates',
     listQuickSteps: 'mail:list-quick-steps',
     runQuickStep: 'mail:run-quick-step',
@@ -1197,15 +1379,26 @@ export const IPC = {
     /** Nur Start/Ende/Ganztaegig (Drag & Drop / Resize). */
     patchEventSchedule: 'calendar:patch-event-schedule',
     /** Nur `categories` am Graph-Termin patchen (ohne Body/Zeiten). */
-    patchEventCategories: 'calendar:patch-event-categories'
+    patchEventCategories: 'calendar:patch-event-categories',
+    patchEventIcon: 'calendar:patch-event-icon',
+    transferEvent: 'calendar:transfer-event',
+    syncAccount: 'calendar:sync-account',
+    getAccountSyncStates: 'calendar:get-account-sync-states'
   },
   tasks: {
     listLists: 'tasks:list-lists',
     listTasks: 'tasks:list-tasks',
+    clearLocalTasksCache: 'tasks:clear-local-tasks-cache',
     createTask: 'tasks:create-task',
     updateTask: 'tasks:update-task',
     patchTask: 'tasks:patch-task',
-    deleteTask: 'tasks:delete-task'
+    deleteTask: 'tasks:delete-task',
+    bulkDeleteCompletedFlaggedEmailTasks: 'tasks:bulk-delete-completed-flagged-email-tasks',
+    listPlannedSchedules: 'tasks:list-planned-schedules',
+    setPlannedSchedule: 'tasks:set-planned-schedule',
+    clearPlannedSchedule: 'tasks:clear-planned-schedule',
+    listMailCloudTaskLinks: 'tasks:list-mail-cloud-task-links',
+    createMailCloudTaskFromMessage: 'tasks:create-mail-cloud-task-from-message'
   },
   people: {
     list: 'people:list',

@@ -9,11 +9,16 @@ import { ToastStack } from './components/ToastStack'
 import { AppDialogHost } from './components/AppDialogHost'
 import { NotionDestinationPickerDialog } from './components/NotionDestinationPickerDialog'
 import { SnoozePickerHost } from './components/SnoozePickerHost'
+import { CreateCloudTaskFromMailDialogHost } from './components/CreateCloudTaskFromMailDialogHost'
 import { useAccountsStore } from './stores/accounts'
 import { useMailStore } from './stores/mail'
+import { useCalendarSyncStore } from './stores/calendar-sync'
 import { useGlobalShortcuts } from './lib/use-global-shortcuts'
-import { OPEN_ACCOUNT_SETTINGS_EVENT, type OpenAccountSettingsTab } from './lib/open-account-settings'
-import { useAppModeStore } from './stores/app-mode'
+import {
+  OPEN_ACCOUNT_SETTINGS_EVENT,
+  type OpenAccountSettingsTab
+} from './lib/open-account-settings'
+import { PENDING_MAIL_RULES_SETTINGS_KEY, useAppModeStore } from './stores/app-mode'
 import { subscribeConnectivityFromMain } from './stores/connectivity'
 
 const HomeDashboard = lazy(async () => {
@@ -24,10 +29,6 @@ const MailWorkspace = lazy(async () => {
   const m = await import('./app/layout/MailWorkspace')
   return { default: m.MailWorkspace }
 })
-const WorkflowBoard = lazy(async () => {
-  const m = await import('./app/workflow/WorkflowBoard')
-  return { default: m.WorkflowBoard }
-})
 const CalendarShell = lazy(async () => {
   const m = await import('./app/calendar/CalendarShell')
   return { default: m.CalendarShell }
@@ -36,10 +37,6 @@ const NotesShell = lazy(async () => {
   const m = await import('./app/notes/NotesShell')
   return { default: m.NotesShell }
 })
-const RulesShell = lazy(async () => {
-  const m = await import('./app/rules/RulesShell')
-  return { default: m.RulesShell }
-})
 const ChatShell = lazy(async () => {
   const m = await import('./app/chat/ChatShell')
   return { default: m.ChatShell }
@@ -47,6 +44,10 @@ const ChatShell = lazy(async () => {
 const TasksShell = lazy(async () => {
   const m = await import('./app/tasks/TasksShell')
   return { default: m.TasksShell }
+})
+const WorkShell = lazy(async () => {
+  const m = await import('./app/work/WorkShell')
+  return { default: m.WorkShell }
 })
 const PeopleShell = lazy(async () => {
   const m = await import('./app/people/PeopleShell')
@@ -70,11 +71,12 @@ export function App(): JSX.Element {
   const [accountDialogInitialTab, setAccountDialogInitialTab] = useState<
     OpenAccountSettingsTab | undefined
   >(undefined)
-  const initialize = useAccountsStore((s) => s.initialize)
+  const [accountDialogInitialMailSubNav, setAccountDialogInitialMailSubNav] = useState<
+    string | undefined
+  >(undefined)
   const accounts = useAccountsStore((s) => s.accounts)
   const config = useAccountsStore((s) => s.config)
   const accountsLoading = useAccountsStore((s) => s.loading)
-  const initMail = useMailStore((s) => s.initialize)
   const refreshAccounts = useMailStore((s) => s.refreshAccounts)
   const mode = useAppModeStore((s) => s.mode)
 
@@ -95,25 +97,44 @@ export function App(): JSX.Element {
     accounts.length === 0 &&
     config.firstRunSetupCompleted === false
 
-  function openAccountSettings(tab: OpenAccountSettingsTab = 'general'): void {
+  function openAccountSettings(
+    tab: OpenAccountSettingsTab = 'general',
+    mailSubNav?: string
+  ): void {
     setAccountDialogInitialTab(tab)
+    setAccountDialogInitialMailSubNav(mailSubNav)
     setAccountDialogOpen(true)
   }
 
   function closeAccountSettings(): void {
     setAccountDialogOpen(false)
     setAccountDialogInitialTab(undefined)
+    setAccountDialogInitialMailSubNav(undefined)
   }
 
   useEffect(() => {
-    initMail()
-    void initialize()
-  }, [initialize, initMail])
+    // Einmalig beim Mount — nicht an Store-Funktions-Referenzen koppeln (vermeidet Re-Inits).
+    useMailStore.getState().initialize()
+    useCalendarSyncStore.getState().initialize()
+    void useAccountsStore.getState().initialize()
+  }, [])
 
   useGlobalShortcuts()
 
   useEffect(() => {
     return subscribeConnectivityFromMain()
+  }, [])
+
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(PENDING_MAIL_RULES_SETTINGS_KEY) === '1') {
+        window.localStorage.removeItem(PENDING_MAIL_RULES_SETTINGS_KEY)
+        openAccountSettings('mail', 'rules')
+      }
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- einmalig nach Migration vom Regeln-Modul
   }, [])
 
   useEffect(() => {
@@ -124,9 +145,10 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     const onOpenSettings = (e: Event): void => {
-      const ce = e as CustomEvent<{ tab?: OpenAccountSettingsTab }>
+      const ce = e as CustomEvent<{ tab?: OpenAccountSettingsTab; mailSubNav?: string }>
       const tab = ce.detail?.tab ?? 'general'
       setAccountDialogInitialTab(tab)
+      setAccountDialogInitialMailSubNav(ce.detail?.mailSubNav)
       setAccountDialogOpen(true)
     }
     window.addEventListener(OPEN_ACCOUNT_SETTINGS_EVENT, onOpenSettings as EventListener)
@@ -139,12 +161,11 @@ export function App(): JSX.Element {
       <div className="flex min-h-0 flex-1 flex-col">
         <Suspense fallback={<AppShellFallback />}>
           {mode === 'home' && <HomeDashboard />}
-          {mode === 'workflow' && <WorkflowBoard />}
           {mode === 'calendar' && <CalendarShell />}
           {mode === 'tasks' && <TasksShell />}
+          {mode === 'work' && <WorkShell />}
           {mode === 'people' && <PeopleShell />}
           {mode === 'notes' && <NotesShell />}
-          {mode === 'rules' && <RulesShell />}
           {mode === 'chat' && (
             <ChatShell onOpenAccountDialog={(): void => openAccountSettings('general')} />
           )}
@@ -163,6 +184,7 @@ export function App(): JSX.Element {
       <AccountSetupDialog
         open={accountDialogOpen}
         initialTab={accountDialogInitialTab}
+        initialMailSubNav={accountDialogInitialMailSubNav}
         onClose={closeAccountSettings}
       />
       <WorkflowMailFoldersIntro
@@ -173,6 +195,7 @@ export function App(): JSX.Element {
       />
       <ComposerStack />
       <SnoozePickerHost />
+      <CreateCloudTaskFromMailDialogHost />
       <ToastStack />
       <AppDialogHost />
       <NotionDestinationPickerDialog />

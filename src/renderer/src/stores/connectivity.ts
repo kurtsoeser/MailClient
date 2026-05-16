@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { isMailClientRuntimeComplete, warnMailClientMissingOnce } from '@/lib/mail-client-runtime'
 
 interface ConnectivityState {
   online: boolean
@@ -12,6 +13,13 @@ export const useConnectivityStore = create<ConnectivityState>((set) => ({
 
 /** IPC-Zustand aus Main (`net.isOnline`) — einmal lesen, dann Events. */
 export function subscribeConnectivityFromMain(): () => void {
+  if (!isMailClientRuntimeComplete()) {
+    warnMailClientMissingOnce(
+      'connectivity-sub',
+      '[connectivity] `window.mailClient` unvollständig: Online-Status per IPC nicht verbunden.'
+    )
+    return (): void => undefined
+  }
   void window.mailClient.app.getConnectivity().then((r) => {
     useConnectivityStore.getState().setOnline(r.online)
   })

@@ -17,6 +17,8 @@ export interface SidebarNamedGroup {
   id: string
   name: string
   order: number
+  /** Optionales Lucide-Symbol (`calendar-sidebar-section-icons`). */
+  icon?: string
 }
 
 export interface CalendarSidebarLayoutV1 {
@@ -86,7 +88,15 @@ export function persistSidebarLayout(layout: CalendarSidebarLayoutV1): void {
 function isNamedGroup(x: unknown): x is SidebarNamedGroup {
   if (!x || typeof x !== 'object') return false
   const o = x as Record<string, unknown>
-  return typeof o.id === 'string' && o.id.length > 0 && typeof o.name === 'string' && typeof o.order === 'number'
+  const iconOk =
+    o.icon === undefined || (typeof o.icon === 'string' && o.icon.length > 0 && o.icon.length <= 48)
+  return (
+    typeof o.id === 'string' &&
+    o.id.length > 0 &&
+    typeof o.name === 'string' &&
+    typeof o.order === 'number' &&
+    iconOk
+  )
 }
 
 function isNamedGroupArray(x: unknown): x is SidebarNamedGroup[] {
@@ -147,16 +157,73 @@ export function addAccountGroup(layout: CalendarSidebarLayoutV1, accountId: stri
   }
 }
 
-export function addGlobalSection(layout: CalendarSidebarLayoutV1, name: string): CalendarSidebarLayoutV1 {
+export function addGlobalSection(
+  layout: CalendarSidebarLayoutV1,
+  name: string,
+  icon?: string
+): CalendarSidebarLayoutV1 {
   const g = [...layout.globalSections]
   const order = g.length === 0 ? 0 : Math.max(...g.map((x) => x.order)) + 1
   const id = newGroupId()
-  g.push({ id, name: name.trim() || 'Section', order })
+  const trimmedIcon = icon?.trim()
+  g.push({
+    id,
+    name: name.trim() || 'Section',
+    order,
+    ...(trimmedIcon ? { icon: trimmedIcon } : {})
+  })
   g.sort((a, b) => a.order - b.order)
   return {
     ...layout,
     globalSections: g,
     sectionCalKeys: { ...layout.sectionCalKeys, [id]: [] }
+  }
+}
+
+export function renameGlobalSection(
+  layout: CalendarSidebarLayoutV1,
+  sectionId: string,
+  name: string
+): CalendarSidebarLayoutV1 {
+  const trimmed = name.trim()
+  if (!trimmed) return layout
+  return {
+    ...layout,
+    globalSections: layout.globalSections.map((s) =>
+      s.id === sectionId ? { ...s, name: trimmed } : s
+    )
+  }
+}
+
+export function setGlobalSectionIcon(
+  layout: CalendarSidebarLayoutV1,
+  sectionId: string,
+  icon: string | undefined
+): CalendarSidebarLayoutV1 {
+  const trimmed = icon?.trim()
+  return {
+    ...layout,
+    globalSections: layout.globalSections.map((s) => {
+      if (s.id !== sectionId) return s
+      if (!trimmed) {
+        const { icon: _removed, ...rest } = s
+        return rest
+      }
+      return { ...s, icon: trimmed }
+    })
+  }
+}
+
+/** Section löschen; zugeordnete Kalender werden unzugeordnet. */
+export function removeGlobalSection(
+  layout: CalendarSidebarLayoutV1,
+  sectionId: string
+): CalendarSidebarLayoutV1 {
+  const { [sectionId]: _removed, ...sectionCalKeys } = layout.sectionCalKeys
+  return {
+    ...layout,
+    globalSections: layout.globalSections.filter((s) => s.id !== sectionId),
+    sectionCalKeys
   }
 }
 

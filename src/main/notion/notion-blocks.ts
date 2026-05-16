@@ -1,14 +1,17 @@
-import { de, enUS } from 'date-fns/locale'
 import type { CalendarEventView, MailFull } from '@shared/types'
-import {
-  calendarEventClipboardLabels,
-  formatCalendarEventClipboardText
-} from '@shared/calendar-event-clipboard'
 
 const MAX_RICH_TEXT = 1900
 const MAX_BODY_PARAGRAPHS = 24
 
-type NotionRichText = { type: 'text'; text: { content: string; link?: { url: string } | null } }
+type NotionRichText =
+  | { type: 'text'; text: { content: string; link?: { url: string } | null } }
+  | {
+      type: 'mention'
+      mention: {
+        type: 'date'
+        date: { start: string; end?: string | null; time_zone?: string | null }
+      }
+    }
 
 type NotionBlock =
   | { object: 'block'; type: 'paragraph'; paragraph: { rich_text: NotionRichText[] } }
@@ -74,6 +77,42 @@ function rt(content: string, linkUrl?: string | null): NotionRichText {
 
 function paragraph(text: string, linkUrl?: string | null): NotionBlock {
   return { object: 'block', type: 'paragraph', paragraph: { rich_text: [rt(text, linkUrl)] } }
+}
+
+function paragraphRich(richText: NotionRichText[]): NotionBlock {
+  return { object: 'block', type: 'paragraph', paragraph: { rich_text: richText } }
+}
+
+function calendarDateMention(ev: CalendarEventView): NotionRichText | null {
+  const start = ev.startIso?.trim()
+  if (!start) return null
+
+  if (ev.isAllDay) {
+    const startDate = start.slice(0, 10)
+    const endDate = ev.endIso?.trim().slice(0, 10) || null
+    return {
+      type: 'mention',
+      mention: {
+        type: 'date',
+        date: {
+          start: startDate,
+          end: endDate
+        }
+      }
+    }
+  }
+
+  const end = ev.endIso?.trim()
+  return {
+    type: 'mention',
+    mention: {
+      type: 'date',
+      date: {
+        start,
+        end: end || null
+      }
+    }
+  }
 }
 
 function tableRow(label: string, value: string, valueLink?: string | null): NotionBlock {
@@ -164,7 +203,8 @@ function bodyParagraphBlocks(plain: string): NotionBlock[] {
   if (blocks.length >= MAX_BODY_PARAGRAPHS && text.length > MAX_RICH_TEXT * MAX_BODY_PARAGRAPHS) {
     const last = blocks[blocks.length - 1]
     if (last.type === 'paragraph') {
-      const prev = last.paragraph.rich_text[0]?.text.content ?? ''
+      const first = last.paragraph.rich_text[0]
+      const prev = first?.type === 'text' ? first.text.content : ''
       last.paragraph.rich_text = [rt(`${prev}…`)]
     }
   }
@@ -265,56 +305,40 @@ export function buildMailNotionBlocks(
 
 export function buildCalendarEventNotionBlocks(
   ev: CalendarEventView,
-  localeCode: 'de' | 'en' = 'de'
+  localeCode: 'de' | 'en' = 'de',
+  description?: string | null
 ): NotionBlock[] {
   const isDe = localeCode === 'de'
-  const locale = isDe ? de : enUS
-  const labels = calendarEventClipboardLabels(localeCode)
-  const text = formatCalendarEventClipboardText(ev, labels, locale, isDe)
-  const lines = text.split('\n')
-  const title = lines[0]?.trim() || (isDe ? 'Termin' : 'Event')
+  const title = ev.title?.trim() || (isDe ? 'Termin' : 'Event')
   const link = ev.joinUrl?.trim() || ev.webLink?.trim()
 
-  const start = ev.startIso
-    ? new Date(ev.startIso).toLocaleString(isDe ? 'de-DE' : 'en-US', {
-        dateStyle: 'medium',
-        timeStyle: 'short'
-      })
-    : '—'
-  const end = ev.endIso
-    ? new Date(ev.endIso).toLocaleString(isDe ? 'de-DE' : 'en-US', {
-        dateStyle: 'medium',
-        timeStyle: 'short'
-      })
-    : '—'
+  const children: NotionBlock[] = []
 
-  const tableChildren: NotionBlock[] = [
-    tableRow(isDe ? 'Beginn:' : 'Start:', start),
-    tableRow(isDe ? 'Ende:' : 'End:', end)
-  ]
-  if (ev.location?.trim()) {
-    tableChildren.push(tableRow(isDe ? 'Ort:' : 'Location:', ev.location.trim()))
+  const dateMention = calendarDateMention(ev)
+  if (dateMention) {
+    children.push(paragraphRich([dateMention]))
   }
+
+  const body = description?.trim()
+  if (body) {
+    children.push(...bodyParagraphBlocks(body))
+  }
+
+  const location = ev.location?.trim()
+  if (location) {
+    const label = isDe ? 'Ort: ' : 'Location: '
+    children.push(paragraph(`${label}${location}`))
+  }
+
   if (link) {
-    tableChildren.push(tableRow(isDe ? 'Link:' : 'Link:', 'LINK', link))
-  }
-
-  const children: NotionBlock[] = [
-    {
-      object: 'block',
-      type: 'table',
-      table: {
-        table_width: 2,
-        has_column_header: false,
-        has_row_header: true,
-        children: tableChildren
-      }
-    }
-  ]
-
-  const notes = text.split('\n').slice(1).join('\n').trim()
-  if (notes) {
-    children.push(...bodyParagraphBlocks(notes))
+    const label = ev.joinUrl?.trim()
+      ? isDe
+        ? 'Teams-Besprechung'
+        : 'Teams meeting'
+      : isDe
+        ? 'Kalenderlink'
+        : 'Calendar link'
+    children.push(paragraph(label, link))
   }
 
   return [
@@ -324,7 +348,7 @@ export function buildCalendarEventNotionBlocks(
       callout: {
         rich_text: [rt(title)],
         icon: { emoji: '📅' },
-        color: 'gray_background',
+        color: 'default',
         children
       }
     }

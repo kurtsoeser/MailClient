@@ -3,15 +3,17 @@
  * Kalender-Kachel auf dem Dashboard — ein Abruf, zwei Darstellungen.
  */
 import { create } from 'zustand'
-import { addDays } from 'date-fns'
 import type { CalendarEventView, ConnectedAccount, MailListItem } from '@shared/types'
 import { buildCalendarIncludeCalendars } from '@/lib/build-calendar-include-calendars'
+import {
+  calendarPreviewRangeIso,
+  filterUpcomingCalendarEvents
+} from '@/lib/calendar-dashboard-range'
 import { mailListItemTodoScheduleWindow } from '@/app/calendar/mail-todo-calendar'
 
 const MAX_AGENDA = 10
 /** Wie viele reine Kalender-Termine die Startseiten-Kachel höchstens zeigt (s. HomeDashboard). */
 const DASHBOARD_CALENDAR_MAX_EVENTS = 20
-const RANGE_DAYS_AHEAD = 56
 
 /** Wie lange gecachte Termine ohne erneuten Netzwerkabruf gelten (Modulwechsel). */
 export const INBOX_AGENDA_STALE_MS = 120_000
@@ -34,15 +36,16 @@ interface InboxCalendarAgendaCacheState {
   agenda: InboxAgendaRow[]
   /** Nur Cloud-Kalender, sortiert — gleiche Datenbasis wie `agenda` (Graph), für die Dashboard-Kachel. */
   dashboardUpcomingCalendar: CalendarEventView[]
+  /** Alle Cloud-Termine im Vorschau-Zeitraum (SQLite-Cache via `listEvents`). */
+  previewRangeEvents: CalendarEventView[]
   error: string | null
   fetchedAt: number
   cachedKey: string | null
   inFlight: boolean
 
   /**
-   * Agenda + Dashboard-Termine laden (ein Netzwerk-Rutsch). Ohne `force`: bei frischem Cache
-   * (gleiche Konten, Alter unter INBOX_AGENDA_STALE_MS) kein Abruf.
-   * Mit `force`: immer abrufen; bei bereits vorhandenen Zeilen kein Vollbild-Spinner (silent refresh).
+   * Agenda + Dashboard-Termine laden (ein IPC-Abruf über Kalender-SQLite-Cache). Ohne `force`: bei frischem
+   * RAM-Cache (gleiche Konten, Alter unter INBOX_AGENDA_STALE_MS) kein Abruf.
    */
   loadAgenda: (calendarLinkedAccounts: ConnectedAccount[], opts?: { force?: boolean }) => Promise<void>
 }
@@ -50,6 +53,7 @@ interface InboxCalendarAgendaCacheState {
 export const useInboxCalendarAgendaCacheStore = create<InboxCalendarAgendaCacheState>((set, get) => ({
   agenda: [],
   dashboardUpcomingCalendar: [],
+  previewRangeEvents: [],
   error: null,
   fetchedAt: 0,
   cachedKey: null,
@@ -70,16 +74,15 @@ export const useInboxCalendarAgendaCacheStore = create<InboxCalendarAgendaCacheS
       return
     }
 
-    const hadRows = agenda.length > 0 || dashboardUpcomingCalendar.length > 0
+    const hadRows =
+      agenda.length > 0 ||
+      dashboardUpcomingCalendar.length > 0 ||
+      get().previewRangeEvents.length > 0
     const seq = ++loadSeq
 
     set({ inFlight: true, ...(hadRows ? {} : { error: null }) })
 
-    const start = new Date()
-    start.setHours(0, 0, 0, 0)
-    const end = addDays(start, RANGE_DAYS_AHEAD)
-    const startIso = start.toISOString()
-    const endIso = end.toISOString()
+    const { startIso, endIso } = calendarPreviewRangeIso()
 
     try {
       const includeCalendars = await buildCalendarIncludeCalendars(calendarLinkedAccounts)
@@ -103,13 +106,11 @@ export const useInboxCalendarAgendaCacheStore = create<InboxCalendarAgendaCacheS
       const nowMs = Date.now()
       const rows: InboxAgendaRow[] = []
 
-      const upcomingCalOnly = graphEvents
-        .filter((ev) => {
-          const t = Date.parse(ev.endIso)
-          return !Number.isNaN(t) && t >= nowMs
-        })
-        .sort((a, b) => Date.parse(a.startIso) - Date.parse(b.startIso))
-        .slice(0, DASHBOARD_CALENDAR_MAX_EVENTS)
+      const upcomingCalOnly = filterUpcomingCalendarEvents(
+        graphEvents,
+        DASHBOARD_CALENDAR_MAX_EVENTS,
+        nowMs
+      )
 
       for (const ev of graphEvents) {
         const s = Date.parse(ev.startIso)
@@ -130,6 +131,7 @@ export const useInboxCalendarAgendaCacheStore = create<InboxCalendarAgendaCacheS
       set({
         agenda: rows.slice(0, MAX_AGENDA),
         dashboardUpcomingCalendar: upcomingCalOnly,
+        previewRangeEvents: graphEvents,
         error: null,
         fetchedAt: Date.now(),
         cachedKey: key
@@ -141,7 +143,8 @@ export const useInboxCalendarAgendaCacheStore = create<InboxCalendarAgendaCacheS
         error: msg,
         agenda: s.agenda.length > 0 ? s.agenda : [],
         dashboardUpcomingCalendar:
-          s.dashboardUpcomingCalendar.length > 0 ? s.dashboardUpcomingCalendar : []
+          s.dashboardUpcomingCalendar.length > 0 ? s.dashboardUpcomingCalendar : [],
+        previewRangeEvents: s.previewRangeEvents.length > 0 ? s.previewRangeEvents : []
       }))
     } finally {
       if (seq === loadSeq) {

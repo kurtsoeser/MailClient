@@ -87,9 +87,8 @@ function sortMessagesByDateDesc(a: MailListItem, b: MailListItem): number {
 }
 
 /**
- * Workflow-Mail-Kalender: ein FullCalendar-Eintrag pro Konversation (Thread),
- * damit Ziehen/Termin wie im Kanban fuer alle Mails im Thread gilt.
- * `extendedProps.threadKey` / neueste `mailMessage` fuer Vorschau; Persistenz laedt den vollen Thread per IPC.
+ * Legacy: ein FullCalendar-Eintrag pro Konversation (Thread). Nicht mehr fuer Hauptkalender genutzt —
+ * Produktentscheidung: Mail-ToDos pro Message (`mailTodoItemsToFullCalendarEvents`).
  */
 export function mailTodoConversationsToFullCalendarEvents(
   items: MailListItem[],

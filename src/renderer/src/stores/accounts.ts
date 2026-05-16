@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { isMailClientRuntimeComplete, warnMailClientMissingOnce } from '@/lib/mail-client-runtime'
 import type { AppConfig, AppConfigWeatherLocation, ConnectedAccount, PatchAccountInput } from '@shared/types'
 import { safeSetCalendarTimeZone, safeSetGoogleClientId, safeSetWeatherLocation } from '@/lib/config-invoke'
 
@@ -59,6 +60,13 @@ export const useAccountsStore = create<AccountsState>((set, get) => ({
   error: null,
 
   async initialize(): Promise<void> {
+    if (typeof window === 'undefined' || !isMailClientRuntimeComplete()) {
+      warnMailClientMissingOnce(
+        'accounts-store-init',
+        '[accounts] `window.mailClient` unvollständig: Konten/Config nicht geladen.'
+      )
+      return
+    }
     set({ loading: true, error: null })
     try {
       const [accounts, config] = await Promise.all([
@@ -73,7 +81,7 @@ export const useAccountsStore = create<AccountsState>((set, get) => ({
       }
       set({ accounts, config, profilePhotoDataUrls, loading: false })
 
-      window.mailClient.events.onAccountsChanged((next) => {
+      window.mailClient.events?.onAccountsChanged((next) => {
         void (async (): Promise<void> => {
           const urls = await loadProfilePhotoDataUrls(next)
           set({ accounts: next, profilePhotoDataUrls: urls })

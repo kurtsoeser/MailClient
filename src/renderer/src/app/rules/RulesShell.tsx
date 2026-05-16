@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Plus,
   Trash2,
   Play,
   FlaskConical,
@@ -20,6 +19,7 @@ import { useAccountsStore } from '@/stores/accounts'
 import { useMailStore } from '@/stores/mail'
 import { showAppConfirm } from '@/stores/app-dialog'
 import { useAppModeStore } from '@/stores/app-mode'
+import { useTranslation } from 'react-i18next'
 import type {
   MailRuleDto,
   MailRuleDefinition,
@@ -42,6 +42,7 @@ import {
   defaultRuleDefinition
 } from '@shared/mail-rules'
 import { getRulesClient } from '@/lib/rules-client'
+import { RULE_CREATE_FLUSH_EVENT, RULE_CREATE_PENDING_SESSION_KEY } from '@/lib/global-create'
 
 type TabId = 'rules' | 'automation'
 
@@ -58,7 +59,13 @@ function cloneDef(d: MailRuleDefinition): MailRuleDefinition {
   return JSON.parse(JSON.stringify(d)) as MailRuleDefinition
 }
 
-export function RulesShell(): JSX.Element {
+interface RulesShellProps {
+  /** In Einstellungen → Mail eingebettet (ohne Modul-Header). */
+  embedded?: boolean
+}
+
+export function RulesShell({ embedded = false }: RulesShellProps): JSX.Element {
+  const { t } = useTranslation()
   const setMode = useAppModeStore((s) => s.setMode)
   const accounts = useAccountsStore((s) => s.accounts)
   const foldersByAccount = useMailStore((s) => s.foldersByAccount)
@@ -144,7 +151,7 @@ export function RulesShell(): JSX.Element {
     }
   }
 
-  async function createRule(): Promise<void> {
+  const createRule = useCallback(async (): Promise<void> => {
     setMsg(null)
     try {
       const r = await rulesClient.create({
@@ -158,7 +165,23 @@ export function RulesShell(): JSX.Element {
     } catch (e) {
       setMsg(e instanceof Error ? e.message : String(e))
     }
-  }
+  }, [rulesClient])
+
+  useEffect(() => {
+    function flushPendingCreateFromTopbar(): void {
+      try {
+        if (window.sessionStorage.getItem(RULE_CREATE_PENDING_SESSION_KEY) === '1') {
+          window.sessionStorage.removeItem(RULE_CREATE_PENDING_SESSION_KEY)
+          void createRule()
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    flushPendingCreateFromTopbar()
+    window.addEventListener(RULE_CREATE_FLUSH_EVENT, flushPendingCreateFromTopbar)
+    return (): void => window.removeEventListener(RULE_CREATE_FLUSH_EVENT, flushPendingCreateFromTopbar)
+  }, [createRule])
 
   async function deleteRule(): Promise<void> {
     if (!selected) return
@@ -295,22 +318,33 @@ export function RulesShell(): JSX.Element {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col bg-background">
+    <div
+      className={cn(
+        'flex flex-col',
+        embedded
+          ? 'min-h-[min(68vh,560px)] flex-1 overflow-hidden rounded-md border border-border bg-background'
+          : 'h-full min-h-0 flex-1 bg-background'
+      )}
+    >
+      {!embedded && (
       <header className={cn(moduleColumnHeaderShellBarClass, 'gap-3')}>
         <div className="flex min-w-0 items-center gap-2">
           <ListFilter className={cn(moduleColumnHeaderIconGlyphClass, 'text-muted-foreground')} />
-          <h1 className={cn(moduleColumnHeaderTitleClass, 'truncate')}>Regeln &amp; Automation</h1>
+          <h1 className={cn(moduleColumnHeaderTitleClass, 'truncate')}>
+            {t('settings.mailRulesHeading')}
+          </h1>
         </div>
         <button
           type="button"
           className={moduleColumnHeaderOutlineSmClass}
           onClick={(): void => setMode('mail')}
         >
-          Zur Inbox
+          {t('rules.backToInbox')}
         </button>
       </header>
+      )}
 
-      <div className="flex border-b border-border text-xs">
+      <div className="flex shrink-0 border-b border-border text-xs">
         <button
           type="button"
           className={cn(
@@ -338,7 +372,7 @@ export function RulesShell(): JSX.Element {
       {msg && <div className="border-b border-border bg-muted/50 px-4 py-1 text-xs">{msg}</div>}
 
       {tab === 'automation' && (
-        <div className="min-h-0 flex-1 overflow-auto p-4">
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
           <p className="mb-3 text-xs text-muted-foreground">
             Aktionen, die Regeln automatisch ausgefuehrt haben (Audit-Log). Nur Eintraege mit Regelbezug.
           </p>
@@ -375,14 +409,6 @@ export function RulesShell(): JSX.Element {
       {tab === 'rules' && (
         <div className="flex min-h-0 flex-1">
           <aside className="w-52 shrink-0 border-r border-border p-2">
-            <button
-              type="button"
-              className="mb-2 flex w-full items-center justify-center gap-1 rounded-md bg-primary px-2 py-1.5 text-xs font-medium text-primary-foreground"
-              onClick={(): void => void createRule()}
-            >
-              <Plus className="h-3.5 w-3.5" />
-              Neue Regel
-            </button>
             <ul className="space-y-0.5">
               {rules.map((r) => (
                 <li key={r.id}>

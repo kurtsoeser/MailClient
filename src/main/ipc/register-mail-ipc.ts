@@ -30,7 +30,10 @@ import {
   type EnsureWorkflowMailFoldersResult,
   type MetaFolderSummary,
   type MetaFolderCreateInput,
-  type MetaFolderUpdateInput
+  type MetaFolderUpdateInput,
+  type MailBulkUnflagInput,
+  type MailBulkUnflagResult,
+  type RemoveMailTodoRecordsResult
 } from '@shared/types'
 import { loadConfig } from '../config'
 import { listAccounts } from '../accounts'
@@ -46,6 +49,8 @@ import {
   gmailFetchInlineImages
 } from '../google/gmail-attachments'
 import { runInitialSync, runFolderSync } from '../sync-runner'
+import { clearMailAccountLocalCacheAndResync } from '../mail-cache-reset'
+import { runBulkUnflagFlaggedMessages } from '../mail-bulk-unflag-service'
 import { triggerManualPoll, setActivePollFolder } from '../mail-poll-runner'
 import { assertAppOnline } from '../network-status'
 import {
@@ -95,6 +100,7 @@ import {
   setTodoForMessage,
   setTodoScheduleForMessage,
   completeTodoForMessage,
+  removeMailTodoRecordsForMessage,
   listTodoMessagesMerged,
   listTodoMessagesInRange,
   getTodoCountsAll
@@ -117,11 +123,15 @@ import {
   moveFolder as graphMoveFolder
 } from '../graph/folder-actions'
 import {
-  graphListMasterCategories,
   graphCreateMasterCategory,
   graphUpdateMasterCategory,
   graphDeleteMasterCategory
 } from '../graph/master-categories'
+import {
+  invalidateMasterCategoriesSyncState,
+  listMasterCategoriesCached,
+  syncMasterCategoriesForAccount
+} from '../master-categories-cache-service'
 import { sendMail as graphSendMail, saveMailDraft as graphSaveMailDraft } from '../graph/compose'
 import {
   graphListDriveExplorer,
@@ -142,6 +152,7 @@ import {
   listAttachmentsMeta,
   downloadAttachmentBytes
 } from '../graph/attachments'
+import { isGraphItemNotFound } from '../graph/graph-request-errors'
 import { performOneClickUnsubscribe } from '../mail-unsubscribe'
 import {
   decorateMailList,
@@ -336,7 +347,9 @@ export function registerMailIpc(): void {
         }
         return await graphFetchInlineImages(msg.accountId, msg.remoteId)
       } catch (e) {
-        console.warn('[ipc] fetchInlineImages fehlgeschlagen:', e)
+        if (!isGraphItemNotFound(e)) {
+          console.warn('[ipc] fetchInlineImages fehlgeschlagen:', e)
+        }
         return {}
       }
     }
@@ -358,7 +371,9 @@ export function registerMailIpc(): void {
         }
         return await listAttachmentsMeta(msg.accountId, msg.remoteId)
       } catch (e) {
-        console.warn('[ipc] listAttachments fehlgeschlagen:', e)
+        if (!isGraphItemNotFound(e)) {
+          console.warn('[ipc] listAttachments fehlgeschlagen:', e)
+        }
         return []
       }
     }
@@ -444,6 +459,10 @@ export function registerMailIpc(): void {
     assertAppOnline()
     return runInitialSync(accountId)
   })
+
+  ipcMain.handle(IPC.mail.clearLocalMailCache, async (_event, accountId: string) => {
+    return clearMailAccountLocalCacheAndResync(accountId)
+  })
   
   ipcMain.handle(IPC.mail.syncFolder, async (_event, folderId: number) => {
     assertAppOnline()
@@ -484,6 +503,15 @@ export function registerMailIpc(): void {
     IPC.mail.setFlagged,
     async (_event, args: { messageId: number; flagged: boolean }): Promise<void> => {
       await applySetFlaggedForMessage(args.messageId, args.flagged)
+    }
+  )
+
+  ipcMain.removeHandler(IPC.mail.bulkUnflagFlaggedMessages)
+  ipcMain.handle(
+    IPC.mail.bulkUnflagFlaggedMessages,
+    async (_event, input: MailBulkUnflagInput): Promise<MailBulkUnflagResult> => {
+      if (!input?.dryRun) assertAppOnline()
+      return runBulkUnflagFlaggedMessages(input)
     }
   )
   
@@ -621,6 +649,12 @@ export function registerMailIpc(): void {
     completeTodoForMessage(messageId)
     await routeToDoneFolderAfterCompleteIfConfigured(messageId)
   })
+
+  ipcMain.handle(
+    IPC.mail.removeMailTodoRecordsForMessage,
+    async (_event, messageId: number): Promise<RemoveMailTodoRecordsResult> =>
+      removeMailTodoRecordsForMessage(messageId)
+  )
   
   ipcMain.handle(
     IPC.mail.listWaitingMessages,
@@ -649,7 +683,7 @@ export function registerMailIpc(): void {
   ipcMain.handle(
     IPC.mail.listMasterCategories,
     async (_event, accountId: string): Promise<MailMasterCategory[]> => {
-      return graphListMasterCategories(accountId)
+      return listMasterCategoriesCached(accountId)
     }
   )
   
@@ -659,7 +693,12 @@ export function registerMailIpc(): void {
       _event,
       args: { accountId: string; displayName: string; color: string }
     ): Promise<MailMasterCategory> => {
-      return graphCreateMasterCategory(args.accountId, args.displayName, args.color)
+      const created = await graphCreateMasterCategory(args.accountId, args.displayName, args.color)
+      invalidateMasterCategoriesSyncState(args.accountId)
+      void syncMasterCategoriesForAccount(args.accountId).catch((e) =>
+        console.warn('[master-categories] Nach Anlegen Sync fehlgeschlagen:', e)
+      )
+      return created
     }
   )
   
@@ -673,6 +712,10 @@ export function registerMailIpc(): void {
         displayName: args.displayName,
         color: args.color
       })
+      invalidateMasterCategoriesSyncState(args.accountId)
+      void syncMasterCategoriesForAccount(args.accountId).catch((e) =>
+        console.warn('[master-categories] Nach Aktualisieren Sync fehlgeschlagen:', e)
+      )
     }
   )
   
@@ -680,6 +723,10 @@ export function registerMailIpc(): void {
     IPC.mail.deleteMasterCategory,
     async (_event, args: { accountId: string; categoryId: string }): Promise<void> => {
       await graphDeleteMasterCategory(args.accountId, args.categoryId)
+      invalidateMasterCategoriesSyncState(args.accountId)
+      void syncMasterCategoriesForAccount(args.accountId).catch((e) =>
+        console.warn('[master-categories] Nach Loeschen Sync fehlgeschlagen:', e)
+      )
     }
   )
   

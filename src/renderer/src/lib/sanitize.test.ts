@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { describe, expect, it } from 'vitest'
-import { replaceInlineCidImages, sanitizeMailHtml } from './sanitize'
+import { replaceInlineCidImages, sanitizeMailHtml, buildMailShadowRootInnerHtml } from './sanitize'
 
 describe('replaceInlineCidImages', () => {
   it('ersetzt cid-src mit Data-URI', () => {
@@ -32,11 +32,34 @@ describe('sanitizeMailHtml', () => {
     expect(clean).toContain('data:image/png;base64,AAA')
   })
 
+  it('neutralisiert ms-outlook-Link fuer externes Oeffnen', () => {
+    const dirty = '<a href="ms-outlook://events/0?itemid=abc">Termin</a>'
+    const clean = sanitizeMailHtml(dirty, { loadImages: true })
+    expect(clean).toContain('data-mail-external="ms-outlook://events/0?itemid=abc"')
+    expect(clean).toMatch(/href\s*=\s*["']#["']/i)
+  })
+
   it('entfernt target am Link (kein Electron-Popup / kein _blank)', () => {
     const dirty = '<a href="https://example.com/path" target="_blank">go</a>'
     const clean = sanitizeMailHtml(dirty, { loadImages: true })
     expect(clean).toContain('data-mail-external="https://example.com/path"')
     expect(clean).toMatch(/href\s*=\s*["']#["']/i)
     expect(clean).not.toMatch(/\btarget\s*=/i)
+  })
+})
+
+describe('buildMailShadowRootInnerHtml', () => {
+  it('nutzt :host statt html/body', () => {
+    const inner = buildMailShadowRootInnerHtml('<p>x</p>', 'light')
+    expect(inner).toContain(':host')
+    expect(inner).not.toMatch(/<html[\s>]/i)
+    expect(inner).toContain('<p>x</p>')
+  })
+
+  it('dark-Shadow ohne 100vh-Mindesthoehe (Scroll im Lesebereich)', () => {
+    const inner = buildMailShadowRootInnerHtml('<p>x</p>', 'dark')
+    expect(inner).toContain(':host')
+    expect(inner).not.toContain('100vh')
+    expect(inner).toContain('min-height: 0')
   })
 })

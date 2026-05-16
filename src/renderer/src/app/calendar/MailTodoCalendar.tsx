@@ -21,7 +21,9 @@ import { DateTime } from 'luxon'
 import type { MailListItem, ConnectedAccount } from '@shared/types'
 import { accountColorToCssBackground } from '@/lib/avatar-color'
 import { MIME_THREAD_IDS, readDraggedWorkflowMessageIds } from '@/lib/workflow-dnd'
-import { CALENDAR_KIND_MAIL_TODO, mailTodoConversationsToFullCalendarEvents } from './mail-todo-calendar'
+import { scheduleRemoveDuplicateFullCalendarEventsById } from '@/app/calendar/calendar-fc-event-source'
+import { CALENDAR_KIND_MAIL_TODO, mailTodoItemsToFullCalendarEvents } from './mail-todo-calendar'
+import { useCalendarFcEventContent } from '@/app/calendar/use-calendar-fc-event-content'
 import './notion-calendar.css'
 
 /** Standard-Laenge fuer neue Zeitbloecke (Ganztag -> Zeitleiste, fehlendes Ende, Posteingang auf Tag). */
@@ -154,6 +156,7 @@ export function MailTodoCalendar({
   onViewMeta,
   className
 }: MailTodoCalendarProps): JSX.Element {
+  const calendarFcEventContentRender = useCalendarFcEventContent()
   const calendarRef = useRef<FullCalendar>(null)
   const resolvedFcView = fcView ?? calendarView
   const shellRef = useRef<HTMLDivElement>(null)
@@ -170,7 +173,7 @@ export function MailTodoCalendar({
   )
 
   const fcEvents = useMemo(
-    () => mailTodoConversationsToFullCalendarEvents(items, accountColorById),
+    () => mailTodoItemsToFullCalendarEvents(items, accountColorById),
     [items, accountColorById]
   )
 
@@ -209,16 +212,6 @@ export function MailTodoCalendar({
     return off
   }, [loadRange])
 
-  const expandConversationMessageIds = useCallback(async (mail: MailListItem): Promise<number[]> => {
-    const tk = mail.remoteThreadId?.trim()
-    if (!tk) return [mail.id]
-    const list = await window.mailClient.mail
-      .listMessagesByThreads({ accountId: mail.accountId, threadKeys: [tk] })
-      .catch(() => [] as MailListItem[])
-    const ids = [...new Set(list.map((x) => x.id))]
-    return ids.length > 0 ? ids : [mail.id]
-  }, [])
-
   const persistEventChange = useCallback(
     async (info: EventDropArg | EventResizeDoneArg): Promise<void> => {
       if (!onScheduleMessages) {
@@ -232,13 +225,17 @@ export function MailTodoCalendar({
         return
       }
       try {
-        const ids = await expandConversationMessageIds(m)
-        await onScheduleMessages(ids, range.startIso, range.endIso)
+        await onScheduleMessages([m.id], range.startIso, range.endIso)
+        scheduleRemoveDuplicateFullCalendarEventsById(calendarRef.current?.getApi(), [
+          `mail-todo:${m.id}`
+        ])
+        const { start, end } = lastRangeRef.current
+        void loadRange(start, end)
       } catch {
         info.revert()
       }
     },
-    [expandConversationMessageIds, onScheduleMessages, timeZone]
+    [onScheduleMessages, timeZone]
   )
 
   useLayoutEffect(() => {
@@ -330,17 +327,7 @@ export function MailTodoCalendar({
       const range = scheduleRangeFromInboxDrop(e.clientX, e.clientY, dateStr, timeZone)
       void (async (): Promise<void> => {
         try {
-          const idSet = new Set<number>()
-          for (const id of dragged) {
-            const anchor = await window.mailClient.mail.getMessage(id).catch(() => null)
-            if (anchor) {
-              const expanded = await expandConversationMessageIds(anchor as MailListItem)
-              for (const x of expanded) idSet.add(x)
-            } else {
-              idSet.add(id)
-            }
-          }
-          await onScheduleMessages([...idSet], range.startIso, range.endIso)
+          await onScheduleMessages(dragged, range.startIso, range.endIso)
         } catch {
           /* Toast / Store */
         }
@@ -356,7 +343,7 @@ export function MailTodoCalendar({
       root.removeEventListener('dragover', onDragHoverNative, capHover)
       root.removeEventListener('drop', onDrop, { capture: true })
     }
-  }, [expandConversationMessageIds, onScheduleMessages, timeZone])
+  }, [onScheduleMessages, timeZone])
 
   return (
     <div ref={shellRef} className={className ?? 'calendar-notion-shell h-full min-h-0 flex-1'}>
@@ -373,8 +360,9 @@ export function MailTodoCalendar({
         firstDay={1}
         views={{ ...multiDayViews }}
         initialView={resolvedFcView}
-        slotMinTime="07:00:00"
-        slotMaxTime="20:00:00"
+        slotMinTime="00:00:00"
+        slotMaxTime="24:00:00"
+        scrollTime="07:00:00"
         slotDuration="00:30:00"
         slotLabelInterval="01:00:00"
         defaultTimedEventDuration="00:30:00"
@@ -383,6 +371,7 @@ export function MailTodoCalendar({
         selectable={false}
         dayMaxEvents
         events={fcEvents}
+        eventContent={calendarFcEventContentRender}
         eventDidMount={(info): void => {
           const kind = info.event.extendedProps.calendarKind as string | undefined
           if (kind !== CALENDAR_KIND_MAIL_TODO) return

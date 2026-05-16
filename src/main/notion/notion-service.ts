@@ -10,6 +10,7 @@ import { loginNotion } from '../auth/notion-oauth'
 import { loadConfig } from '../config'
 import { getMessageById } from '../db/messages-repo'
 import { buildCalendarEventNotionBlocks, buildMailNotionBlocks } from './notion-blocks'
+import { fetchCalendarEventDescription } from './notion-calendar-description'
 import {
   buildNotionAttachmentSectionBlocks,
   uploadMailAttachmentsToNotion
@@ -357,7 +358,8 @@ async function appendCalendarEventBlocksToPage(
   targetId: string,
   localeCode: 'de' | 'en'
 ): Promise<string> {
-  const blocks = buildCalendarEventNotionBlocks(event, localeCode)
+  const description = await fetchCalendarEventDescription(event)
+  const blocks = buildCalendarEventNotionBlocks(event, localeCode, description)
   return appendBlocksToPage(targetId, blocks)
 }
 

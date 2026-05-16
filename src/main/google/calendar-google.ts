@@ -4,10 +4,42 @@ import type { CalendarGraphCalendarRow, CalendarSaveEventRecurrence } from '@sha
 import { loadConfig } from '../config'
 import { resolveCalendarTimeZone } from '../todo-due-buckets'
 import { getGoogleApis } from './google-auth-client'
-import type { GraphCalendarEventRow } from '../graph/calendar-graph'
+import type { GraphCalendarEventRow, GraphCalendarEventDetail } from '../graph/calendar-graph'
 import { buildGoogleEventRecurrence } from '../calendar-recurrence'
 import { getCalendarEventsSyncToken, setCalendarEventsSyncToken } from './google-sync-meta-store'
 import { withGoogleUsageLimitRetry } from './google-api-usage-retry'
+
+const SIMPLE_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i
+const MAX_GOOGLE_EVENT_ATTENDEES = 40
+const GOOGLE_CAL_DESCRIPTION_MAX = 8192
+
+function escapeHtmlPlain(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+function normalizeGoogleEventDescriptionHtml(raw: string | null | undefined): string | null {
+  const c = raw?.trim()
+  if (!c) return null
+  if (/<[a-z][\s\S]*>/i.test(c)) return c
+  return `<p>${escapeHtmlPlain(c).replace(/\n/g, '<br>')}</p>`
+}
+
+function isEffectivelyEmptyEditorHtml(html: string): boolean {
+  const t = html.replace(/<[^>]+>/gi, '').replace(/\u00a0/g, ' ').trim()
+  return t.length === 0
+}
+
+/** Google `description` ist ein String; HTML bleibt als Zeichenkette erhalten (wie Web-Outlook). */
+function googleCalendarDescriptionFromEditorHtml(html: string | null | undefined): string | undefined {
+  if (html === null || html === undefined) return undefined
+  if (isEffectivelyEmptyEditorHtml(html)) return ''
+  const t = html.trim().replace(/\0/g, '').slice(0, GOOGLE_CAL_DESCRIPTION_MAX)
+  return t || ''
+}
 
 function googleDateToIso(
   dt: calendar_v3.Schema$EventDateTime | null | undefined,
@@ -226,8 +258,11 @@ export async function googleCreateEvent(
 
   const body: calendar_v3.Schema$Event = {
     summary: input.subject,
-    location: input.location ?? undefined,
-    description: input.bodyHtml ? stripHtmlToText(input.bodyHtml) : undefined
+    location: input.location ?? undefined
+  }
+  const descCreate = googleCalendarDescriptionFromEditorHtml(input.bodyHtml ?? null)
+  if (descCreate !== undefined && descCreate !== '') {
+    body.description = descCreate
   }
 
   if (input.isAllDay) {
@@ -255,14 +290,6 @@ export async function googleCreateEvent(
   return { id: res.data.id ?? '', webLink: res.data.htmlLink ?? null }
 }
 
-function stripHtmlToText(html: string): string {
-  return html
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 8000)
-}
-
 export async function googleUpdateEvent(
   accountId: string,
   calendarId: string,
@@ -280,10 +307,11 @@ export async function googleUpdateEvent(
   const config = await loadConfig()
   const tz = resolveCalendarTimeZone(config.calendarTimeZone)
 
+  const descPatch = googleCalendarDescriptionFromEditorHtml(input.bodyHtml ?? null)
   const body: calendar_v3.Schema$Event = {
     summary: input.subject,
     location: input.location ?? undefined,
-    description: input.bodyHtml ? stripHtmlToText(input.bodyHtml) : undefined
+    ...(descPatch !== undefined ? { description: descPatch } : {})
   }
 
   if (input.isAllDay) {
@@ -332,4 +360,45 @@ export async function googleDeleteEvent(
 ): Promise<void> {
   const { calendar } = await getGoogleApis(accountId)
   await calendar.events.delete({ calendarId, eventId })
+}
+
+/** Termin-Details inkl. Beschreibung (Google `description`, oft HTML) fuer den Dialog. */
+export async function googleGetCalendarEventDetail(
+  accountId: string,
+  calendarId: string,
+  eventId: string
+): Promise<GraphCalendarEventDetail> {
+  const { calendar } = await getGoogleApis(accountId)
+  const res = await withGoogleUsageLimitRetry('events.get', () =>
+    calendar.events.get({
+      calendarId,
+      eventId,
+      fields: 'summary,description,hangoutLink,conferenceData,attendees(email)'
+    })
+  )
+  const ev = res.data
+  const emails: string[] = []
+  const seen = new Set<string>()
+  for (const at of ev.attendees ?? []) {
+    const addr = at.email?.trim().toLowerCase()
+    if (!addr || !SIMPLE_EMAIL.test(addr) || seen.has(addr)) continue
+    seen.add(addr)
+    emails.push(addr)
+    if (emails.length >= MAX_GOOGLE_EVENT_ATTENDEES) break
+  }
+  const joinUrl =
+    ev.hangoutLink?.trim() ||
+    ev.conferenceData?.entryPoints?.find((e) => e.entryPointType === 'video')?.uri?.trim() ||
+    ev.conferenceData?.entryPoints?.[0]?.uri?.trim() ||
+    null
+  const isOnlineMeeting = Boolean(
+    joinUrl || (ev.conferenceData?.entryPoints && ev.conferenceData.entryPoints.length > 0)
+  )
+  return {
+    subject: ev.summary ?? null,
+    attendeeEmails: emails,
+    joinUrl,
+    isOnlineMeeting,
+    bodyHtml: normalizeGoogleEventDescriptionHtml(ev.description ?? null)
+  }
 }

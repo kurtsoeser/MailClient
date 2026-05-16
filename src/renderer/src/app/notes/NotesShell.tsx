@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ComponentType } from 'react'
-import { CalendarDays, Loader2, Mail, Paperclip, Plus, Search, StickyNote, Trash2, X } from 'lucide-react'
+import { CalendarDays, Loader2, Mail, Paperclip, Search, StickyNote, Trash2, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { CalendarEventView, ConnectedAccount, UserNote, UserNoteKind, UserNoteListItem } from '@shared/types'
 import { useAccountsStore } from '@/stores/accounts'
@@ -12,11 +12,11 @@ import { ReadingPane } from '@/app/layout/ReadingPane'
 import {
   ModuleColumnHeaderIconButton,
   moduleColumnHeaderIconGlyphClass,
-  moduleColumnHeaderPrimarySmClass,
   moduleColumnHeaderShellBarClass,
   moduleColumnHeaderSubToolbarClass,
   moduleColumnHeaderTitleClass
 } from '@/components/ModuleColumnHeader'
+import { GLOBAL_CREATE_EVENT, useGlobalCreateNavigateStore } from '@/lib/global-create'
 
 const ALL_KINDS: UserNoteKind[] = ['mail', 'calendar', 'standalone']
 
@@ -228,7 +228,7 @@ export function NotesShell(): JSX.Element {
     })
   }
 
-  async function createStandalone(): Promise<void> {
+  const createStandalone = useCallback(async (): Promise<void> => {
     setSaving(true)
     setError(null)
     try {
@@ -245,7 +245,24 @@ export function NotesShell(): JSX.Element {
     } finally {
       setSaving(false)
     }
-  }
+  }, [t, clearSelectedMessage])
+
+  useEffect(() => {
+    const pending = useGlobalCreateNavigateStore.getState().takePendingAfterNavigate()
+    if (pending === 'note') {
+      window.setTimeout((): void => void createStandalone(), 0)
+    }
+  }, [createStandalone])
+
+  useEffect(() => {
+    function onGlobalCreate(e: Event): void {
+      const ce = e as CustomEvent<{ kind?: string }>
+      if (ce.detail?.kind !== 'note') return
+      void createStandalone()
+    }
+    window.addEventListener(GLOBAL_CREATE_EVENT, onGlobalCreate as EventListener)
+    return (): void => window.removeEventListener(GLOBAL_CREATE_EVENT, onGlobalCreate as EventListener)
+  }, [createStandalone])
 
   function openEdit(note: UserNoteListItem): void {
     setEditing(note)
@@ -356,15 +373,6 @@ export function NotesShell(): JSX.Element {
               <div className="truncate text-xs font-semibold leading-tight text-foreground">{t('notes.shell.title')}</div>
               <div className="truncate text-[10px] leading-tight text-muted-foreground">{t('notes.shell.subtitle')}</div>
             </div>
-            <button
-              type="button"
-              onClick={(): void => void createStandalone()}
-              disabled={saving}
-              className={cn(moduleColumnHeaderPrimarySmClass, 'shrink-0')}
-            >
-              <Plus className={moduleColumnHeaderIconGlyphClass} />
-              {t('notes.shell.newStandalone')}
-            </button>
           </div>
           <div className={moduleColumnHeaderSubToolbarClass}>
           <div className="relative">

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import type { MailFilter } from '@/stores/mail'
@@ -126,8 +127,7 @@ export function MailListViewMenu({
       top: r.bottom + 4,
       left,
       width,
-      maxHeight: maxH,
-      zIndex: 200
+      maxHeight: maxH
     })
   }, [open])
 
@@ -173,17 +173,18 @@ export function MailListViewMenu({
         <ChevronDown className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground', open && 'rotate-180')} />
       </button>
 
-      {open && (
-        <div
-          ref={panelRef}
-          role="menu"
-          aria-label={t('mail.listViewMenu.menuAria')}
-          className={cn(
-            'overflow-y-auto rounded-lg border border-border bg-popover py-1 shadow-xl',
-            'text-popover-foreground'
-          )}
-          style={panelStyle}
-        >
+      {open &&
+        createPortal(
+          <div
+            ref={panelRef}
+            role="menu"
+            aria-label={t('mail.listViewMenu.menuAria')}
+            className={cn(
+              'z-[400] overflow-y-auto rounded-lg border border-border bg-popover py-1 shadow-xl',
+              'text-popover-foreground'
+            )}
+            style={panelStyle}
+          >
           <MenuSectionTitle>{t('mail.listViewMenu.filterSection')}</MenuSectionTitle>
           <div className="px-1">
             <MenuRow
@@ -209,6 +210,7 @@ export function MailListViewMenu({
             <MenuRow
               selected={filter === 'flagged'}
               suffix={filterCounts.flagged > 0 ? filterCounts.flagged : undefined}
+              title={t('mail.listViewMenu.filterFlaggedTitle')}
               onPick={(): void => {
                 onFilterChange('flagged')
                 setOpen(false)
@@ -272,8 +274,9 @@ export function MailListViewMenu({
               {t('mail.listViewMenu.chronoOldest')}
             </MenuRow>
           </div>
-        </div>
-      )}
+        </div>,
+          document.body
+        )}
     </div>
   )
 }

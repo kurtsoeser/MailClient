@@ -34,6 +34,7 @@ import { Avatar } from '@/components/Avatar'
 import { cn } from '@/lib/utils'
 import { bgToRingClass, resolvedAccountColorCss } from '@/lib/avatar-color'
 import { peopleListPrimaryLabel } from '@/app/people/people-display-label'
+import { parsePhonesJson } from '@/app/people/people-contact-json'
 
 export type PeopleContactDetailPanelHandle = {
   /** Speichert offene Bearbeitung am aktuellen Kontakt. `false` bei Fehler — Wechsel dann abbrechen. */
@@ -78,29 +79,6 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
     binary += String.fromCharCode(bytes[i]!)
   }
   return btoa(binary)
-}
-
-function parsePhonesJson(raw: string | null): Array<{ type: string; value: string }> {
-  if (!raw) return []
-  try {
-    const arr = JSON.parse(raw) as unknown
-    if (!Array.isArray(arr)) return []
-    return arr
-      .map((x) => {
-        if (x && typeof x === 'object' && 'value' in x) {
-          const v = (x as { value?: string; type?: string }).value
-          const t = (x as { type?: string }).type
-          return {
-            type: typeof t === 'string' && t.trim() ? t.trim() : 'other',
-            value: typeof v === 'string' ? v.trim() : ''
-          }
-        }
-        return { type: 'other', value: '' }
-      })
-      .filter((p) => p.value)
-  } catch {
-    return []
-  }
 }
 
 /** Kompakte Icon-Aktionen wie in `ReadingPane` (Mail-Detail). */

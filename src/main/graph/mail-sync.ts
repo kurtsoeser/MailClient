@@ -4,17 +4,19 @@ import {
   upsertFolders,
   findFolderByRemoteId,
   findFolderByWellKnown,
+  setFolderMailboxCountsLocal,
   type UpsertFolderInput
 } from '../db/folders-repo'
 import {
-  upsertMessages,
   clearWaitingForReplyOnThreads,
   listMessageIdsByRemoteIds,
   deleteMessagesByAccountRemoteIds,
+  deleteAllMessagesInFolderLocal,
   type UpsertMessageInput
 } from '../db/messages-repo'
 import { listAccounts } from '../accounts'
 import { replaceMessageTags } from '../db/message-tags-repo'
+import { upsertMailMessagesReconcilingTodos } from '../mail-upsert-with-todo-reconcile'
 import {
   getFolderSyncState,
   upsertFolderSyncState
@@ -276,6 +278,12 @@ function mirrorGraphCategoriesToLocal(accountId: string, graphMessages: GraphMes
   }
 }
 
+function normalizeGraphFollowUpFlagStatus(m: GraphMessage): 'notFlagged' | 'flagged' | 'complete' {
+  const s = m.flag?.flagStatus
+  if (s === 'flagged' || s === 'complete' || s === 'notFlagged') return s
+  return 'notFlagged'
+}
+
 function graphMessageToUpsert(
   m: GraphMessage,
   accountId: string,
@@ -287,6 +295,7 @@ function graphMessageToUpsert(
   // Fuer die Volltextsuche: bei HTML-Only-Mails Plain-Text extrahieren.
   if (!text && html) text = htmlToPlainText(html)
   const { list, post, listId } = extractListUnsubscribeHeaders(m.internetMessageHeaders)
+  const followUpFlagStatus = normalizeGraphFollowUpFlagStatus(m)
   return {
     accountId,
     folderId,
@@ -305,7 +314,9 @@ function graphMessageToUpsert(
     sentAt: m.sentDateTime,
     receivedAt: m.receivedDateTime,
     isRead: m.isRead ? 1 : 0,
-    isFlagged: m.flag?.flagStatus === 'flagged' ? 1 : 0,
+    // Nur aktiv gekennzeichnet; `complete` / `notFlagged` siehe followUpFlagStatus.
+    isFlagged: followUpFlagStatus === 'flagged' ? 1 : 0,
+    followUpFlagStatus,
     hasAttachments: m.hasAttachments ? 1 : 0,
     importance: m.importance,
     changeKey: m.changeKey,
@@ -439,7 +450,7 @@ async function runGraphDeltaPollCycle(
       deleteMessagesByAccountRemoteIds(accountId, ing.removedRemoteIds)
     }
     if (ing.rows.length > 0) {
-      upsertMessages(ing.rows)
+      upsertMailMessagesReconcilingTodos(accountId, ing.rows)
       mirrorGraphCategoriesToLocal(accountId, ing.graphMessages)
       total += ing.rows.length
       remoteIds.push(...ing.remoteIds)
@@ -522,6 +533,24 @@ export async function syncMessagesInFolder(
     throw new Error(`Ordner ${folderRemoteId} nicht in DB gefunden.`)
   }
 
+  /** Leer auf dem Server: Graph liefert sonst keine Delta-Removals im Folder-Sync — lokalen Ordner leeren. */
+  const folderStats = (await client
+    .api(`/me/mailFolders/${folderRemoteId}`)
+    .select('totalItemCount,unreadItemCount')
+    .get()) as { totalItemCount?: number; unreadItemCount?: number }
+  const remoteTotal = folderStats.totalItemCount ?? 0
+  if (remoteTotal === 0) {
+    deleteAllMessagesInFolderLocal(folder.id)
+    setFolderMailboxCountsLocal(folder.id, 0, 0)
+    upsertFolderSyncState({
+      accountId,
+      folderId: folder.id,
+      deltaToken: null,
+      lastSyncedAt: null
+    })
+    return 0
+  }
+
   let request = client
     .api(`/me/mailFolders/${folderRemoteId}/messages`)
     .top(topCount)
@@ -534,8 +563,14 @@ export async function syncMessagesInFolder(
   const page = (await request.get()) as GraphCollection<GraphMessage>
 
   const messages = page.value.map((m) => graphMessageToUpsert(m, accountId, folder.id))
-  upsertMessages(messages)
+  upsertMailMessagesReconcilingTodos(accountId, messages)
   mirrorGraphCategoriesToLocal(accountId, page.value)
+
+  setFolderMailboxCountsLocal(
+    folder.id,
+    folderStats.unreadItemCount ?? 0,
+    remoteTotal
+  )
 
   // Watermark setzen: die juengste lastModifiedDateTime, damit das spaetere
   // Polling von dort weiterlaufen kann.
@@ -633,7 +668,7 @@ export async function pollMessagesInFolder(
         if (m.id) remoteIds.push(m.id)
       }
       const batch = page.value.map((m) => graphMessageToUpsert(m, accountId, folder.id))
-      upsertMessages(batch)
+      upsertMailMessagesReconcilingTodos(accountId, batch)
       mirrorGraphCategoriesToLocal(accountId, page.value)
       total += batch.length
 

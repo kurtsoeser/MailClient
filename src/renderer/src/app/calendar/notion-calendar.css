@@ -177,6 +177,70 @@
   font-weight: 500;
 }
 
+.calendar-notion-shell .fc-cal-event-custom {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  padding: 2px 18px 2px 4px;
+  overflow: hidden;
+}
+
+.calendar-notion-shell .fc-cal-event-custom-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.calendar-notion-shell .fc-cal-event-custom-time {
+  font-size: 10px;
+  line-height: 1.25;
+  opacity: 0.9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.calendar-notion-shell .fc-cal-event-custom-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 3px;
+  min-width: 0;
+}
+
+.calendar-notion-shell .fc-cal-event-custom-title-icon {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  opacity: 0.95;
+}
+
+.calendar-notion-shell .fc-cal-event-custom-title {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  min-width: 0;
+  flex: 1;
+}
+
+.calendar-notion-shell .fc-cal-event-kind-icon {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 14px;
+  height: 14px;
+  opacity: 0.92;
+  pointer-events: none;
+}
+
+.calendar-notion-shell .fc-daygrid-event .fc-cal-event-custom {
+  padding-right: 16px;
+}
+
 .calendar-notion-shell .fc-event-main-frame {
   padding: 1px 0;
 }

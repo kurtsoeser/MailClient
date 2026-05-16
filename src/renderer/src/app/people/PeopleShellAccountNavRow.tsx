@@ -2,6 +2,7 @@ import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { AlertCircle, ChevronRight, GripVertical, Loader2, RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import type { MouseEvent } from 'react'
 import type { ConnectedAccount } from '@shared/types'
 import { Avatar } from '@/components/Avatar'
 import { cn } from '@/lib/utils'
@@ -17,7 +18,8 @@ export function PeopleShellSortableAccountNavRow({
   syncError,
   syncErrorMessage,
   onSelect,
-  onSync
+  onSync,
+  onAccountContextMenu
 }: {
   account: ConnectedAccount
   profilePhotoDataUrl?: string
@@ -33,6 +35,7 @@ export function PeopleShellSortableAccountNavRow({
   syncErrorMessage?: string | null
   onSelect: () => void
   onSync: () => void
+  onAccountContextMenu?: (e: MouseEvent) => void
 }): JSX.Element {
   const { t } = useTranslation()
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -70,6 +73,10 @@ export function PeopleShellSortableAccountNavRow({
           'flex items-center gap-1.5 rounded-md px-1.5 py-2 transition-colors',
           active ? 'bg-primary/15' : 'hover:bg-secondary/40'
         )}
+        onContextMenu={(e): void => {
+          if (!onAccountContextMenu) return
+          onAccountContextMenu(e)
+        }}
       >
         {dragHandle}
         <span

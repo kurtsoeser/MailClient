@@ -61,7 +61,7 @@ export function PeopleContactListAvatar({
         size={isTile ? 'xl' : 'md'}
         className={cn(
           'ring-2 ring-offset-2 ring-offset-background',
-          isTile ? '!h-[4.25rem] !w-[4.25rem]' : '!h-9 !w-9',
+          isTile ? '!h-[5rem] !w-[5rem] sm:!h-[5.25rem] sm:!w-[5.25rem]' : '!h-9 !w-9',
           ringCls
         )}
       />

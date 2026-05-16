@@ -11,6 +11,10 @@ import { useSnoozeUiStore } from '@/stores/snooze-ui'
 import { useUndoStore } from '@/stores/undo'
 import { indexMessagesByThread, type ThreadGroup } from '@/lib/thread-group'
 import {
+  buildMailboxFlagExcludedFolderIds,
+  threadMatchesMailboxFlaggedFilter
+} from '@/lib/mail-flagged-mailbox-view'
+import {
   dedupeMailListThreadMessagesById,
   MAIL_LIST_UNIFIED_INBOX_STRIPE_BAR
 } from '@/lib/mail-list-ui'
@@ -26,6 +30,7 @@ import {
   buildMailCategorySubmenuItems,
   type MailContextHandlers
 } from '@/lib/mail-context-menu'
+import { accountSupportsCloudTasks } from '@/lib/cloud-task-accounts'
 import {
   createMailSendAsNewNotionPageHandler,
   createMailSendToNotionHandler
@@ -106,6 +111,7 @@ export function MailList(): JSX.Element {
   const toggleMessageFlag = useMailStore((s) => s.toggleMessageFlag)
   const archiveMessage = useMailStore((s) => s.archiveMessage)
   const deleteMessage = useMailStore((s) => s.deleteMessage)
+  const removeMailTodoRecordsForMessage = useMailStore((s) => s.removeMailTodoRecordsForMessage)
   const moveMessagesToFolder = useMailStore((s) => s.moveMessagesToFolder)
   const syncByAccount = useMailStore((s) => s.syncByAccount)
   const accounts = useAccountsStore((s) => s.accounts)
@@ -131,6 +137,7 @@ export function MailList(): JSX.Element {
   const [noteTarget, setNoteTarget] = useState<ObjectNoteTarget | null>(null)
   const [emptyingTrash, setEmptyingTrash] = useState(false)
   const filter = useMailStore((s) => s.mailFilter)
+  const flaggedFilterExcludeDeletedJunk = useMailStore((s) => s.flaggedFilterExcludeDeletedJunk)
   const setFilter = useMailStore((s) => s.setMailFilter)
   const mailListArrangeBy = useMailStore((s) => s.mailListArrangeBy)
   const mailListChronoOrder = useMailStore((s) => s.mailListChronoOrder)
@@ -152,6 +159,17 @@ export function MailList(): JSX.Element {
     void withFullMessage(messageId, (full) => openReply('reply', full))
   }
 
+  const deleteMessageOrRemoveTodoEntry = useCallback(
+    async (messageId: number): Promise<void> => {
+      if (listKind === 'todo') {
+        await removeMailTodoRecordsForMessage(messageId)
+      } else {
+        await deleteMessage(messageId)
+      }
+    },
+    [listKind, deleteMessage, removeMailTodoRecordsForMessage]
+  )
+
   const mailContextHandlers = useMemo<MailContextHandlers>(
     () => ({
       openReply,
@@ -167,7 +185,7 @@ export function MailList(): JSX.Element {
       setMessageRead,
       toggleMessageFlag,
       archiveMessage,
-      deleteMessage,
+      deleteMessage: deleteMessageOrRemoveTodoEntry,
       setTodoForMessage,
       completeTodoForMessage,
       setWaitingForMessage,
@@ -185,7 +203,7 @@ export function MailList(): JSX.Element {
       setMessageRead,
       toggleMessageFlag,
       archiveMessage,
-      deleteMessage,
+      deleteMessageOrRemoveTodoEntry,
       setTodoForMessage,
       completeTodoForMessage,
       setWaitingForMessage,
@@ -213,7 +231,7 @@ export function MailList(): JSX.Element {
       const targets =
         bulk && bulk.length > 1 ? dedupeMailListThreadMessagesById(bulk) : [m]
       void (async (): Promise<void> => {
-        for (const x of targets) await deleteMessage(x.id)
+        for (const x of targets) await deleteMessageOrRemoveTodoEntry(x.id)
       })()
     },
     onToggleFlag: (e, m, bulk): void => {
@@ -291,7 +309,9 @@ export function MailList(): JSX.Element {
         ...ui,
         categorySubmenu: cat.length > 0 ? cat : undefined,
         deletedItemsFolder: listKind === 'folder' && folder?.wellKnown === 'deleteditems',
+        removeMailTodoOnly: listKind === 'todo',
         moveSubmenuContent,
+        allowsCloudTaskCreate: accountSupportsCloudTasks(primaryAcc),
         t
       })
       setContextMenu({ x: anchor.x, y: anchor.y, items })
@@ -338,25 +358,47 @@ export function MailList(): JSX.Element {
     [messages, threadMessages, listKind]
   )
 
+  const mailboxFlagExcludedFolderIds = useMemo(
+    () => buildMailboxFlagExcludedFolderIds(foldersByAccount),
+    [foldersByAccount]
+  )
+
   const filterCounts = useMemo(() => {
     let unread = 0
     let flagged = 0
     let withTodo = 0
     for (const t of threads) {
       if (t.unreadCount > 0) unread++
-      if (t.isFlagged) flagged++
+      if (
+        threadMatchesMailboxFlaggedFilter(
+          t,
+          messagesByThread,
+          mailboxFlagExcludedFolderIds,
+          flaggedFilterExcludeDeletedJunk
+        )
+      ) {
+        flagged++
+      }
       if (t.openTodoDueKind != null) withTodo++
     }
     return { all: threads.length, unread, flagged, withTodo }
-  }, [threads])
+  }, [threads, messagesByThread, mailboxFlagExcludedFolderIds, flaggedFilterExcludeDeletedJunk])
 
   const filteredThreads = useMemo(() => {
     if (filter === 'all') return threads
     if (filter === 'unread') return threads.filter((t) => t.unreadCount > 0)
-    if (filter === 'flagged') return threads.filter((t) => t.isFlagged)
+    if (filter === 'flagged')
+      return threads.filter((t) =>
+        threadMatchesMailboxFlaggedFilter(
+          t,
+          messagesByThread,
+          mailboxFlagExcludedFolderIds,
+          flaggedFilterExcludeDeletedJunk
+        )
+      )
     if (filter === 'with_todo') return threads.filter((t) => t.openTodoDueKind != null)
     return threads
-  }, [threads, filter])
+  }, [threads, filter, messagesByThread, mailboxFlagExcludedFolderIds, flaggedFilterExcludeDeletedJunk])
 
   const accountById = useMemo(
     () => new Map(accounts.map((a) => [a.id, a] as const)),

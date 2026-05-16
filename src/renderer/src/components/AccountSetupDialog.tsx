@@ -29,7 +29,9 @@ import {
 } from '@/lib/calendar-visibility-storage'
 import { SIDEBAR_DEFAULT_CAL_ID } from '@/app/calendar/calendar-shell-storage'
 import { AccountPropertiesMenu } from '@/components/AccountPropertiesMenu'
+import { BulkUnflagServerDialog } from '@/components/BulkUnflagServerDialog'
 import { NotionSettingsPanel } from '@/components/NotionSettingsPanel'
+import { RulesShell } from '@/app/rules/RulesShell'
 import { accountColorToCssBackground } from '@/lib/avatar-color'
 import {
   DASHBOARD_GRID_STEP_DEFAULT_PX,
@@ -48,10 +50,12 @@ import {
   AlertCircle,
   Trash2,
   CalendarClock,
+  Eraser,
   Image as ImageIcon,
   Inbox,
   Tag,
   ListChecks,
+  ListTodo,
   RefreshCw,
   Download,
   Upload,
@@ -70,8 +74,64 @@ const SETTINGS_SUB_DEFAULT: Record<SettingsTab, string> = {
 
 type CalSidebarAccountLoad = {
   calendars: CalendarGraphCalendarRow[]
+  groupCalendars: CalendarGraphCalendarRow[]
   loading: boolean
+  groupLoading: boolean
   error: string | null
+  groupError: string | null
+}
+
+const M365_GROUP_CAL_SETTINGS_PAGE = 50
+
+async function loadAllM365GroupCalendarsForSettings(
+  accountId: string
+): Promise<CalendarGraphCalendarRow[]> {
+  const out: CalendarGraphCalendarRow[] = []
+  let offset = 0
+  for (;;) {
+    const page = await window.mailClient.calendar.listMicrosoft365GroupCalendars({
+      accountId,
+      offset,
+      limit: M365_GROUP_CAL_SETTINGS_PAGE
+    })
+    out.push(...page.calendars)
+    if (!page.hasMore) break
+    offset = page.offset + page.limit
+  }
+  return out
+}
+
+function renderCalendarSidebarCheckboxRow(
+  accId: string,
+  cal: CalendarGraphCalendarRow,
+  calSidebarHiddenKeysForSettings: Set<string>,
+  busy: boolean,
+  reconnectingAccountId: string | null,
+  onToggle: (accountId: string, calId: string, visible: boolean) => void
+): JSX.Element {
+  const isDefaultSlot = cal.id === SIDEBAR_DEFAULT_CAL_ID
+  const vk = calendarVisibilityKey(accId, cal.id)
+  const inSidebar = !calSidebarHiddenKeysForSettings.has(vk)
+  return (
+    <label
+      key={`${accId}:${cal.id}`}
+      className={cn(
+        'flex cursor-pointer items-start gap-2 rounded border border-transparent px-1 py-0.5 hover:bg-background/60',
+        isDefaultSlot && 'opacity-60'
+      )}
+    >
+      <input
+        type="checkbox"
+        className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-primary"
+        checked={inSidebar}
+        disabled={isDefaultSlot || busy || reconnectingAccountId !== null}
+        onChange={(e): void => {
+          onToggle(accId, cal.id, e.target.checked)
+        }}
+      />
+      <span className="min-w-0 flex-1 text-[11px] leading-snug text-foreground">{cal.name}</span>
+    </label>
+  )
 }
 
 function snapshotLocalStorage(): Record<string, string> {
@@ -115,9 +175,16 @@ interface Props {
   onClose: () => void
   /** Beim Oeffnen direkt einen Tab anzeigen (z. B. von Hinweisdialog «Triage-Ordner»). */
   initialTab?: SettingsTab
+  /** Unterpunkt im Mail-Tab (z. B. `rules`). */
+  initialMailSubNav?: string
 }
 
-export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.Element | null {
+export function AccountSetupDialog({
+  open,
+  onClose,
+  initialTab,
+  initialMailSubNav
+}: Props): JSX.Element | null {
   const {
     config,
     accounts,
@@ -139,6 +206,8 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
   const refreshAccounts = useMailStore((s) => s.refreshAccounts)
   const triggerSync = useMailStore((s) => s.triggerSync)
   const foldersByAccount = useMailStore((s) => s.foldersByAccount)
+  const flaggedFilterExcludeDeletedJunk = useMailStore((s) => s.flaggedFilterExcludeDeletedJunk)
+  const setFlaggedFilterExcludeDeletedJunk = useMailStore((s) => s.setFlaggedFilterExcludeDeletedJunk)
   const { t } = useTranslation()
   const setAppMode = useAppModeStore((s) => s.setMode)
   const locale = useLocaleStore((s) => s.locale)
@@ -198,6 +267,10 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
   const [newCatColor, setNewCatColor] = useState('preset4')
   /** Konto-ID, fuer das gerade Microsoft OAuth (Refresh) laeuft. */
   const [reconnectingAccountId, setReconnectingAccountId] = useState<string | null>(null)
+  const [mailCacheClearingAccountId, setMailCacheClearingAccountId] = useState<string | null>(null)
+  const [mailCacheNotice, setMailCacheNotice] = useState<string | null>(null)
+  const [tasksCacheClearingAccountId, setTasksCacheClearingAccountId] = useState<string | null>(null)
+  const [tasksCacheNotice, setTasksCacheNotice] = useState<string | null>(null)
   const [colorSavingAccountId, setColorSavingAccountId] = useState<string | null>(null)
   const [aheadSavingAccountId, setAheadSavingAccountId] = useState<string | null>(null)
   const [backupBusy, setBackupBusy] = useState(false)
@@ -225,6 +298,7 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
   const [weatherSearchDraft, setWeatherSearchDraft] = useState('')
   const [weatherBusy, setWeatherBusy] = useState(false)
   const [weatherMsg, setWeatherMsg] = useState<string | null>(null)
+  const [bulkUnflagOpen, setBulkUnflagOpen] = useState(false)
 
   const calendarLinkedAccounts = useMemo(
     () => accounts.filter((a) => a.provider === 'microsoft' || a.provider === 'google'),
@@ -238,6 +312,7 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
       setGoogleClientSecretInput('')
       setLocalError(null)
       setBackupNotice(null)
+      setMailCacheNotice(null)
     }
   }, [open, config])
 
@@ -253,10 +328,12 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
   }, [open, config?.weatherLocationName])
 
   useEffect(() => {
-    if (open) {
-      setActiveTab(initialTab ?? 'general')
+    if (!open) return
+    setActiveTab(initialTab ?? 'general')
+    if (initialTab === 'mail' && initialMailSubNav) {
+      setSubNavId((prev) => ({ ...prev, mail: initialMailSubNav }))
     }
-  }, [open, initialTab])
+  }, [open, initialTab, initialMailSubNav])
 
   const microsoftAccounts = useMemo(
     () => accounts.filter((a) => a.provider === 'microsoft'),
@@ -287,7 +364,8 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
           { id: 'display', label: t('settings.mailDisplayHeading') },
           { id: 'sidebarFolders', label: t('settings.mailSidebarFoldersHeading') },
           { id: 'triage', label: t('settings.triageHeading') },
-          { id: 'categories', label: t('settings.categoriesHeading') }
+          { id: 'categories', label: t('settings.categoriesHeading') },
+          { id: 'rules', label: t('settings.mailRulesHeading') }
         ]
       case 'calendar':
         return [
@@ -417,7 +495,14 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
     let cancelled = false
     const nextInit: Record<string, CalSidebarAccountLoad> = {}
     for (const a of accounts) {
-      nextInit[a.id] = { calendars: [], loading: true, error: null }
+      nextInit[a.id] = {
+        calendars: [],
+        groupCalendars: [],
+        loading: true,
+        groupLoading: a.provider === 'microsoft',
+        error: null,
+        groupError: null
+      }
     }
     setCalSidebarPerAccount(nextInit)
     for (const a of accounts) {
@@ -427,7 +512,19 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
           if (cancelled) return
           setCalSidebarPerAccount((prev) => ({
             ...prev,
-            [a.id]: { calendars: rows, loading: false, error: null }
+            [a.id]: {
+              ...(prev[a.id] ?? {
+                calendars: [],
+                groupCalendars: [],
+                loading: true,
+                groupLoading: false,
+                error: null,
+                groupError: null
+              }),
+              calendars: rows.filter((c) => c.calendarKind !== 'm365Group'),
+              loading: false,
+              error: null
+            }
           }))
         })
         .catch((e: unknown) => {
@@ -436,11 +533,51 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
             ...prev,
             [a.id]: {
               calendars: prev[a.id]?.calendars ?? [],
+              groupCalendars: prev[a.id]?.groupCalendars ?? [],
               loading: false,
-              error: e instanceof Error ? e.message : String(e)
+              groupLoading: prev[a.id]?.groupLoading ?? false,
+              error: e instanceof Error ? e.message : String(e),
+              groupError: prev[a.id]?.groupError ?? null
             }
           }))
         })
+
+      if (a.provider === 'microsoft') {
+        void loadAllM365GroupCalendarsForSettings(a.id)
+          .then((groupRows) => {
+            if (cancelled) return
+            setCalSidebarPerAccount((prev) => ({
+              ...prev,
+              [a.id]: {
+                ...(prev[a.id] ?? {
+                  calendars: [],
+                  groupCalendars: [],
+                  loading: false,
+                  groupLoading: true,
+                  error: null,
+                  groupError: null
+                }),
+                groupCalendars: groupRows,
+                groupLoading: false,
+                groupError: null
+              }
+            }))
+          })
+          .catch((e: unknown) => {
+            if (cancelled) return
+            setCalSidebarPerAccount((prev) => ({
+              ...prev,
+              [a.id]: {
+                calendars: prev[a.id]?.calendars ?? [],
+                groupCalendars: prev[a.id]?.groupCalendars ?? [],
+                loading: prev[a.id]?.loading ?? false,
+                groupLoading: false,
+                error: prev[a.id]?.error ?? null,
+                groupError: e instanceof Error ? e.message : String(e)
+              }
+            }))
+          })
+      }
     }
     return (): void => {
       cancelled = true
@@ -695,6 +832,58 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
     writeHiddenCalendarKeysToStorage(nextHidden)
   }
 
+  async function handleClearTasksCache(accountId: string, email: string): Promise<void> {
+    const ok = await showAppConfirm(
+      t('settings.clearTasksCacheConfirm', { email }),
+      {
+        title: t('settings.clearTasksCacheTitle'),
+        variant: 'danger',
+        confirmLabel: t('settings.clearMailCacheConfirmButton')
+      }
+    )
+    if (!ok) return
+    setTasksCacheClearingAccountId(accountId)
+    setLocalError(null)
+    setTasksCacheNotice(null)
+    try {
+      const result = await window.mailClient.tasks.clearLocalTasksCache(accountId)
+      await refreshAccounts(accounts)
+      setTasksCacheNotice(
+        result.resynced ? t('settings.clearTasksCacheDoneOnline') : t('settings.clearTasksCacheDoneOffline')
+      )
+    } catch (e) {
+      setLocalError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setTasksCacheClearingAccountId(null)
+    }
+  }
+
+  async function handleClearMailCache(accountId: string, email: string): Promise<void> {
+    const ok = await showAppConfirm(
+      t('settings.clearMailCacheConfirm', { email }),
+      {
+        title: t('settings.clearMailCacheTitle'),
+        variant: 'danger',
+        confirmLabel: t('settings.clearMailCacheConfirmButton')
+      }
+    )
+    if (!ok) return
+    setMailCacheClearingAccountId(accountId)
+    setLocalError(null)
+    setMailCacheNotice(null)
+    try {
+      const result = await window.mailClient.mail.clearLocalMailCache(accountId)
+      await refreshAccounts(accounts)
+      setMailCacheNotice(
+        result.resynced ? t('settings.clearMailCacheDoneOnline') : t('settings.clearMailCacheDoneOffline')
+      )
+    } catch (e) {
+      setLocalError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setMailCacheClearingAccountId(null)
+    }
+  }
+
   async function handleRemove(id: string): Promise<void> {
     setBusy(true)
     setLocalError(null)
@@ -872,6 +1061,7 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
   }
 
   return createPortal(
+    <>
     <div
       className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm"
       role="presentation"
@@ -932,7 +1122,14 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
                 </button>
               ))}
             </nav>
-            <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-5">
+            <div
+              className={cn(
+                'min-h-0 min-w-0 flex-1 p-5',
+                activeTab === 'mail' && subNavId.mail === 'rules'
+                  ? 'flex flex-col overflow-hidden'
+                  : 'overflow-y-auto'
+              )}
+            >
           {activeTab === 'general' && (
             <div role="tabpanel" aria-label={t('settings.generalPanelAria')} className="space-y-5">
               {subNavId.general === 'language' && (
@@ -1278,6 +1475,13 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
                 </div>
                 <p className="text-xs leading-relaxed text-muted-foreground">{t('settings.accountsIntro')}</p>
 
+                {mailCacheNotice ? (
+                  <p className="text-[10px] text-emerald-600 dark:text-emerald-500">{mailCacheNotice}</p>
+                ) : null}
+                {tasksCacheNotice ? (
+                  <p className="text-[10px] text-emerald-600 dark:text-emerald-500">{tasksCacheNotice}</p>
+                ) : null}
+
                 {accounts.length === 0 ? (
                   <p className="rounded-md border border-dashed border-border bg-background/50 p-4 text-center text-xs text-muted-foreground">
                     {t('settings.noAccountYet')}
@@ -1358,7 +1562,7 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
                             </button>
                           </div>
                         </div>
-                        <div className="mt-2.5 border-t border-border/40 pt-2 pl-10">
+                        <div className="mt-2.5 border-t border-border/40 pt-2 pl-10 space-y-2">
                           <AccountPropertiesMenu
                             provider={acc.provider}
                             accountId={acc.id}
@@ -1370,6 +1574,68 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
                               void handleAccountColorChange(acc.id, next)
                             }}
                           />
+                          {(acc.provider === 'microsoft' || acc.provider === 'google') && (
+                            <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={(): void => {
+                                void handleClearMailCache(acc.id, acc.email)
+                              }}
+                              disabled={
+                                busy ||
+                                reconnectingAccountId !== null ||
+                                mailCacheClearingAccountId !== null ||
+                                tasksCacheClearingAccountId !== null
+                              }
+                              className={cn(
+                                'inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-xs font-medium outline-none transition-colors',
+                                busy ||
+                                  reconnectingAccountId !== null ||
+                                  mailCacheClearingAccountId !== null ||
+                                  tasksCacheClearingAccountId !== null
+                                  ? 'cursor-not-allowed opacity-40'
+                                  : 'hover:bg-secondary/80 focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/40'
+                              )}
+                              title={t('settings.clearMailCacheTitle')}
+                            >
+                              {mailCacheClearingAccountId === acc.id ? (
+                                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+                              ) : (
+                                <Eraser className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                              )}
+                              {t('settings.clearMailCacheButton')}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(): void => {
+                                void handleClearTasksCache(acc.id, acc.email)
+                              }}
+                              disabled={
+                                busy ||
+                                reconnectingAccountId !== null ||
+                                mailCacheClearingAccountId !== null ||
+                                tasksCacheClearingAccountId !== null
+                              }
+                              className={cn(
+                                'inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-xs font-medium outline-none transition-colors',
+                                busy ||
+                                  reconnectingAccountId !== null ||
+                                  mailCacheClearingAccountId !== null ||
+                                  tasksCacheClearingAccountId !== null
+                                  ? 'cursor-not-allowed opacity-40'
+                                  : 'hover:bg-secondary/80 focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/40'
+                              )}
+                              title={t('settings.clearTasksCacheTitle')}
+                            >
+                              {tasksCacheClearingAccountId === acc.id ? (
+                                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+                              ) : (
+                                <ListTodo className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                              )}
+                              {t('settings.clearTasksCacheButton')}
+                            </button>
+                            </div>
+                          )}
                         </div>
                       </li>
                     ))}
@@ -1429,6 +1695,48 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
                     </span>
                   </span>
                 </label>
+                <label className="flex cursor-pointer items-start gap-3 rounded-md border border-border bg-background/40 p-3">
+                  <input
+                    type="checkbox"
+                    checked={flaggedFilterExcludeDeletedJunk}
+                    onChange={(e): void => {
+                      setFlaggedFilterExcludeDeletedJunk(e.target.checked)
+                    }}
+                    disabled={busy}
+                    className="mt-0.5 h-4 w-4 cursor-pointer accent-primary"
+                  />
+                  <span className="flex-1 text-xs">
+                    <span className="block font-medium text-foreground">
+                      {t('settings.flaggedMailboxFilterTitle')}
+                    </span>
+                    <span className="mt-0.5 block leading-relaxed text-muted-foreground">
+                      {t('settings.flaggedMailboxFilterHint')}
+                    </span>
+                  </span>
+                </label>
+                <div className="space-y-2 rounded-md border border-border bg-muted/20 p-3">
+                  <div className="flex items-start gap-2">
+                    <Eraser className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <p className="text-xs font-medium text-foreground">{t('settings.bulkUnflagSettingsHeading')}</p>
+                      <p className="text-xs leading-relaxed text-muted-foreground">{t('settings.bulkUnflagSettingsBody')}</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(): void => setBulkUnflagOpen(true)}
+                    disabled={busy || triageMailAccounts.length === 0}
+                    className={cn(
+                      'inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium transition-colors',
+                      busy || triageMailAccounts.length === 0
+                        ? 'cursor-not-allowed opacity-50'
+                        : 'hover:bg-secondary/60'
+                    )}
+                  >
+                    <Eraser className="h-3.5 w-3.5" aria-hidden />
+                    {t('settings.bulkUnflagOpenButton')}
+                  </button>
+                </div>
               </section>
               )}
 
@@ -1767,6 +2075,12 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
                 )}
               </section>
               )}
+
+              {subNavId.mail === 'rules' && (
+              <section className="-mx-5 -mb-5 flex min-h-0 flex-col">
+                <RulesShell embedded />
+              </section>
+              )}
             </div>
           )}
 
@@ -1894,7 +2208,7 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
                                 : t('settings.calendarSidebarProviderMicrosoft')}
                             </p>
                           </div>
-                          {!pack || pack.loading ? (
+                          {!pack || (pack.loading && pack.calendars.length === 0) ? (
                             <p className="flex items-center gap-1 py-1 text-[10px] text-muted-foreground">
                               <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden />
                               {t('settings.catLoading')}
@@ -1904,34 +2218,51 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
                               {pack.error}
                             </div>
                           ) : (
-                            <div className="space-y-0.5">
-                              {pack.calendars.map((cal) => {
-                                const isDefaultSlot = cal.id === SIDEBAR_DEFAULT_CAL_ID
-                                const vk = calendarVisibilityKey(acc.id, cal.id)
-                                const inSidebar = !calSidebarHiddenKeysForSettings.has(vk)
-                                return (
-                                  <label
-                                    key={`${acc.id}:${cal.id}`}
-                                    className={cn(
-                                      'flex cursor-pointer items-start gap-2 rounded border border-transparent px-1 py-0.5 hover:bg-background/60',
-                                      isDefaultSlot && 'opacity-60'
-                                    )}
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-primary"
-                                      checked={inSidebar}
-                                      disabled={isDefaultSlot || busy || reconnectingAccountId !== null}
-                                      onChange={(e): void => {
-                                        handleCalendarSidebarRowToggle(acc.id, cal.id, e.target.checked)
-                                      }}
-                                    />
-                                    <span className="min-w-0 flex-1 text-[11px] leading-snug text-foreground">
-                                      {cal.name}
-                                    </span>
-                                  </label>
-                                )
-                              })}
+                            <div className="space-y-2">
+                              <div className="space-y-0.5">
+                                {pack.calendars.map((cal) =>
+                                  renderCalendarSidebarCheckboxRow(
+                                    acc.id,
+                                    cal,
+                                    calSidebarHiddenKeysForSettings,
+                                    busy,
+                                    reconnectingAccountId,
+                                    handleCalendarSidebarRowToggle
+                                  )
+                                )}
+                              </div>
+                              {acc.provider === 'microsoft' ? (
+                                <div className="space-y-1 border-t border-border/50 pt-2">
+                                  <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                    {t('settings.calendarSidebarGroupCalendars')}
+                                  </p>
+                                  {pack.groupLoading ? (
+                                    <p className="flex items-center gap-1 py-0.5 text-[10px] text-muted-foreground">
+                                      <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden />
+                                      {t('settings.calendarSidebarGroupCalendarsLoading')}
+                                    </p>
+                                  ) : pack.groupError ? (
+                                    <p className="text-[10px] text-destructive">{pack.groupError}</p>
+                                  ) : pack.groupCalendars.length === 0 ? (
+                                    <p className="text-[10px] text-muted-foreground">
+                                      {t('settings.calendarSidebarGroupCalendarsEmpty')}
+                                    </p>
+                                  ) : (
+                                    <div className="space-y-0.5">
+                                      {pack.groupCalendars.map((cal) =>
+                                        renderCalendarSidebarCheckboxRow(
+                                          acc.id,
+                                          cal,
+                                          calSidebarHiddenKeysForSettings,
+                                          busy,
+                                          reconnectingAccountId,
+                                          handleCalendarSidebarRowToggle
+                                        )
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              ) : null}
                             </div>
                           )}
                         </div>
@@ -2011,7 +2342,9 @@ export function AccountSetupDialog({ open, onClose, initialTab }: Props): JSX.El
           )}
         </div>
       </div>
-    </div>,
+    </div>
+    <BulkUnflagServerDialog open={bulkUnflagOpen} onClose={(): void => setBulkUnflagOpen(false)} />
+    </>,
     document.body
   )
 }

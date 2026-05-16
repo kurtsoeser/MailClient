@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal, flushSync } from 'react-dom'
 import FullCalendar from '@fullcalendar/react'
 import dayGridPlugin from '@fullcalendar/daygrid'
 import timeGridPlugin from '@fullcalendar/timegrid'
@@ -7,7 +8,7 @@ import interactionPlugin from '@fullcalendar/interaction'
 import luxonPlugin from '@fullcalendar/luxon'
 import deLocale from '@fullcalendar/core/locales/de'
 import enGbLocale from '@fullcalendar/core/locales/en-gb'
-import type { EventChangeArg } from '@fullcalendar/core'
+import type { EventChangeArg, EventInput, EventSourceInput } from '@fullcalendar/core'
 import {
   addMonths,
   compareAsc,
@@ -20,7 +21,17 @@ import {
 } from 'date-fns'
 import { de as deFns, enUS as enUSFns } from 'date-fns/locale'
 import type { Locale } from 'date-fns'
-import { Eye, EyeOff, Mails, PanelLeftClose, PanelRightClose, Search, SquareArrowOutUpRight } from 'lucide-react'
+import {
+  CheckSquare,
+  Eye,
+  EyeOff,
+  Mails,
+  PanelLeftClose,
+  PanelRightClose,
+  Search,
+  SquareArrowOutUpRight,
+  CalendarPlus
+} from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useAccountsStore } from '@/stores/accounts'
 import { useCalendarPendingFocusStore } from '@/stores/calendar-pending-focus'
@@ -31,6 +42,7 @@ import { showAppConfirm } from '@/stores/app-dialog'
 import type {
   CalendarEventView,
   CalendarGraphCalendarRow,
+  ConnectedAccount,
   MailListItem,
   TodoDueKindOpen
 } from '@shared/types'
@@ -41,12 +53,38 @@ import {
 } from '@shared/graph-calendar-colors'
 import {
   CALENDAR_KIND_MAIL_TODO,
-  mailTodoConversationsToFullCalendarEvents,
+  mailTodoItemsToFullCalendarEvents,
   computePersistIsoRangeForMailTodo
 } from '@/app/calendar/mail-todo-calendar'
+import {
+  CALENDAR_KIND_CLOUD_TASK,
+  cloudTaskEventId,
+  cloudTasksToFullCalendarEvents,
+  computePersistTargetForCloudTask
+} from '@/app/calendar/cloud-task-calendar'
+import { scheduleRemoveDuplicateFullCalendarEventsById } from '@/app/calendar/calendar-fc-event-source'
+import { applyCloudTaskPersistTarget } from '@/app/calendar/apply-cloud-task-persist'
+import { useCalendarFcEventContent } from '@/app/calendar/use-calendar-fc-event-content'
+import { useCalendarSyncStore } from '@/stores/calendar-sync'
+import { CloudTaskItemPreview } from '@/app/calendar/CloudTaskItemPreview'
+import { loadPlannedScheduleMapForTasks } from '@/app/work-items/load-planned-schedules'
+import {
+  cloudTaskCalendarDisplaySignature,
+  filterCloudTasksInCalendarRange,
+  loadCloudTasksForAccount,
+  loadUnifiedCloudTasks
+} from '@/app/tasks/tasks-calendar-load'
+import type { TaskItemWithContext } from '@/app/tasks/tasks-types'
+import { cloudTaskStableKey } from '@shared/work-item-keys'
+import type { WorkItemPlannedSchedule, WorkItem } from '@shared/work-item'
 import { cn } from '@/lib/utils'
 import { openExternalUrl } from '@/lib/open-external'
+import { buildAccountColorAndNewContextItems } from '@/lib/account-sidebar-context-menu'
 import { CalendarEventDialog } from '@/app/calendar/CalendarEventDialog'
+import {
+  CalendarCreateQuickPopover,
+  type CalendarCreateQuickDraft
+} from '@/app/calendar/CalendarCreateQuickPopover'
 import { CalendarEventPreview } from '@/app/calendar/CalendarEventPreview'
 import { ContextMenu, type ContextMenuItem } from '@/components/ContextMenu'
 import {
@@ -56,9 +94,11 @@ import {
   moduleColumnHeaderIconGlyphClass,
   moduleColumnHeaderUppercaseLabelClass
 } from '@/components/ModuleColumnHeader'
+import { CalendarRightZeitlistePanel } from '@/app/calendar/CalendarRightZeitlistePanel'
 import { ObjectNoteDialog, type ObjectNoteTarget } from '@/components/ObjectNoteEditor'
 import {
   buildCalendarEventCategorySubmenuItems,
+  buildCalendarEventTransferSubmenuItems,
   buildCalendarEventContextItems,
   formatCalendarEventClipboardText
 } from '@/lib/calendar-event-context-menu'
@@ -72,17 +112,20 @@ import {
   buildMailContextItems,
   type MailContextHandlers
 } from '@/lib/mail-context-menu'
+import { accountSupportsCloudTasks } from '@/lib/cloud-task-accounts'
 import { deleteCalendarEventIpc } from '@/lib/calendar-ipc'
 import { applyCalendarEventDomColors } from '@/lib/calendar-event-chip-style'
 import { accountColorToCssBackground } from '@/lib/avatar-color'
 import { ReadingPane } from '@/app/layout/ReadingPane'
+import { GLOBAL_CREATE_EVENT, useGlobalCreateNavigateStore } from '@/lib/global-create'
 import { VerticalSplitter, useResizableWidth } from '@/components/ResizableSplitter'
-import { CalendarRightPosteingangPanel } from '@/app/calendar/CalendarRightPosteingang'
 import { useCalendarPanelLayoutStore } from '@/stores/calendar-panel-layout'
 import { CalendarFloatingPanel } from '@/app/calendar/CalendarFloatingPanel'
 import { CalendarDockPanelSlide } from '@/app/calendar/CalendarDockPanelSlide'
 import { CalendarDockStripFrame } from '@/app/calendar/CalendarDockStripFrame'
 import { useCalendarMailExternalDrop } from '@/lib/use-calendar-mail-external-drop'
+import { useCalendarCloudTaskExternalDrop } from '@/lib/use-calendar-cloud-task-external-drop'
+import type { CloudTaskDragPayload } from '@/app/tasks/tasks-cloud-task-dnd'
 import { buildCalendarIncludeCalendars } from '@/lib/build-calendar-include-calendars'
 import {
   CALENDAR_VISIBILITY_CHANGED_EVENT,
@@ -113,11 +156,13 @@ import {
   persistAccountSidebarOpen,
   persistGroupCalSidebarOpen,
   persistMailTodoOverlay,
+  persistCloudTaskOverlay,
   persistRightInboxOpen,
   persistRightPreviewOpen,
   persistTimeGridSlotMinutes,
   readLeftSidebarCollapsedFromStorage,
   readMailTodoOverlayFromStorage,
+  readCloudTaskOverlayFromStorage,
   readRightInboxOpenFromStorage,
   readRightPreviewOpenFromStorage,
   readTimeGridSlotMinutesFromStorage,
@@ -143,6 +188,7 @@ function sameStringSet(a: Set<string>, b: Set<string>): boolean {
 
 export function CalendarShell(): JSX.Element {
   const { t, i18n } = useTranslation()
+  const calendarFcEventContentRender = useCalendarFcEventContent()
   const fcLocale = useMemo(
     () => (i18n.language.startsWith('de') ? deLocale : enGbLocale),
     [i18n.language]
@@ -155,7 +201,10 @@ export function CalendarShell(): JSX.Element {
   const isDeCalendar = i18n.language.startsWith('de')
 
   const accounts = useAccountsStore((s) => s.accounts)
+  const calendarSyncByAccount = useCalendarSyncStore((s) => s.syncByAccount)
+  const triggerCalendarAccountSync = useCalendarSyncStore((s) => s.triggerSync)
   const profilePhotoDataUrls = useAccountsStore((s) => s.profilePhotoDataUrls)
+  const patchAccountColor = useAccountsStore((s) => s.patchAccountColor)
   const calendarTimeZoneConfig = useAccountsStore((s) => s.config?.calendarTimeZone)
   const selectedMessageId = useMailStore((s) => s.selectedMessageId)
   const selectMessage = useMailStore((s) => s.selectMessage)
@@ -182,10 +231,18 @@ export function CalendarShell(): JSX.Element {
   })
 
   const [events, setEvents] = useState<CalendarEventView[]>([])
+  const eventsRef = useRef<CalendarEventView[]>([])
+  eventsRef.current = events
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   /** Erzwingt Reload der rechten ToDo-Spalte nach Kalender-Zug (mail:changed allein reicht nicht zuverlässig). */
   const [todoSideListRefreshKey, setTodoSideListRefreshKey] = useState(0)
+
+  const timelineReloadRef = useRef<(() => void) | null>(null)
+  const reloadCalendarEventsOnlyRef = useRef<
+    (opts?: { silent?: boolean; forceRefresh?: boolean }) => void
+  >(() => {})
+  const [timelineLoading, setTimelineLoading] = useState(false)
 
   const [activeViewId, setActiveViewId] = useState<string>('timeGridWeek')
   const [rangeTitle, setRangeTitle] = useState('')
@@ -209,10 +266,17 @@ export function CalendarShell(): JSX.Element {
         range?: { start: Date; end: Date; allDay: boolean } | null
         createPrefill?: { subject: string; location: string }
         createAccountId?: string
+        createKind?: CalendarCreateQuickDraft['createKind']
+        createGraphCalendarId?: string
+        createTaskListId?: string
       }
     | { mode: 'edit'; event: CalendarEventView }
 
   const [eventDialog, setEventDialog] = useState<EventDialogState>(null)
+  const [quickCreate, setQuickCreate] = useState<{
+    anchor: { x: number; y: number }
+    range: { start: Date; end: Date; allDay: boolean }
+  } | null>(null)
   const [eventContextMenu, setEventContextMenu] = useState<{
     x: number
     y: number
@@ -233,6 +297,24 @@ export function CalendarShell(): JSX.Element {
   mailTodoOverlayRef.current = mailTodoOverlay
 
   const [mailTodoItems, setMailTodoItems] = useState<MailListItem[]>([])
+
+  const [cloudTaskOverlay, setCloudTaskOverlay] = useState<boolean>(readCloudTaskOverlayFromStorage)
+  const cloudTaskOverlayRef = useRef(cloudTaskOverlay)
+  cloudTaskOverlayRef.current = cloudTaskOverlay
+  const [cloudTaskAllItems, setCloudTaskAllItems] = useState<TaskItemWithContext[]>([])
+  const [cloudTaskRangeItems, setCloudTaskRangeItems] = useState<TaskItemWithContext[]>([])
+  const [cloudTaskPlannedByKey, setCloudTaskPlannedByKey] = useState(
+    () => new Map<string, WorkItemPlannedSchedule>()
+  )
+  const cloudTaskAllItemsRef = useRef(cloudTaskAllItems)
+  cloudTaskAllItemsRef.current = cloudTaskAllItems
+  const cloudTaskPlannedByKeyRef = useRef(cloudTaskPlannedByKey)
+  cloudTaskPlannedByKeyRef.current = cloudTaskPlannedByKey
+  const cloudTaskLayerSigRef = useRef('')
+  const cloudTaskFcEventsSigRef = useRef('')
+  const cloudTaskByKeyRef = useRef(new Map<string, TaskItemWithContext>())
+  const lastCloudFilterRangeKeyRef = useRef('')
+  const cloudTaskElByKeyRef = useRef(new Map<string, HTMLElement>())
 
   /** Ausgeblendete Kalender (Key `accountId|graphCalendarId`); leer = alle sichtbar. */
   const [hiddenCalendarKeys, setHiddenCalendarKeys] = useState<Set<string>>(
@@ -272,6 +354,17 @@ export function CalendarShell(): JSX.Element {
     [accounts]
   )
 
+  const taskAccounts = useMemo(
+    () => accounts.filter((a) => a.provider === 'microsoft' || a.provider === 'google'),
+    [accounts]
+  )
+
+  const canCreateCalendarEntry = calendarLinkedAccounts.length > 0 || taskAccounts.length > 0
+
+  const loadTaskListsForAccount = useCallback(async (accountId: string) => {
+    return window.mailClient.tasks.listLists({ accountId })
+  }, [])
+
   useEffect(() => {
     persistTimeGridSlotMinutes(timeGridSlotMinutes)
   }, [timeGridSlotMinutes])
@@ -302,17 +395,15 @@ export function CalendarShell(): JSX.Element {
   }, [])
 
   useEffect(() => {
+    useCalendarSyncStore.getState().initialize()
+  }, [])
+
+  useEffect(() => {
     if (migrateLegacyCalendarShellSource()) {
       setMailTodoOverlay(true)
       persistMailTodoOverlay(true)
     }
   }, [])
-
-  useEffect(() => {
-    if (selectedMessageId != null) {
-      setPreviewCalendarEvent(null)
-    }
-  }, [selectedMessageId])
 
   const isAccountSidebarOpen = useCallback(
     (accountId: string) => accountSidebarOpen[accountId] !== false,
@@ -628,6 +719,9 @@ export function CalendarShell(): JSX.Element {
     readLeftSidebarCollapsedFromStorage
   )
   const [previewCalendarEvent, setPreviewCalendarEvent] = useState<CalendarEventView | null>(null)
+  const [previewCloudTask, setPreviewCloudTask] = useState<TaskItemWithContext | null>(null)
+  const [previewCloudTaskPlannedFromTimeline, setPreviewCloudTaskPlannedFromTimeline] =
+    useState<WorkItemPlannedSchedule | null>(null)
   const [inboxColumnWidth, setInboxColumnWidth] = useResizableWidth({
     storageKey: 'mailclient.calendarShell.rightInboxWidth',
     defaultWidth: 300,
@@ -640,6 +734,65 @@ export function CalendarShell(): JSX.Element {
     minWidth: 280,
     maxWidth: 900
   })
+
+  useEffect(() => {
+    if (selectedMessageId != null) {
+      setPreviewCalendarEvent(null)
+      setPreviewCloudTask(null)
+      setPreviewCloudTaskPlannedFromTimeline(null)
+    }
+  }, [selectedMessageId])
+
+  const openCreateCalendarEventDialog = useCallback((): void => {
+    if (!canCreateCalendarEntry) return
+    setError(null)
+    setPreviewCloudTask(null)
+    setPreviewCloudTaskPlannedFromTimeline(null)
+    setPreviewCalendarEvent(null)
+    setEventDialog({ mode: 'create', range: null })
+  }, [canCreateCalendarEntry])
+
+  useEffect(() => {
+    const pending = useGlobalCreateNavigateStore.getState().takePendingAfterNavigate()
+    if (pending === 'calendar_event') {
+      window.setTimeout((): void => openCreateCalendarEventDialog(), 0)
+    }
+  }, [openCreateCalendarEventDialog])
+
+  useEffect(() => {
+    function onGlobalCreate(e: Event): void {
+      const ce = e as CustomEvent<{ kind?: string }>
+      if (ce.detail?.kind !== 'calendar_event') return
+      openCreateCalendarEventDialog()
+    }
+    window.addEventListener(GLOBAL_CREATE_EVENT, onGlobalCreate as EventListener)
+    return (): void => window.removeEventListener(GLOBAL_CREATE_EVENT, onGlobalCreate as EventListener)
+  }, [openCreateCalendarEventDialog])
+
+  const openCalendarAccountContextMenu = useCallback(
+    (clientX: number, clientY: number, account: ConnectedAccount): void => {
+      setEventContextMenu(null)
+      setCalendarFolderContextMenu({
+        x: clientX,
+        y: clientY,
+        items: buildAccountColorAndNewContextItems({
+          account,
+          patchAccountColor,
+          onPatchError: (msg) => setError(msg),
+          newItem: {
+            id: `cal-new-event-${account.id}`,
+            label: t('calendar.shell.newEvent'),
+            icon: CalendarPlus,
+            onSelect: (): void => {
+              setCalendarFolderContextMenu(null)
+              setEventDialog({ mode: 'create', range: null, createAccountId: account.id })
+            }
+          }
+        })
+      })
+    },
+    [patchAccountColor, t]
+  )
 
   const inboxPlacement = useCalendarPanelLayoutStore((s) => s.inboxPlacement)
   const previewPlacement = useCalendarPanelLayoutStore((s) => s.previewPlacement)
@@ -711,23 +864,69 @@ export function CalendarShell(): JSX.Element {
     return { x: Math.max(12, window.innerWidth - inboxFloatWidth - 20), y: 68 }
   }, [bothPanelsFloating, inboxFloatWidth, previewFloatPos.x, previewFloatWidth])
 
+  const previewCloudTaskPlanned = useMemo(() => {
+    if (!previewCloudTask) return null
+    const key = cloudTaskStableKey(
+      previewCloudTask.accountId,
+      previewCloudTask.listId,
+      previewCloudTask.id
+    )
+    return cloudTaskPlannedByKey.get(key) ?? previewCloudTaskPlannedFromTimeline ?? null
+  }, [previewCloudTask, cloudTaskPlannedByKey, previewCloudTaskPlannedFromTimeline])
+
+  const previewCloudTaskAccountName = useMemo(() => {
+    if (!previewCloudTask) return undefined
+    return accounts.find((a) => a.id === previewCloudTask.accountId)?.displayName
+  }, [previewCloudTask, accounts])
+
+  const previewColumnLabel = useMemo((): string => {
+    if (previewCloudTask) return t('calendar.shell.previewBadgeCloudTask')
+    if (previewCalendarEvent) return t('calendar.shell.previewBadgeEvent')
+    if (selectedMessageId != null) return t('calendar.shell.previewBadgeMail')
+    return t('calendar.shell.previewBadgeDefault')
+  }, [previewCloudTask, previewCalendarEvent, selectedMessageId, t])
+
   const calendarPreviewBody = useMemo(
     () => (
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        {previewCalendarEvent ? (
+        {previewCloudTask ? (
+          <CloudTaskItemPreview
+            task={previewCloudTask}
+            planned={previewCloudTaskPlanned}
+            accountDisplayName={previewCloudTaskAccountName}
+          />
+        ) : previewCalendarEvent ? (
           <CalendarEventPreview
             event={previewCalendarEvent}
             onEdit={(): void => setEventDialog({ mode: 'edit', event: previewCalendarEvent })}
+            onEventChange={(updated): void => {
+              setPreviewCalendarEvent(updated)
+              setEvents((prev) =>
+                prev.map((row) =>
+                  row.accountId === updated.accountId && row.graphEventId === updated.graphEventId
+                    ? updated
+                    : row
+                )
+              )
+            }}
+            onSaved={(): void => reloadCalendarEventsOnlyRef.current({ silent: true })}
           />
         ) : (
           <ReadingPane
-            emptySelectionTitle={t('calendar.shell.emptyPreviewTitle')}
+            hideChromeWhenEmpty
+            emptySelectionTitle={t('calendar.shell.previewBadgeDefault')}
             emptySelectionBody={t('calendar.shell.emptyPreviewBody')}
           />
         )}
       </div>
     ),
-    [previewCalendarEvent, t]
+    [
+      previewCloudTask,
+      previewCloudTaskPlanned,
+      previewCloudTaskAccountName,
+      previewCalendarEvent,
+      t
+    ]
   )
 
   const accountColorById = useMemo(
@@ -750,9 +949,141 @@ export function CalendarShell(): JSX.Element {
     }
   }, [])
 
-  const loadRange = useCallback(
+  const reloadCloudTasksAll = useCallback(async (): Promise<{
+    items: TaskItemWithContext[]
+    planned: Map<string, WorkItemPlannedSchedule>
+  }> => {
+    if (taskAccounts.length === 0) {
+      setCloudTaskAllItems([])
+      setCloudTaskPlannedByKey(new Map())
+      cloudTaskByKeyRef.current = new Map()
+      cloudTaskLayerSigRef.current = ''
+      cloudTaskFcEventsSigRef.current = ''
+      return { items: [], planned: new Map() }
+    }
+    try {
+      const items = await loadUnifiedCloudTasks(taskAccounts, { cacheOnly: true })
+      const planned = await loadPlannedScheduleMapForTasks(items)
+      const map = new Map<string, TaskItemWithContext>()
+      for (const t of items) {
+        map.set(cloudTaskStableKey(t.accountId, t.listId, t.id), t)
+      }
+      setCloudTaskAllItems(items)
+      setCloudTaskPlannedByKey(planned)
+      cloudTaskByKeyRef.current = map
+      return { items, planned }
+    } catch {
+      setCloudTaskAllItems([])
+      setCloudTaskPlannedByKey(new Map())
+      cloudTaskByKeyRef.current = new Map()
+      cloudTaskLayerSigRef.current = ''
+      cloudTaskFcEventsSigRef.current = ''
+      return { items: [], planned: new Map() }
+    }
+  }, [taskAccounts])
+
+  const commitCloudTaskLayer = useCallback(
+    (
+      merged: TaskItemWithContext[],
+      planned: Map<string, WorkItemPlannedSchedule>,
+      rangeStart: Date,
+      rangeEnd: Date
+    ): void => {
+      const map = new Map<string, TaskItemWithContext>()
+      for (const t of merged) {
+        map.set(cloudTaskStableKey(t.accountId, t.listId, t.id), t)
+      }
+      cloudTaskByKeyRef.current = map
+
+      const filtered = filterCloudTasksInCalendarRange(
+        merged,
+        planned,
+        rangeStart,
+        rangeEnd,
+        'open',
+        fcTimeZone
+      )
+      const sig = cloudTaskCalendarDisplaySignature(filtered, planned)
+      if (sig === cloudTaskLayerSigRef.current) return
+
+      cloudTaskLayerSigRef.current = sig
+      setCloudTaskAllItems(merged)
+      setCloudTaskPlannedByKey(planned)
+      setCloudTaskRangeItems(filtered)
+    },
+    [fcTimeZone]
+  )
+
+  const applyCloudTaskRangeFilter = useCallback(
+    (
+      items: TaskItemWithContext[],
+      planned: Map<string, WorkItemPlannedSchedule>,
+      start: Date,
+      end: Date
+    ): void => {
+      const rangeKey = `${start.toISOString()}|${end.toISOString()}`
+      const filtered = filterCloudTasksInCalendarRange(items, planned, start, end, 'open', fcTimeZone)
+      const sig = cloudTaskCalendarDisplaySignature(filtered, planned)
+      if (sig === cloudTaskLayerSigRef.current && rangeKey === lastCloudFilterRangeKeyRef.current) {
+        return
+      }
+      lastCloudFilterRangeKeyRef.current = rangeKey
+      cloudTaskLayerSigRef.current = sig
+      setCloudTaskRangeItems(filtered)
+    },
+    [fcTimeZone]
+  )
+
+  /** Konten aus lokalem Cache (ohne Hintergrund-Sync) → ein Commit für alle betroffenen Konten. */
+  const reloadCloudTasksForAccounts = useCallback(
+    async (accountIds: string[]): Promise<void> => {
+      const ids = accountIds.filter((id) => taskAccounts.some((a) => a.id === id))
+      if (ids.length === 0) return
+      try {
+        let merged = cloudTaskAllItemsRef.current
+        for (const accountId of ids) {
+          const accountItems = await loadCloudTasksForAccount(accountId, { cacheOnly: true })
+          merged = [...merged.filter((t) => t.accountId !== accountId), ...accountItems]
+        }
+        const planned = await loadPlannedScheduleMapForTasks(merged)
+        if (!cloudTaskOverlayRef.current) return
+        const api = calendarRef.current?.getApi()
+        const { start, end } = api
+          ? { start: api.view.activeStart, end: api.view.activeEnd }
+          : lastRangeRef.current
+        commitCloudTaskLayer(merged, planned, start, end)
+      } catch {
+        // Cache-Lesen fehlgeschlagen
+      }
+    },
+    [taskAccounts, commitCloudTaskLayer]
+  )
+
+  const loadCloudTasksForRange = useCallback(
     async (start: Date, end: Date): Promise<void> => {
-      setLoading(true)
+      if (!cloudTaskOverlayRef.current) return
+      let items = cloudTaskAllItemsRef.current
+      let planned = cloudTaskPlannedByKeyRef.current
+      if (items.length === 0 && taskAccounts.length > 0) {
+        const loaded = await reloadCloudTasksAll()
+        items = loaded.items
+        planned = loaded.planned
+      }
+      applyCloudTaskRangeFilter(items, planned, start, end)
+    },
+    [taskAccounts.length, reloadCloudTasksAll, applyCloudTaskRangeFilter]
+  )
+  const loadCloudTasksForRangeRef = useRef(loadCloudTasksForRange)
+  loadCloudTasksForRangeRef.current = loadCloudTasksForRange
+
+  const loadRange = useCallback(
+    async (
+      start: Date,
+      end: Date,
+      opts?: { silent?: boolean; forceRefresh?: boolean }
+    ): Promise<void> => {
+      const silent = opts?.silent === true
+      if (!silent) setLoading(true)
       setError(null)
       try {
         const includeCalendars = await buildCalendarIncludeCalendars(
@@ -765,31 +1096,57 @@ export function CalendarShell(): JSX.Element {
           startIso: start.toISOString(),
           endIso: end.toISOString(),
           focusCalendar: null,
-          includeCalendars
+          includeCalendars,
+          forceRefresh: opts?.forceRefresh === true
         })
         setEvents(list)
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e))
-        setEvents([])
+        if (!silent) setEvents([])
       } finally {
-        setLoading(false)
+        if (!silent) setLoading(false)
       }
     },
     [calendarLinkedAccounts, calendarsByAccount, hiddenCalendarKeys, sidebarHiddenCalendarKeys]
   )
 
-  const reloadVisibleRange = useCallback((): void => {
-    const api = calendarRef.current?.getApi()
-    if (api) {
-      const { activeStart, activeEnd } = api.view
-      void loadRange(activeStart, activeEnd)
-      if (mailTodoOverlayRef.current) void loadMailTodosForRange(activeStart, activeEnd)
-      return
-    }
-    const { start, end } = lastRangeRef.current
-    void loadRange(start, end)
-    if (mailTodoOverlayRef.current) void loadMailTodosForRange(start, end)
-  }, [loadRange, loadMailTodosForRange])
+  const reloadVisibleRange = useCallback(
+    (opts?: { silent?: boolean; forceRefresh?: boolean }): void => {
+      const silent = opts?.silent ?? eventsRef.current.length > 0
+      const api = calendarRef.current?.getApi()
+      if (api) {
+        const { activeStart, activeEnd } = api.view
+        void loadRange(activeStart, activeEnd, { silent, forceRefresh: opts?.forceRefresh })
+        if (mailTodoOverlayRef.current) void loadMailTodosForRange(activeStart, activeEnd)
+        if (cloudTaskOverlayRef.current) void loadCloudTasksForRange(activeStart, activeEnd)
+        return
+      }
+      const { start, end } = lastRangeRef.current
+      void loadRange(start, end, { silent, forceRefresh: opts?.forceRefresh })
+      if (mailTodoOverlayRef.current) void loadMailTodosForRange(start, end)
+      if (cloudTaskOverlayRef.current) void loadCloudTasksForRange(start, end)
+    },
+    [loadRange, loadMailTodosForRange, loadCloudTasksForRange]
+  )
+
+  /** Nur Graph-Termine + Mail-ToDos (Aufgaben-Layer nicht bei jedem Termin-Cache-Tick). */
+  const reloadCalendarEventsOnly = useCallback(
+    (opts?: { silent?: boolean; forceRefresh?: boolean }): void => {
+      const silent = opts?.silent ?? eventsRef.current.length > 0
+      const api = calendarRef.current?.getApi()
+      if (api) {
+        const { activeStart, activeEnd } = api.view
+        void loadRange(activeStart, activeEnd, { silent, forceRefresh: opts?.forceRefresh })
+        if (mailTodoOverlayRef.current) void loadMailTodosForRange(activeStart, activeEnd)
+        return
+      }
+      const { start, end } = lastRangeRef.current
+      void loadRange(start, end, { silent, forceRefresh: opts?.forceRefresh })
+      if (mailTodoOverlayRef.current) void loadMailTodosForRange(start, end)
+    },
+    [loadRange, loadMailTodosForRange]
+  )
+  reloadCalendarEventsOnlyRef.current = reloadCalendarEventsOnly
 
   /** Ein-/Ausblenden in der Sidebar: `includeCalendars` aendert sich — Cloud-Termine neu laden (z. B. Gruppenkalender). */
   useEffect(() => {
@@ -810,6 +1167,7 @@ export function CalendarShell(): JSX.Element {
       }
       await useMailStore.getState().reloadSelectedMessageFromDb()
       setTodoSideListRefreshKey((k) => k + 1)
+      timelineReloadRef.current?.()
       const api = calendarRef.current?.getApi()
       if (api) {
         void loadMailTodosForRange(api.view.activeStart, api.view.activeEnd)
@@ -823,6 +1181,7 @@ export function CalendarShell(): JSX.Element {
 
   const bumpTodoOverlayAndSideList = useCallback((): void => {
     setTodoSideListRefreshKey((k) => k + 1)
+    timelineReloadRef.current?.()
     const api = calendarRef.current?.getApi()
     if (api) {
       void loadMailTodosForRange(api.view.activeStart, api.view.activeEnd)
@@ -897,10 +1256,82 @@ export function CalendarShell(): JSX.Element {
   const mailContextHandlersRef = useRef<MailContextHandlers>(mailContextHandlers)
   mailContextHandlersRef.current = mailContextHandlers
 
+  const applyTimelineWorkItemToPreview = useCallback(
+    (item: WorkItem): void => {
+      setError(null)
+      if (item.kind === 'cloud_task') {
+        setPreviewCalendarEvent(null)
+        clearSelectedMessage()
+        const task: TaskItemWithContext = {
+          ...item.task,
+          accountId: item.accountId,
+          listName: item.listName
+        }
+        setPreviewCloudTaskPlannedFromTimeline(item.planned)
+        setPreviewCloudTask(task)
+        persistRightPreviewOpen(true)
+        setRightPreviewOpen(true)
+        return
+      }
+      if (item.kind === 'mail_todo') {
+        setPreviewCalendarEvent(null)
+        setPreviewCloudTask(null)
+        setPreviewCloudTaskPlannedFromTimeline(null)
+        void selectMessageWithThreadPreview(item.messageId)
+        persistRightPreviewOpen(true)
+        setRightPreviewOpen(true)
+        return
+      }
+      clearSelectedMessage()
+      setPreviewCloudTask(null)
+      setPreviewCloudTaskPlannedFromTimeline(null)
+      setPreviewCalendarEvent(item.event)
+      persistRightPreviewOpen(true)
+      setRightPreviewOpen(true)
+    },
+    [clearSelectedMessage, selectMessageWithThreadPreview]
+  )
+
   useCalendarMailExternalDrop(calendarDropRootRef, {
     timeZone: fcTimeZone,
     enabled: true,
     onScheduleMany: scheduleMailsOnCalendar
+  })
+
+  const scheduleCloudTaskFromExternalDrop = useCallback(
+    async (payload: CloudTaskDragPayload, startIso: string, endIso: string): Promise<void> => {
+      const taskPick = { accountId: payload.accountId, listId: payload.listId, id: payload.taskId }
+      const target = {
+        kind: 'planned' as const,
+        taskKey: payload.taskKey,
+        plannedStartIso: startIso,
+        plannedEndIso: endIso
+      }
+      try {
+        await applyCloudTaskPersistTarget(target, taskPick, fcTimeZone)
+        setError(null)
+        const items = await loadUnifiedCloudTasks(taskAccounts, { cacheOnly: true })
+        const planned = await loadPlannedScheduleMapForTasks(items)
+        const api = calendarRef.current?.getApi()
+        const { start, end } = api
+          ? { start: api.view.activeStart, end: api.view.activeEnd }
+          : lastRangeRef.current
+        cloudTaskLayerSigRef.current = ''
+        cloudTaskFcEventsSigRef.current = ''
+        commitCloudTaskLayer(items, planned, start, end)
+        setTodoSideListRefreshKey((k) => k + 1)
+        timelineReloadRef.current?.()
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+      }
+    },
+    [fcTimeZone, taskAccounts, commitCloudTaskLayer]
+  )
+
+  useCalendarCloudTaskExternalDrop(calendarDropRootRef, {
+    timeZone: fcTimeZone,
+    enabled: true,
+    onSchedulePlanned: scheduleCloudTaskFromExternalDrop
   })
 
   /** Startseite / extern: Termin vormerken und beim Oeffnen des Kalenders anzeigen + Datum setzen; oder nur Zieldatum (Mini-Monat). */
@@ -910,6 +1341,8 @@ export function CalendarShell(): JSX.Element {
     if (ev) {
       clearSelectedMessage()
       setError(null)
+      setPreviewCloudTask(null)
+      setPreviewCloudTaskPlannedFromTimeline(null)
       setPreviewCalendarEvent(ev)
       persistRightPreviewOpen(true)
       setRightPreviewOpen(true)
@@ -943,6 +1376,8 @@ export function CalendarShell(): JSX.Element {
     if (createOnDay) {
       clearSelectedMessage()
       setError(null)
+      setPreviewCloudTask(null)
+      setPreviewCloudTaskPlannedFromTimeline(null)
       setPreviewCalendarEvent(null)
 
       const parsed = parseISO(createOnDay.dateIso)
@@ -1109,6 +1544,50 @@ export function CalendarShell(): JSX.Element {
   const handleGraphEventChange = useCallback(
     async (info: EventChangeArg): Promise<void> => {
       const kind = info.event.extendedProps.calendarKind as string | undefined
+      if (kind === CALENDAR_KIND_CLOUD_TASK) {
+        const taskKey =
+          (typeof info.event.extendedProps.taskKey === 'string' && info.event.extendedProps.taskKey) ||
+          null
+        const task = taskKey ? cloudTaskByKeyRef.current.get(taskKey) : undefined
+        if (!task) {
+          info.revert()
+          return
+        }
+        const target = computePersistTargetForCloudTask(info.event, info.oldEvent, fcTimeZone)
+        if (!target) {
+          info.revert()
+          return
+        }
+        try {
+          await applyCloudTaskPersistTarget(target, task, fcTimeZone)
+          setError(null)
+          const items = await loadUnifiedCloudTasks(taskAccounts, { cacheOnly: true })
+          const planned = await loadPlannedScheduleMapForTasks(items)
+          const api = calendarRef.current?.getApi()
+          const { start, end } = api
+            ? { start: api.view.activeStart, end: api.view.activeEnd }
+            : lastRangeRef.current
+          cloudTaskLayerSigRef.current = ''
+          cloudTaskFcEventsSigRef.current = ''
+          commitCloudTaskLayer(items, planned, start, end)
+          if (taskKey) {
+            scheduleRemoveDuplicateFullCalendarEventsById(calendarRef.current?.getApi(), [
+              cloudTaskEventId(taskKey)
+            ])
+          }
+          if (taskKey) {
+            const updated = cloudTaskByKeyRef.current.get(taskKey)
+            if (updated) {
+              setPreviewCloudTaskPlannedFromTimeline(null)
+              setPreviewCloudTask(updated)
+            }
+          }
+        } catch (e) {
+          setError(e instanceof Error ? e.message : String(e))
+          info.revert()
+        }
+        return
+      }
       if (kind === CALENDAR_KIND_MAIL_TODO) {
         const m = info.event.extendedProps.mailMessage as MailListItem | undefined
         const range = computePersistIsoRangeForMailTodo(info.event, info.oldEvent, fcTimeZone)
@@ -1117,26 +1596,16 @@ export function CalendarShell(): JSX.Element {
           return
         }
         try {
-          const tk = m.remoteThreadId?.trim()
-          let ids: number[] = [m.id]
-          if (tk) {
-            const list = await window.mailClient.mail.listMessagesByThreads({
-              accountId: m.accountId,
-              threadKeys: [tk]
-            })
-            ids = [...new Set(list.map((x) => x.id))]
-            if (ids.length === 0) ids = [m.id]
-          }
-          for (const id of ids) {
-            await setTodoScheduleForMessage(id, range.startIso, range.endIso, {
-              skipSelectedRefresh: true
-            })
-          }
+          await setTodoScheduleForMessage(m.id, range.startIso, range.endIso, {
+            skipSelectedRefresh: true
+          })
           await useMailStore.getState().reloadSelectedMessageFromDb()
           setError(null)
           setTodoSideListRefreshKey((k) => k + 1)
+          timelineReloadRef.current?.()
           const api = calendarRef.current?.getApi()
           if (api) {
+            scheduleRemoveDuplicateFullCalendarEventsById(api, [`mail-todo:${m.id}`])
             void loadMailTodosForRange(api.view.activeStart, api.view.activeEnd)
           } else {
             const { start, end } = lastRangeRef.current
@@ -1183,13 +1652,45 @@ export function CalendarShell(): JSX.Element {
           isAllDay: sched.isAllDay
         })
         setError(null)
-        void reloadVisibleRange()
+        const updatedCalEv: CalendarEventView = {
+          ...calEv,
+          startIso: sched.startIso,
+          endIso: sched.endIso,
+          isAllDay: sched.isAllDay
+        }
+        info.event.setExtendedProp('calendarEvent', updatedCalEv)
+        flushSync(() => {
+          setEvents((prev) =>
+            prev.map((ev) =>
+              ev.accountId === calEv.accountId && ev.graphEventId === calEv.graphEventId
+                ? updatedCalEv
+                : ev
+            )
+          )
+          setPreviewCalendarEvent((prev) =>
+            prev &&
+            prev.accountId === calEv.accountId &&
+            prev.graphEventId === calEv.graphEventId
+              ? updatedCalEv
+              : prev
+          )
+        })
+        scheduleRemoveDuplicateFullCalendarEventsById(calendarRef.current?.getApi(), [calEv.id])
+        reloadCalendarEventsOnly({ silent: true })
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e))
         info.revert()
       }
     },
-    [reloadVisibleRange, fcTimeZone, setTodoScheduleForMessage, loadMailTodosForRange, t]
+    [
+      reloadCalendarEventsOnly,
+      fcTimeZone,
+      setTodoScheduleForMessage,
+      loadMailTodosForRange,
+      taskAccounts,
+      commitCloudTaskLayer,
+      t
+    ]
   )
 
   const defaultGraphCalendarIdByAccount = useMemo(() => {
@@ -1302,39 +1803,93 @@ export function CalendarShell(): JSX.Element {
             joinUrl: ev.joinUrl,
             calendarEvent: ev
           },
-          editable: Boolean(ev.graphEventId && ev.source === 'microsoft'),
-          startEditable: Boolean(ev.graphEventId && ev.source === 'microsoft'),
-          durationEditable: Boolean(ev.graphEventId && ev.source === 'microsoft')
+          editable: Boolean(
+            ev.graphEventId && (ev.source === 'microsoft' || ev.source === 'google')
+          ),
+          startEditable: Boolean(
+            ev.graphEventId && (ev.source === 'microsoft' || ev.source === 'google')
+          ),
+          durationEditable: Boolean(
+            ev.graphEventId && (ev.source === 'microsoft' || ev.source === 'google')
+          )
         }
       }),
     [visibleGraphEvents, defaultGraphCalendarIdByAccount, calendarDisplayHexByKey]
   )
 
   const mailTodoFcEvents = useMemo(
-    () => mailTodoConversationsToFullCalendarEvents(mailTodoItems, accountColorById),
+    () => mailTodoItemsToFullCalendarEvents(mailTodoItems, accountColorById),
     [mailTodoItems, accountColorById]
   )
 
-  const fcEvents = useMemo(
-    () => (mailTodoOverlay ? [...graphFcEvents, ...mailTodoFcEvents] : graphFcEvents),
-    [graphFcEvents, mailTodoFcEvents, mailTodoOverlay]
+  const cloudTaskFcEventsRef = useRef<EventInput[]>([])
+  const cloudTaskFcEvents = useMemo((): EventInput[] => {
+    const sig = cloudTaskCalendarDisplaySignature(cloudTaskRangeItems, cloudTaskPlannedByKey)
+    if (sig === cloudTaskFcEventsSigRef.current && cloudTaskFcEventsRef.current.length > 0) {
+      return cloudTaskFcEventsRef.current
+    }
+    cloudTaskFcEventsSigRef.current = sig
+    const next = cloudTasksToFullCalendarEvents(
+      cloudTaskRangeItems,
+      accountColorById,
+      cloudTaskPlannedByKey
+    )
+    cloudTaskFcEventsRef.current = next
+    return next
+  }, [cloudTaskRangeItems, accountColorById, cloudTaskPlannedByKey])
+
+  const filterCalendarSearchEvents = useCallback(
+    (evs: EventInput[]): EventInput[] => {
+      const q = calendarEventSearchQuery.trim().toLowerCase()
+      if (!q) return evs
+      return evs.filter((ev) => {
+        if (
+          String(ev.title ?? '')
+            .toLowerCase()
+            .includes(q)
+        )
+          return true
+        const cal = ev.extendedProps?.calendarEvent as CalendarEventView | undefined
+        const loc = (cal?.location ?? '').trim().toLowerCase()
+        if (loc.includes(q)) return true
+        const task = (ev.extendedProps as { cloudTask?: TaskItemWithContext } | undefined)?.cloudTask
+        return (task?.title ?? '').trim().toLowerCase().includes(q)
+      })
+    },
+    [calendarEventSearchQuery]
   )
 
-  const fcEventsDisplayed = useMemo(() => {
-    const q = calendarEventSearchQuery.trim().toLowerCase()
-    if (!q) return fcEvents
-    return fcEvents.filter((ev) => {
-      if (
-        String(ev.title ?? '')
-          .toLowerCase()
-          .includes(q)
-      )
-        return true
-      const cal = ev.extendedProps?.calendarEvent as CalendarEventView | undefined
-      const loc = (cal?.location ?? '').trim().toLowerCase()
-      return loc.includes(q)
-    })
-  }, [fcEvents, calendarEventSearchQuery])
+  const graphFcEventsDisplayed = useMemo(
+    () => filterCalendarSearchEvents(graphFcEvents),
+    [graphFcEvents, filterCalendarSearchEvents]
+  )
+  const mailTodoFcEventsDisplayed = useMemo(
+    () => filterCalendarSearchEvents(mailTodoFcEvents),
+    [mailTodoFcEvents, filterCalendarSearchEvents]
+  )
+  const cloudTaskFcEventsDisplayed = useMemo(
+    () => filterCalendarSearchEvents(cloudTaskFcEvents),
+    [cloudTaskFcEvents, filterCalendarSearchEvents]
+  )
+
+  const fcEventSources = useMemo((): EventSourceInput[] => {
+    const sources: EventSourceInput[] = [
+      { id: 'graph-calendar', events: graphFcEventsDisplayed }
+    ]
+    if (mailTodoOverlay) {
+      sources.push({ id: 'mail-todo', events: mailTodoFcEventsDisplayed })
+    }
+    if (cloudTaskOverlay) {
+      sources.push({ id: 'cloud-task', events: cloudTaskFcEventsDisplayed })
+    }
+    return sources
+  }, [
+    graphFcEventsDisplayed,
+    mailTodoFcEventsDisplayed,
+    cloudTaskFcEventsDisplayed,
+    mailTodoOverlay,
+    cloudTaskOverlay
+  ])
 
   useEffect(() => {
     if (!mailTodoOverlay) {
@@ -1353,6 +1908,61 @@ export function CalendarShell(): JSX.Element {
     })
     return off
   }, [mailTodoOverlay, loadMailTodosForRange])
+
+  useEffect(() => {
+    const off = window.mailClient.events.onCalendarChanged(() => {
+      reloadCalendarEventsOnly({ silent: true })
+    })
+    return off
+  }, [reloadCalendarEventsOnly])
+
+  useEffect(() => {
+    if (!cloudTaskOverlay) return
+    let debounceTimer: ReturnType<typeof setTimeout> | undefined
+    const pendingAccountIds = new Set<string>()
+    const off = window.mailClient.events.onTasksChanged(({ accountId }) => {
+      pendingAccountIds.add(accountId)
+      if (debounceTimer) clearTimeout(debounceTimer)
+      debounceTimer = setTimeout(() => {
+        const ids = [...pendingAccountIds]
+        pendingAccountIds.clear()
+        void reloadCloudTasksForAccounts(ids)
+      }, 400)
+    })
+    return (): void => {
+      off()
+      if (debounceTimer) clearTimeout(debounceTimer)
+    }
+  }, [cloudTaskOverlay, reloadCloudTasksForAccounts])
+
+  useEffect(() => {
+    if (!cloudTaskOverlay) return
+    const previewKey = previewCloudTask
+      ? cloudTaskStableKey(previewCloudTask.accountId, previewCloudTask.listId, previewCloudTask.id)
+      : null
+    for (const [key, el] of cloudTaskElByKeyRef.current) {
+      const active = previewKey != null && key === previewKey
+      el.classList.toggle('ring-2', active)
+      el.classList.toggle('ring-primary', active)
+    }
+  }, [previewCloudTask, cloudTaskOverlay])
+
+  useEffect(() => {
+    if (!cloudTaskOverlay) {
+      setCloudTaskAllItems([])
+      setCloudTaskRangeItems([])
+      setCloudTaskPlannedByKey(new Map())
+      cloudTaskByKeyRef.current = new Map()
+      cloudTaskLayerSigRef.current = ''
+      cloudTaskFcEventsSigRef.current = ''
+      lastCloudFilterRangeKeyRef.current = ''
+      cloudTaskElByKeyRef.current.clear()
+      return
+    }
+    const { start, end } = lastRangeRef.current
+    void loadCloudTasksForRangeRef.current(start, end)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- nur Overlay-Toggle, nicht bei jedem Task-Cache-Update
+  }, [cloudTaskOverlay])
 
   const applyMiniCalendarDayRange = useCallback(
     (startInclusive: Date, endInclusive: Date): void => {
@@ -1589,16 +2199,6 @@ export function CalendarShell(): JSX.Element {
                   onCalendarNext={(): void => calendarRef.current?.getApi().next()}
                   leftSidebarCollapsed={leftSidebarCollapsed}
                   onLeftSidebarCollapsedChange={setLeftSidebarCollapsed}
-                  onNewEventClick={(): void => {
-                    if (calendarLinkedAccounts.length === 0) return
-                    setError(null)
-                    setPreviewCalendarEvent(null)
-                    setEventDialog({
-                      mode: 'create',
-                      range: null
-                    })
-                  }}
-                  newEventDisabled={calendarLinkedAccounts.length === 0}
                 />
               </div>
             </div>
@@ -1639,9 +2239,7 @@ export function CalendarShell(): JSX.Element {
                           'min-w-0 flex-1 text-left'
                         )}
                       >
-                        {previewCalendarEvent
-                          ? t('calendar.shell.previewBadgeEvent')
-                          : t('calendar.shell.previewBadgeMail')}
+                        {previewColumnLabel}
                       </span>
                       <div className="flex shrink-0 items-center gap-0.5">
                         <ModuleColumnHeaderIconButton
@@ -1685,16 +2283,7 @@ export function CalendarShell(): JSX.Element {
                   onNextMonth={(): void => setMiniMonth((m) => addMonths(m, 1))}
                 />
 
-                <div>
-                  <p className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    {t('calendar.shell.emailsSection')}
-                  </p>
-                  <ul
-                    className={cn(
-                      'relative ml-3 mt-1 space-y-0.5 pl-2',
-                      'before:absolute before:bottom-1 before:left-0 before:top-1 before:w-0.5 before:rounded-full before:bg-primary/55'
-                    )}
-                  >
+                <ul className="space-y-0.5">
                     <li>
                       <div
                         className={cn(
@@ -1738,8 +2327,52 @@ export function CalendarShell(): JSX.Element {
                         </span>
                       </div>
                     </li>
-                  </ul>
-                </div>
+                    <li>
+                      <div
+                        className={cn(
+                          'flex w-full items-center gap-1 rounded-md px-1 py-1.5 text-left text-[12px] text-muted-foreground'
+                        )}
+                      >
+                        <button
+                          type="button"
+                          onClick={(): void => {
+                            setCloudTaskOverlay((prev) => {
+                              const next = !prev
+                              persistCloudTaskOverlay(next)
+                              return next
+                            })
+                          }}
+                          disabled={taskAccounts.length === 0}
+                          className={cn(
+                            'flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors',
+                            'text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
+                            !cloudTaskOverlay && 'opacity-60',
+                            taskAccounts.length === 0 && 'cursor-not-allowed opacity-40'
+                          )}
+                          title={
+                            cloudTaskOverlay
+                              ? t('calendar.shell.cloudTaskHideTooltip')
+                              : t('calendar.shell.cloudTaskShowTooltip')
+                          }
+                          aria-label={
+                            cloudTaskOverlay
+                              ? t('calendar.shell.cloudTaskHideTooltip')
+                              : t('calendar.shell.cloudTaskShowTooltip')
+                          }
+                        >
+                          {!cloudTaskOverlay ? (
+                            <EyeOff className="h-3.5 w-3.5" />
+                          ) : (
+                            <Eye className="h-3.5 w-3.5" />
+                          )}
+                        </button>
+                        <CheckSquare className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                        <span className="min-w-0 flex-1 truncate text-foreground">
+                          {t('calendar.shell.cloudTasksLabel')}
+                        </span>
+                      </div>
+                    </li>
+                </ul>
 
                 <CalendarShellSidebarCalendars
                   calendarLinkedAccounts={calendarLinkedAccounts}
@@ -1765,6 +2398,15 @@ export function CalendarShell(): JSX.Element {
                   m365GroupCalPaging={m365GroupCalPaging}
                   fetchMicrosoft365GroupCalendarsIfNeeded={fetchMicrosoft365GroupCalendarsIfNeeded}
                   fetchMoreMicrosoft365GroupCalendars={fetchMoreMicrosoft365GroupCalendars}
+                  onAccountHeaderContextMenu={openCalendarAccountContextMenu}
+                  syncByAccount={calendarSyncByAccount}
+                  onAccountSync={(accountId): void => {
+                    void (async (): Promise<void> => {
+                      await triggerCalendarAccountSync(accountId)
+                      await reloadCalendarsForAccount(accountId)
+                      reloadVisibleRange({ forceRefresh: true })
+                    })()
+                  }}
                 />
                 </div>
 
@@ -1774,8 +2416,12 @@ export function CalendarShell(): JSX.Element {
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             <CalendarShellAlerts error={error} />
 
-            <div ref={calendarDropRootRef} className="relative z-0 min-h-0 flex-1 px-3 pb-3 pt-2">
-              <CalendarShellLoadingOverlay visible={loading} />
+            <div
+              ref={calendarDropRootRef}
+              className="relative z-0 flex min-h-0 flex-1 flex-col px-3 pb-3 pt-2"
+            >
+              <>
+                  <CalendarShellLoadingOverlay visible={loading} />
               {/* selectLongPressDelay: Touch — kurzes Halten vor Ziehen (sonst oft ~1s). */}
               <FullCalendar
                 key={`${fcTimeZone}-${i18n.language}-${timeGridSlotMinutes}`}
@@ -1796,13 +2442,18 @@ export function CalendarShell(): JSX.Element {
                   ...multiDayViews
                 }}
                 initialView="timeGridWeek"
-                slotMinTime="07:00:00"
-                slotMaxTime="20:00:00"
+                slotMinTime="00:00:00"
+                slotMaxTime="24:00:00"
+                scrollTime="07:00:00"
                 slotDuration={timeGridSlotDurationIso}
                 slotLabelInterval="01:00:00"
                 nowIndicator
-                editable={calendarLinkedAccounts.length > 0 || mailTodoOverlay}
-                eventResizableFromStart={calendarLinkedAccounts.length > 0 || mailTodoOverlay}
+                editable={
+                  calendarLinkedAccounts.length > 0 || mailTodoOverlay || cloudTaskOverlay
+                }
+                eventResizableFromStart={
+                  calendarLinkedAccounts.length > 0 || mailTodoOverlay || cloudTaskOverlay
+                }
                 eventChange={(info): void => {
                   void handleGraphEventChange(info)
                 }}
@@ -1810,6 +2461,7 @@ export function CalendarShell(): JSX.Element {
                   if (!movingEvent) return true
                   const kind = movingEvent.extendedProps?.calendarKind as string | undefined
                   if (kind === CALENDAR_KIND_MAIL_TODO) return true
+                  if (kind === CALENDAR_KIND_CLOUD_TASK) return true
                   const calEv = movingEvent.extendedProps?.calendarEvent as
                     | CalendarEventView
                     | undefined
@@ -1820,24 +2472,62 @@ export function CalendarShell(): JSX.Element {
                     (calEv.source === 'microsoft' || calEv.source === 'google')
                   )
                 }}
-                selectable={calendarLinkedAccounts.length > 0}
+                selectable={canCreateCalendarEntry}
                 selectMirror
                 selectLongPressDelay={380}
-                selectAllow={(): boolean => calendarLinkedAccounts.length > 0}
+                selectAllow={(): boolean => canCreateCalendarEntry}
                 select={(sel): void => {
-                  if (calendarLinkedAccounts.length === 0) return
+                  if (!canCreateCalendarEntry) return
                   setError(null)
+                  setPreviewCloudTask(null)
+                  setPreviewCloudTaskPlannedFromTimeline(null)
                   setPreviewCalendarEvent(null)
-                  setEventDialog({
-                    mode: 'create',
+                  const js = sel.jsEvent as MouseEvent | undefined
+                  setQuickCreate({
+                    anchor: {
+                      x: js?.clientX ?? window.innerWidth / 2,
+                      y: js?.clientY ?? window.innerHeight / 2
+                    },
                     range: { start: sel.start, end: sel.end, allDay: sel.allDay }
                   })
                   calendarRef.current?.getApi().unselect()
                 }}
                 dayMaxEvents
-                events={fcEventsDisplayed}
+                eventSources={fcEventSources}
+                eventContent={calendarFcEventContentRender}
                 eventDidMount={(info): void => {
                   const kind = info.event.extendedProps.calendarKind as string | undefined
+                  if (kind === CALENDAR_KIND_CLOUD_TASK) {
+                    const el = info.el as HTMLElement & {
+                      _cloudTaskBaseStyled?: boolean
+                      _cloudTaskPreviewKey?: string | null
+                    }
+                    const raw = info.event.extendedProps.accountColor as string | undefined
+                    const bg = accountColorToCssBackground(raw)
+                    const key =
+                      typeof info.event.extendedProps.taskKey === 'string'
+                        ? info.event.extendedProps.taskKey
+                        : ''
+                    const previewKey = previewCloudTask
+                      ? cloudTaskStableKey(
+                          previewCloudTask.accountId,
+                          previewCloudTask.listId,
+                          previewCloudTask.id
+                        )
+                      : null
+                    if (!el._cloudTaskBaseStyled) {
+                      el._cloudTaskBaseStyled = true
+                      if (bg) {
+                        el.style.backgroundColor = bg
+                        el.style.borderColor = 'transparent'
+                        el.style.color = '#fafafa'
+                      } else {
+                        el.style.borderLeft = '4px solid hsl(var(--primary))'
+                      }
+                    }
+                    if (key) cloudTaskElByKeyRef.current.set(key, el)
+                    return
+                  }
                   if (kind === CALENDAR_KIND_MAIL_TODO) {
                     const raw = info.event.extendedProps.accountColor as string | undefined
                     const bg = accountColorToCssBackground(raw)
@@ -1861,9 +2551,11 @@ export function CalendarShell(): JSX.Element {
                           const cat = await buildMailCategorySubmenuItems(m, ui, () =>
                             useMailStore.getState().refreshNow()
                           )
+                          const mailAcc = accounts.find((a) => a.id === m.accountId)
                           const items = buildMailContextItems(m, mailContextHandlersRef.current, {
                             ...ui,
                             categorySubmenu: cat.length > 0 ? cat : undefined,
+                            allowsCloudTaskCreate: accountSupportsCloudTasks(mailAcc),
                             t
                           })
                           setEventContextMenu({ x: anchor.x, y: anchor.y, items })
@@ -1900,13 +2592,38 @@ export function CalendarShell(): JSX.Element {
                         t,
                         calendarCollatorLocale
                       )
+                      const copyTo = await buildCalendarEventTransferSubmenuItems(
+                        calEv,
+                        'copy',
+                        calendarLinkedAccounts,
+                        reloadVisibleRange,
+                        t,
+                        calendarCollatorLocale
+                      )
+                      const moveTo = await buildCalendarEventTransferSubmenuItems(
+                        calEv,
+                        'move',
+                        calendarLinkedAccounts,
+                        reloadVisibleRange,
+                        t,
+                        calendarCollatorLocale
+                      )
+                      const hasGraphEvent = Boolean(calEv.graphEventId?.trim())
                       const canMutateEvent =
                         calEv.calendarCanEdit !== false &&
-                        Boolean(calEv.graphEventId?.trim() && calEv.graphCalendarId?.trim()) &&
+                        hasGraphEvent &&
                         (calEv.source === 'microsoft' || calEv.source === 'google')
+                      const canCopyToOtherCalendar =
+                        hasGraphEvent &&
+                        copyTo.length > 0 &&
+                        (calEv.source === 'microsoft' || calEv.source === 'google')
+                      const canMoveToOtherCalendar =
+                        canMutateEvent && moveTo.length > 0
                       const items = buildCalendarEventContextItems(
                         calEv,
                         canMutateEvent,
+                        canCopyToOtherCalendar,
+                        canMoveToOtherCalendar,
                         calendarLinkedAccounts.length > 0,
                         {
                           onEdit: (): void => {
@@ -2047,6 +2764,8 @@ export function CalendarShell(): JSX.Element {
                         t,
                         {
                           categorySubmenu: cat.length > 0 ? cat : undefined,
+                          copyToSubmenu: copyTo.length > 0 ? copyTo : undefined,
+                          moveToSubmenu: moveTo.length > 0 ? moveTo : undefined
                         }
                       )
                       setCalendarFolderContextMenu(null)
@@ -2058,6 +2777,14 @@ export function CalendarShell(): JSX.Element {
                   el._calCtxMenu = onCtx
                 }}
                 eventWillUnmount={(info): void => {
+                  const kind = info.event.extendedProps.calendarKind as string | undefined
+                  if (kind === CALENDAR_KIND_CLOUD_TASK) {
+                    const key =
+                      typeof info.event.extendedProps.taskKey === 'string'
+                        ? info.event.extendedProps.taskKey
+                        : ''
+                    if (key) cloudTaskElByKeyRef.current.delete(key)
+                  }
                   const el = info.el as HTMLElement & { _calCtxMenu?: (ev: MouseEvent) => void }
                   if (el._calCtxMenu) {
                     info.el.removeEventListener('contextmenu', el._calCtxMenu)
@@ -2070,17 +2797,33 @@ export function CalendarShell(): JSX.Element {
                   setMiniMonth(startOfMonth(arg.view.currentStart))
                   setRangeTitle(arg.view.title)
                   setActiveViewId(arg.view.type)
-                  void loadRange(arg.start, arg.end)
+                  void loadRange(arg.start, arg.end, { silent: eventsRef.current.length > 0 })
                   if (mailTodoOverlayRef.current) void loadMailTodosForRange(arg.start, arg.end)
+                  if (cloudTaskOverlayRef.current) void loadCloudTasksForRange(arg.start, arg.end)
                 }}
                 eventClick={(info): boolean => {
                   info.jsEvent.preventDefault()
                   const kind = info.event.extendedProps.calendarKind as string | undefined
+                  if (kind === CALENDAR_KIND_CLOUD_TASK) {
+                    const task = info.event.extendedProps.cloudTask as TaskItemWithContext | undefined
+                    if (task) {
+                      setError(null)
+                      setPreviewCalendarEvent(null)
+                      clearSelectedMessage()
+                      setPreviewCloudTaskPlannedFromTimeline(null)
+                      setPreviewCloudTask(task)
+                      persistRightPreviewOpen(true)
+                      setRightPreviewOpen(true)
+                    }
+                    return false
+                  }
                   if (kind === CALENDAR_KIND_MAIL_TODO) {
                     const m = info.event.extendedProps.mailMessage as MailListItem | undefined
                     if (m) {
                       setError(null)
                       setPreviewCalendarEvent(null)
+                      setPreviewCloudTask(null)
+                      setPreviewCloudTaskPlannedFromTimeline(null)
                       void selectMessageWithThreadPreview(m.id)
                       persistRightPreviewOpen(true)
                       setRightPreviewOpen(true)
@@ -2091,6 +2834,8 @@ export function CalendarShell(): JSX.Element {
                   if (ev) {
                     setError(null)
                     clearSelectedMessage()
+                    setPreviewCloudTask(null)
+                    setPreviewCloudTaskPlannedFromTimeline(null)
                     setPreviewCalendarEvent(ev)
                     persistRightPreviewOpen(true)
                     setRightPreviewOpen(true)
@@ -2098,6 +2843,7 @@ export function CalendarShell(): JSX.Element {
                   return false
                 }}
               />
+                </>
             </div>
           </div>
         </div>
@@ -2117,9 +2863,13 @@ export function CalendarShell(): JSX.Element {
             }
           >
             <div style={{ width: inboxColumnWidth }} className="h-full min-h-0 shrink-0">
-              <CalendarRightPosteingangPanel
+              <CalendarRightZeitlistePanel
                 open
-                sideListRefreshKey={todoSideListRefreshKey}
+                reloadSignal={todoSideListRefreshKey}
+                reloadRef={timelineReloadRef}
+                onWorkItemFocused={applyTimelineWorkItemToPreview}
+                onTimelineLoadingChange={setTimelineLoading}
+                listRefreshing={timelineLoading}
                 dockHeaderSlotEl={
                   inboxPlacement === 'dock' && inboxDockStripInDom ? inboxDockHeaderSlotEl : null
                 }
@@ -2136,7 +2886,7 @@ export function CalendarShell(): JSX.Element {
         {inboxPlacement === 'float' ? (
           <CalendarFloatingPanel
             open={rightInboxOpen}
-            title={t('calendar.shell.todoPanelTitle')}
+            title={t('mega.shell.title')}
             widthPx={inboxFloatWidth}
             minHeightPx={320}
             persistSizeKey={CAL_FLOAT_INBOX_SIZE_KEY}
@@ -2148,9 +2898,13 @@ export function CalendarShell(): JSX.Element {
             }}
             onDock={(): void => setInboxPlacement('dock')}
           >
-            <CalendarRightPosteingangPanel
+            <CalendarRightZeitlistePanel
               open
-              sideListRefreshKey={todoSideListRefreshKey}
+              reloadSignal={todoSideListRefreshKey}
+              reloadRef={timelineReloadRef}
+              onWorkItemFocused={applyTimelineWorkItemToPreview}
+              onTimelineLoadingChange={setTimelineLoading}
+              listRefreshing={timelineLoading}
               hideChrome
               onRequestClose={(): void => {
                 persistRightInboxOpen(false)
@@ -2184,11 +2938,7 @@ export function CalendarShell(): JSX.Element {
         {previewPlacement === 'float' ? (
           <CalendarFloatingPanel
             open={rightPreviewOpen}
-            title={
-              previewCalendarEvent
-                ? t('calendar.shell.floatPreviewEvent')
-                : t('calendar.shell.floatPreviewMail')
-            }
+            title={previewColumnLabel}
             widthPx={previewFloatWidth}
             minHeightPx={360}
             persistSizeKey={CAL_FLOAT_PREVIEW_SIZE_KEY}
@@ -2233,6 +2983,33 @@ export function CalendarShell(): JSX.Element {
         }}
       />
 
+      {quickCreate &&
+        createPortal(
+          <CalendarCreateQuickPopover
+            anchor={quickCreate.anchor}
+            range={quickCreate.range}
+            calendarAccounts={calendarLinkedAccounts}
+            taskAccounts={taskAccounts}
+            defaultAccountId={calendarLinkedAccounts[0]?.id ?? taskAccounts[0]?.id}
+            loadListsForAccount={loadTaskListsForAccount}
+            onClose={(): void => setQuickCreate(null)}
+            onSaved={(): void => reloadVisibleRange({ silent: true })}
+            onOpenDetails={(draft): void => {
+              setQuickCreate(null)
+              setEventDialog({
+                mode: 'create',
+                range: draft.range,
+                createPrefill: { subject: draft.subject, location: '' },
+                createAccountId: draft.accountId,
+                createKind: draft.createKind,
+                createGraphCalendarId: draft.graphCalendarId || undefined,
+                createTaskListId: draft.taskListId || undefined
+              })
+            }}
+          />,
+          document.body
+        )}
+
       <CalendarEventDialog
         open={eventDialog != null}
         mode={eventDialog?.mode === 'edit' ? 'edit' : 'create'}
@@ -2240,7 +3017,7 @@ export function CalendarShell(): JSX.Element {
         defaultAccountId={
           eventDialog?.mode === 'create' && eventDialog.createAccountId
             ? eventDialog.createAccountId
-            : calendarLinkedAccounts[0]?.id
+            : calendarLinkedAccounts[0]?.id ?? taskAccounts[0]?.id
         }
         initialRange={
           eventDialog && eventDialog.mode === 'create'
@@ -2252,9 +3029,20 @@ export function CalendarShell(): JSX.Element {
             ? eventDialog.createPrefill
             : undefined
         }
+        initialCreateKind={
+          eventDialog?.mode === 'create' ? eventDialog.createKind : undefined
+        }
+        initialGraphCalendarId={
+          eventDialog?.mode === 'create' ? eventDialog.createGraphCalendarId : undefined
+        }
+        initialTaskListId={
+          eventDialog?.mode === 'create' ? eventDialog.createTaskListId : undefined
+        }
         initialEvent={eventDialog?.mode === 'edit' ? eventDialog.event : null}
+        taskAccounts={taskAccounts}
+        loadListsForAccount={loadTaskListsForAccount}
         onClose={(): void => setEventDialog(null)}
-        onSaved={reloadVisibleRange}
+        onSaved={(): void => reloadVisibleRange({ silent: true })}
       />
 
       {gotoDateOpen ? (

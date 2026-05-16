@@ -15,6 +15,7 @@ import { useTranslation } from 'react-i18next'
 import {
   AlignLeft,
   Calendar as CalendarIcon,
+  CheckSquare,
   CircleDot,
   ExternalLink,
   LayoutPanelLeft,
@@ -33,14 +34,37 @@ import type {
   CalendarRecurrenceRangeEndMode,
   CalendarSaveEventRecurrence,
   ConnectedAccount,
-  MailMasterCategory
+  MailMasterCategory,
+  TaskListRow
 } from '@shared/types'
+import { cloudTaskStableKey } from '@shared/work-item-keys'
+import { applyCloudTaskPersistTarget } from '@/app/calendar/apply-cloud-task-persist'
+import { isWritableCalendarTarget } from '@/app/calendar/calendar-create-destination'
+import {
+  scheduleFromCalendarCreateRange,
+  type CalendarCreateRange
+} from '@/app/tasks/tasks-calendar-create-range'
+import {
+  persistTasksCalendarCreateAccountId,
+  readTasksCalendarCreateAccountId
+} from '@/app/tasks/tasks-calendar-create-storage'
+import {
+  datetimeLocalValueToIso,
+  isoToDatetimeLocalValue
+} from '@/app/work-items/work-item-datetime'
+import { cloudTaskAccountOptionLabel } from '@/lib/cloud-task-accounts'
 import { cn } from '@/lib/utils'
 import { openExternalUrl } from '@/lib/open-external'
 import { useAccountsStore } from '@/stores/accounts'
 import { outlookCategoryDotClass } from '@/lib/outlook-category-colors'
 import { resolvedAccountColorCss } from '@/lib/avatar-color'
 import { ObjectNoteEditor } from '@/components/ObjectNoteEditor'
+import { TipTapBody } from '@/components/TipTapBody'
+import { sanitizeComposeHtmlFragment } from '@/lib/sanitize-compose-html'
+import { CalendarEventDescriptionPreview } from '@/app/calendar/CalendarEventDescriptionPreview'
+import { CalendarEventIconPicker } from '@/components/CalendarEventIconPicker'
+import { calendarEventIconIsExplicit } from '@/lib/calendar-event-icons'
+import { useThemeStore } from '@/stores/theme'
 
 function dateToDatetimeLocal(d: Date): string {
   return format(d, "yyyy-MM-dd'T'HH:mm")
@@ -52,12 +76,9 @@ function datetimeLocalToIso(s: string, invalidMsg: string): string {
   return d.toISOString()
 }
 
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
+function isEffectivelyEmptyEditorHtml(html: string): boolean {
+  const t = html.replace(/<[^>]+>/gi, '').replace(/\u00a0/g, ' ').trim()
+  return t.length === 0
 }
 
 /** E-Mail aus einem Token (reine Adresse oder `Name <addr>` / Outlook-Stil). */
@@ -110,6 +131,25 @@ function parseCalendarDestinationKey(
 type RecurrenceUiFrequency = 'none' | CalendarRecurrenceFrequency
 
 /** Optgroup im Zielkalender-Dropdown: Name + E-Mail zur eindeutigen Zuordnung. */
+type CalendarEventDialogCreateKind = 'event' | 'task'
+
+function pickDefaultTaskListId(rows: TaskListRow[]): string | null {
+  if (rows.length === 0) return null
+  return rows.find((r) => r.isDefault)?.id ?? rows[0]!.id
+}
+
+function resolvePreferredTaskAccountId(
+  taskAccounts: ConnectedAccount[],
+  preferredAccountId?: string
+): string {
+  if (preferredAccountId && taskAccounts.some((a) => a.id === preferredAccountId)) {
+    return preferredAccountId
+  }
+  const stored = readTasksCalendarCreateAccountId()
+  if (stored && taskAccounts.some((a) => a.id === stored)) return stored
+  return taskAccounts[0]?.id ?? ''
+}
+
 function destinationAccountOptgroupLabel(account: ConnectedAccount): string {
   const name = account.displayName.trim()
   const email = account.email.trim()
@@ -195,7 +235,13 @@ export interface CalendarEventDialogProps {
   initialRange?: { start: Date; end: Date; allDay: boolean } | null
   /** Optional: Betreff/Ort beim Anlegen (z. B. Duplizieren aus Kontextmenue). */
   createPrefill?: { subject?: string; location?: string } | null
+  initialCreateKind?: CalendarEventDialogCreateKind
+  initialGraphCalendarId?: string
+  initialTaskListId?: string
   initialEvent?: CalendarEventView | null
+  taskAccounts?: ConnectedAccount[]
+  loadListsForAccount?: (accountId: string) => Promise<TaskListRow[]>
+  onTaskCreated?: () => void
   onClose: () => void
   onSaved: () => void
 }
@@ -241,7 +287,13 @@ export function CalendarEventDialog({
   defaultAccountId,
   initialRange,
   createPrefill,
+  initialCreateKind,
+  initialGraphCalendarId,
+  initialTaskListId,
   initialEvent,
+  taskAccounts = [],
+  loadListsForAccount,
+  onTaskCreated,
   onClose,
   onSaved
 }: CalendarEventDialogProps): JSX.Element | null {
@@ -267,10 +319,13 @@ export function CalendarEventDialog({
   const tzDisplay =
     calendarTzConfig?.trim() || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 
+  const viewerTheme = useThemeStore((s) => s.effective)
+
   const [accountId, setAccountId] = useState('')
   const [subject, setSubject] = useState('')
+  const [eventIconId, setEventIconId] = useState<string | undefined>(undefined)
   const [location, setLocation] = useState('')
-  const [description, setDescription] = useState('')
+  const [descriptionHtml, setDescriptionHtml] = useState('')
   const [isAllDay, setIsAllDay] = useState(false)
   const [dayStart, setDayStart] = useState('')
   const [dayEnd, setDayEnd] = useState('')
@@ -309,6 +364,31 @@ export function CalendarEventDialog({
   const [recurUntilDate, setRecurUntilDate] = useState('')
   const [recurCount, setRecurCount] = useState('10')
 
+  const [createKind, setCreateKind] = useState<CalendarEventDialogCreateKind>('event')
+  const [taskAccountId, setTaskAccountId] = useState('')
+  const [taskListId, setTaskListId] = useState('')
+  const [taskLists, setTaskLists] = useState<TaskListRow[]>([])
+  const [taskListsLoading, setTaskListsLoading] = useState(false)
+  const [taskNotes, setTaskNotes] = useState('')
+  const [taskDue, setTaskDue] = useState('')
+  const [taskPlannedStart, setTaskPlannedStart] = useState('')
+  const [taskPlannedEnd, setTaskPlannedEnd] = useState('')
+
+  const taskTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+
+  function applyTaskScheduleFromRange(range: CalendarCreateRange | null | undefined): void {
+    if (!range) {
+      setTaskDue('')
+      setTaskPlannedStart('')
+      setTaskPlannedEnd('')
+      return
+    }
+    const sched = scheduleFromCalendarCreateRange(range, taskTimeZone)
+    setTaskDue(sched.dueDate)
+    setTaskPlannedStart(isoToDatetimeLocalValue(sched.plannedStartIso))
+    setTaskPlannedEnd(isoToDatetimeLocalValue(sched.plannedEndIso))
+  }
+
   useEffect(() => {
     if (!open) return
     if (mode === 'edit' && !initialEvent) return
@@ -318,11 +398,14 @@ export function CalendarEventDialog({
     setShowAdvancedDateTime(false)
     setSchedulePicker(null)
     setSchedulePickerPos(null)
-    setDescription('')
+    setDescriptionHtml('')
+    setCreateKind(initialCreateKind ?? 'event')
+    setTaskNotes('')
 
     if (mode === 'edit' && initialEvent) {
       setAccountId(initialEvent.accountId)
       setSubject(initialEvent.title ?? '')
+      setEventIconId(initialEvent.icon?.trim() || undefined)
       setLocation(initialEvent.location ?? '')
       setIsAllDay(initialEvent.isAllDay)
       setEventCategories(
@@ -346,15 +429,22 @@ export function CalendarEventDialog({
       setRecurEnd('never')
       setRecurUntilDate('')
       setRecurCount('10')
+      const calId = initialEvent.graphCalendarId?.trim() ?? ''
+      setGraphCalendarId(calId)
+      setDestinationSelectValue(calendarDestinationKey(initialEvent.accountId, calId))
       return
     }
 
     if (mode === 'create') {
-      const acc = defaultAccountId && calendarAccounts.some((a) => a.id === defaultAccountId)
-        ? defaultAccountId
-        : calendarAccounts[0]?.id ?? ''
+      const preferAcc =
+        defaultAccountId && calendarAccounts.some((a) => a.id === defaultAccountId)
+          ? defaultAccountId
+          : calendarAccounts[0]?.id ?? ''
+      const acc =
+        initialCreateKind === 'task' && defaultAccountId ? defaultAccountId : preferAcc
       setAccountId(acc)
       setSubject(createPrefill?.subject?.trim() ? createPrefill.subject : '')
+      setEventIconId(undefined)
       setLocation(createPrefill?.location?.trim() ? createPrefill.location : '')
       if (initialRange) {
         setIsAllDay(initialRange.allDay)
@@ -381,8 +471,12 @@ export function CalendarEventDialog({
         setDayEnd('')
       }
       setEventCategories([])
-      setGraphCalendarId('')
-      setDestinationSelectValue('')
+      setGraphCalendarId(initialGraphCalendarId?.trim() ?? '')
+      setDestinationSelectValue(
+        initialGraphCalendarId != null && acc
+          ? calendarDestinationKey(acc, initialGraphCalendarId.trim())
+          : ''
+      )
       setTeamsMeeting(false)
       setAttendeeInput('')
       setMsEventDetailsError(null)
@@ -399,34 +493,89 @@ export function CalendarEventDialog({
           })()
       setRecurUntilDate(format(addMonths(anchorForUntil, 6), 'yyyy-MM-dd'))
       setRecurCount('10')
+      const preferTaskAcc = resolvePreferredTaskAccountId(
+        taskAccounts,
+        defaultAccountId && taskAccounts.some((a) => a.id === defaultAccountId)
+          ? defaultAccountId
+          : undefined
+      )
+      setTaskAccountId(
+        initialCreateKind === 'task' && defaultAccountId ? defaultAccountId : preferTaskAcc
+      )
+      setTaskListId(initialTaskListId?.trim() ?? '')
+      setTaskLists([])
+      applyTaskScheduleFromRange(initialRange ?? null)
     }
-  }, [open, mode, initialEvent, initialRange, createPrefill, defaultAccountId, calendarAccountIdsKey])
+  }, [
+    open,
+    mode,
+    initialEvent,
+    initialRange,
+    createPrefill,
+    initialCreateKind,
+    initialGraphCalendarId,
+    initialTaskListId,
+    defaultAccountId,
+    calendarAccountIdsKey,
+    taskAccounts
+  ])
 
   useEffect(() => {
-    if (!open || mode !== 'create' || calendarAccounts.length === 0) {
+    if (!open || calendarAccounts.length === 0) {
+      if (mode !== 'edit') {
+        setCalendarsByAccount([])
+        setCalendarsLoading(false)
+        setDestinationSelectValue('')
+      }
+      return
+    }
+    if (mode !== 'create' && mode !== 'edit') {
       setCalendarsByAccount([])
       setCalendarsLoading(false)
-      setDestinationSelectValue('')
       return
     }
     let cancelled = false
     setCalendarsLoading(true)
-    setDestinationSelectValue('')
+    if (mode === 'create') {
+      setDestinationSelectValue('')
+    }
     void Promise.all(
       calendarAccounts.map((acc) =>
         window.mailClient.calendar
           .listCalendars({ accountId: acc.id })
-          .then((rows) => ({ account: acc, calendars: rows }))
+          .then((rows) => ({
+            account: acc,
+            calendars: rows.filter(isWritableCalendarTarget)
+          }))
           .catch(() => ({ account: acc, calendars: [] as CalendarGraphCalendarRow[] }))
       )
     )
       .then((bundles) => {
         if (cancelled) return
         setCalendarsByAccount(bundles)
+        if (mode === 'edit' && initialEvent) {
+          const calId = initialEvent.graphCalendarId?.trim() ?? ''
+          setDestinationSelectValue(calendarDestinationKey(initialEvent.accountId, calId))
+          setAccountId(initialEvent.accountId)
+          setGraphCalendarId(calId)
+          return
+        }
         const preferAcc =
           defaultAccountId && calendarAccounts.some((a) => a.id === defaultAccountId)
             ? defaultAccountId
             : (calendarAccounts[0]?.id ?? '')
+        if (
+          mode === 'create' &&
+          initialGraphCalendarId != null &&
+          defaultAccountId &&
+          calendarAccounts.some((a) => a.id === defaultAccountId)
+        ) {
+          const calId = initialGraphCalendarId.trim()
+          setDestinationSelectValue(calendarDestinationKey(defaultAccountId, calId))
+          setAccountId(defaultAccountId)
+          setGraphCalendarId(calId)
+          return
+        }
         const bundle = bundles.find((b) => b.account.id === preferAcc) ?? bundles[0]
         if (!bundle) {
           setDestinationSelectValue('')
@@ -453,7 +602,38 @@ export function CalendarEventDialog({
     return (): void => {
       cancelled = true
     }
-  }, [open, mode, calendarAccountIdsKey, defaultAccountId])
+  }, [open, mode, calendarAccountIdsKey, defaultAccountId, initialGraphCalendarId, initialEvent])
+
+  useEffect(() => {
+    if (!open || mode !== 'create' || createKind !== 'task' || !taskAccountId || !loadListsForAccount) {
+      setTaskLists([])
+      setTaskListId('')
+      return
+    }
+    let cancelled = false
+    setTaskListsLoading(true)
+    void loadListsForAccount(taskAccountId)
+      .then((rows) => {
+        if (cancelled) return
+        setTaskLists(rows)
+        const preferred =
+          initialTaskListId && rows.some((r) => r.id === initialTaskListId)
+            ? initialTaskListId
+            : (pickDefaultTaskListId(rows) ?? '')
+        setTaskListId(preferred)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setTaskLists([])
+        setTaskListId('')
+      })
+      .finally(() => {
+        if (!cancelled) setTaskListsLoading(false)
+      })
+    return (): void => {
+      cancelled = true
+    }
+  }, [open, mode, createKind, taskAccountId, loadListsForAccount, initialTaskListId])
 
   const timedDisplay = useMemo(() => {
     if (isAllDay || !dtStart || !dtEnd) return null
@@ -591,16 +771,19 @@ export function CalendarEventDialog({
 
   useEffect(() => {
     if (!open || mode !== 'edit' || !initialEvent) return
-    if (initialEvent.source !== 'microsoft') {
+    const eventId = initialEvent.graphEventId?.trim()
+    if (!eventId) {
       setMsEventDetailsLoading(false)
       setMsEventDetailsError(null)
       return
     }
-    if (!initialEvent.graphEventId) {
+    if (initialEvent.source === 'google' && !initialEvent.graphCalendarId?.trim()) {
       setMsEventDetailsLoading(false)
-      setMsEventDetailsError(null)
+      setMsEventDetailsError(t('calendar.eventDialog.googleCalendarIdMissing'))
+      setAttendeeInput('')
       return
     }
+
     let cancelled = false
     setMsEventDetailsLoading(true)
     setMsEventDetailsError(null)
@@ -608,18 +791,21 @@ export function CalendarEventDialog({
     void window.mailClient.calendar
       .getEvent({
         accountId: initialEvent.accountId,
-        graphEventId: initialEvent.graphEventId,
+        graphEventId: eventId,
         graphCalendarId: initialEvent.graphCalendarId ?? null
       })
       .then((d) => {
         if (cancelled) return
         setTeamsMeeting(!!d.isOnlineMeeting && !initialEvent.isAllDay)
         setAttendeeInput(d.attendeeEmails.join('\n'))
+        const raw = d.bodyHtml?.trim() ? d.bodyHtml.trim() : ''
+        setDescriptionHtml(raw ? sanitizeComposeHtmlFragment(raw) : '')
       })
       .catch((err) => {
         if (cancelled) return
         setMsEventDetailsError(err instanceof Error ? err.message : String(err))
         setAttendeeInput('')
+        setDescriptionHtml('')
       })
       .finally(() => {
         if (!cancelled) setMsEventDetailsLoading(false)
@@ -717,9 +903,86 @@ export function CalendarEventDialog({
     })
   }
 
+  function handleCreateKindChange(next: CalendarEventDialogCreateKind): void {
+    if (next === createKind) return
+    if (next === 'task') {
+      if (accountId && taskAccounts.some((a) => a.id === accountId)) {
+        setTaskAccountId(accountId)
+      }
+      if (dtStart && dtEnd && !isAllDay) {
+        setTaskPlannedStart(dtStart)
+        setTaskPlannedEnd(dtEnd)
+        setTaskDue(dtStart.slice(0, 10))
+      } else if (isAllDay && dayStart) {
+        setTaskDue(dayStart)
+        setTaskPlannedStart('')
+        setTaskPlannedEnd('')
+      } else {
+        applyTaskScheduleFromRange(initialRange ?? null)
+      }
+    }
+    setCreateKind(next)
+  }
+
   async function handleSubmit(e: React.FormEvent): Promise<void> {
     e.preventDefault()
     setLocalError(null)
+
+    if (mode === 'create' && createKind === 'task') {
+      if (taskAccounts.length === 0) {
+        setLocalError(t('tasks.create.noAccounts'))
+        return
+      }
+      if (!taskAccountId) {
+        setLocalError(t('calendar.eventDialog.selectAccount'))
+        return
+      }
+      if (!taskListId) {
+        setLocalError(t('calendar.eventDialog.selectTaskList'))
+        return
+      }
+      if (!subject.trim()) {
+        setLocalError(t('calendar.eventDialog.enterTitle'))
+        return
+      }
+      setBusy(true)
+      try {
+        const dueIso = taskDue.trim() ? `${taskDue.trim()}T12:00:00.000Z` : null
+        const plannedStartIso = datetimeLocalValueToIso(taskPlannedStart)
+        const plannedEndIso = datetimeLocalValueToIso(taskPlannedEnd)
+        const row = await window.mailClient.tasks.createTask({
+          accountId: taskAccountId,
+          listId: taskListId,
+          title: subject.trim(),
+          notes: taskNotes.trim() || null,
+          dueIso,
+          completed: false
+        })
+        if (plannedStartIso && plannedEndIso) {
+          const taskKey = cloudTaskStableKey(taskAccountId, taskListId, row.id)
+          await applyCloudTaskPersistTarget(
+            {
+              kind: 'planned',
+              taskKey,
+              plannedStartIso,
+              plannedEndIso
+            },
+            { accountId: taskAccountId, listId: taskListId, id: row.id },
+            taskTimeZone
+          )
+        }
+        persistTasksCalendarCreateAccountId(taskAccountId)
+        onTaskCreated?.()
+        onSaved()
+        onClose()
+      } catch (err) {
+        setLocalError(err instanceof Error ? err.message : String(err))
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
+
     if (mode === 'create') {
       if (!parseCalendarDestinationKey(destinationSelectValue)) {
         setLocalError(t('calendar.eventDialog.selectTargetCalendar'))
@@ -768,8 +1031,9 @@ export function CalendarEventDialog({
       return
     }
 
-    const bodyHtml =
-      description.trim().length > 0 ? `<p>${escapeHtml(description.trim()).replace(/\n/g, '<br>')}</p>` : null
+    const bodyHtml = isEffectivelyEmptyEditorHtml(descriptionHtml)
+      ? null
+      : sanitizeComposeHtmlFragment(descriptionHtml.trim())
 
     const parsedAttendees = parseAttendeeEmailsField(attendeeInput)
 
@@ -808,7 +1072,7 @@ export function CalendarEventDialog({
     setBusy(true)
     try {
       if (mode === 'create') {
-        await window.mailClient.calendar.createEvent({
+        const created = await window.mailClient.calendar.createEvent({
           accountId,
           graphCalendarId: graphCalendarId.trim() || null,
           subject: subject.trim(),
@@ -826,6 +1090,13 @@ export function CalendarEventDialog({
             : {}),
           ...(recurrence ? { recurrence } : {})
         })
+        if (calendarEventIconIsExplicit(eventIconId) && created.id?.trim()) {
+          await window.mailClient.calendar.patchEventIcon({
+            accountId,
+            graphEventId: created.id.trim(),
+            iconId: eventIconId
+          })
+        }
       } else {
         const gid = initialEvent?.graphEventId
         if (!gid) {
@@ -833,10 +1104,16 @@ export function CalendarEventDialog({
           setBusy(false)
           return
         }
-        await window.mailClient.calendar.updateEvent({
-          accountId,
-          graphEventId: gid,
-          graphCalendarId: initialEvent.graphCalendarId ?? null,
+        const parsedDest = parseCalendarDestinationKey(destinationSelectValue)
+        const initialCalId = initialEvent.graphCalendarId?.trim() ?? ''
+        const initialDestKey = calendarDestinationKey(initialEvent.accountId, initialCalId)
+        const destinationChanged =
+          parsedDest != null &&
+          destinationSelectValue !== initialDestKey &&
+          (parsedDest.accountId !== initialEvent.accountId ||
+            parsedDest.graphCalendarId !== initialCalId)
+
+        const payloadOverride = {
           subject: subject.trim(),
           startIso,
           endIso,
@@ -850,7 +1127,43 @@ export function CalendarEventDialog({
                 teamsMeeting: !isAllDay && teamsMeeting
               }
             : {})
-        })
+        }
+
+        if (destinationChanged && parsedDest) {
+          await window.mailClient.calendar.transferEvent({
+            source: {
+              accountId: initialEvent.accountId,
+              graphEventId: gid,
+              graphCalendarId: initialEvent.graphCalendarId ?? null,
+              title: initialEvent.title,
+              startIso: initialEvent.startIso,
+              endIso: initialEvent.endIso,
+              isAllDay: initialEvent.isAllDay,
+              location: initialEvent.location ?? null,
+              categories: initialEvent.categories ?? null
+            },
+            targetAccountId: parsedDest.accountId,
+            targetGraphCalendarId: parsedDest.graphCalendarId,
+            mode: 'move',
+            payloadOverride
+          })
+        } else {
+          await window.mailClient.calendar.updateEvent({
+            accountId,
+            graphEventId: gid,
+            graphCalendarId: initialEvent.graphCalendarId ?? null,
+            ...payloadOverride
+          })
+        }
+        const prevIcon = initialEvent.icon?.trim() || null
+        const nextIcon = eventIconId?.trim() || null
+        if ((prevIcon ?? '') !== (nextIcon ?? '')) {
+          await window.mailClient.calendar.patchEventIcon({
+            accountId: initialEvent.accountId,
+            graphEventId: gid,
+            iconId: nextIcon
+          })
+        }
       }
       onSaved()
       onClose()
@@ -860,6 +1173,22 @@ export function CalendarEventDialog({
       setBusy(false)
     }
   }
+
+  const isTaskCreate = mode === 'create' && createKind === 'task'
+  const submitDisabled =
+    busy ||
+    (isTaskCreate
+      ? taskAccounts.length === 0 ||
+        !taskAccountId ||
+        !taskListId ||
+        !subject.trim() ||
+        taskListsLoading
+      : calendarAccounts.length === 0 ||
+        ((mode === 'create' || mode === 'edit') && calendarsLoading) ||
+        (mode === 'edit' && initialEvent?.calendarCanEdit === false) ||
+        (mode === 'edit' && Boolean(initialEvent?.graphEventId) && msEventDetailsLoading))
+
+  const submitLabel = isTaskCreate ? t('tasks.create.submit') : t('calendar.eventDialog.save')
 
   return (
     <div
@@ -876,7 +1205,43 @@ export function CalendarEventDialog({
         onClick={(ev): void => ev.stopPropagation()}
       >
         <header className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-3">
-          <span className="text-[13px] font-medium text-muted-foreground">{t('calendar.eventDialog.panelTitle')}</span>
+          {mode === 'create' && taskAccounts.length > 0 ? (
+            <div>
+              <span className="sr-only">{t('calendar.eventDialog.kindLabel')}</span>
+              <div className="flex items-center gap-0.5 rounded-md border border-border p-0.5">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={(): void => handleCreateKindChange('event')}
+                  className={cn(
+                    'rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors',
+                    createKind === 'event'
+                      ? 'bg-secondary text-foreground'
+                      : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
+                  )}
+                >
+                  {t('calendar.eventDialog.eventKindName')}
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={(): void => handleCreateKindChange('task')}
+                  className={cn(
+                    'rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors',
+                    createKind === 'task'
+                      ? 'bg-secondary text-foreground'
+                      : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
+                  )}
+                >
+                  {t('calendar.eventDialog.taskKindName')}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <span className="text-[13px] font-medium text-muted-foreground">
+              {t('calendar.eventDialog.panelTitle')}
+            </span>
+          )}
           <div className="flex items-center gap-0.5">
             <button
               type="button"
@@ -911,19 +1276,78 @@ export function CalendarEventDialog({
         >
           <div className="min-h-0 flex-1 space-y-0 overflow-y-auto px-4 py-3">
             <div className="flex items-start gap-2 border-b border-border pb-3">
-              <CalendarIcon className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
+              {mode === 'create' && createKind === 'task' ? (
+                <CheckSquare className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
+              ) : (
+                <CalendarEventIconPicker
+                  layout="compact"
+                  iconId={eventIconId}
+                  title={subject}
+                  disabled={eventFieldsLocked}
+                  onIconChange={setEventIconId}
+                />
+              )}
               <input
                 type="text"
                 value={subject}
                 onChange={(e): void => setSubject(e.target.value)}
                 disabled={eventFieldsLocked}
-                placeholder={t('calendar.eventDialog.titlePlaceholder')}
+                placeholder={
+                  mode === 'create' && createKind === 'task'
+                    ? t('calendar.eventDialog.taskTitlePlaceholder')
+                    : t('calendar.eventDialog.titlePlaceholder')
+                }
                 aria-label={t('calendar.eventDialog.titleAria')}
                 className="min-w-0 flex-1 rounded-md border border-border/60 bg-secondary/20 px-2.5 py-2 text-[17px] font-semibold leading-snug text-foreground outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-60"
               />
             </div>
 
-            {mode === 'create' && calendarAccounts.length > 0 ? (
+            {mode === 'create' && createKind === 'task' && taskAccounts.length > 0 ? (
+              <div className="border-b border-border py-3">
+                <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  {t('calendar.eventDialog.taskDestinationHeadingShort')}
+                </div>
+                <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+                  {t('calendar.eventDialog.taskDestinationHelpBody')}
+                </p>
+                <label className="mt-2 block space-y-1">
+                  <span className="text-[11px] text-muted-foreground">{t('tasks.create.account')}</span>
+                  <select
+                    value={taskAccountId}
+                    disabled={busy || taskListsLoading}
+                    onChange={(e): void => setTaskAccountId(e.target.value)}
+                    className="w-full rounded-md border border-border bg-background px-2 py-2 text-[13px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {taskAccounts.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {cloudTaskAccountOptionLabel(a)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="mt-2 block space-y-1">
+                  <span className="text-[11px] text-muted-foreground">{t('tasks.create.list')}</span>
+                  <select
+                    value={taskListId}
+                    disabled={busy || taskListsLoading || taskLists.length === 0}
+                    onChange={(e): void => setTaskListId(e.target.value)}
+                    className="w-full rounded-md border border-border bg-background px-2 py-2 text-[13px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {taskListsLoading ? (
+                      <option value="">{t('calendar.eventDialog.loadingShort')}</option>
+                    ) : (
+                      taskLists.map((l) => (
+                        <option key={l.id} value={l.id}>
+                          {l.name}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </label>
+              </div>
+            ) : null}
+
+            {mode === 'create' && createKind === 'event' && calendarAccounts.length > 0 ? (
               <div className="border-b border-border py-3">
                 <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   {t('calendar.eventDialog.destinationHeadingShort')}
@@ -976,6 +1400,56 @@ export function CalendarEventDialog({
               </div>
             ) : null}
 
+            {mode === 'create' && createKind === 'task' ? (
+              <div className="border-b border-border py-3 space-y-3">
+                <div className="mb-1 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  <CheckSquare className="h-3.5 w-3.5 shrink-0" />
+                  {t('tasks.create.planned')}
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <label className="block space-y-1 text-[11px]">
+                    <span className="text-muted-foreground">{t('tasks.create.plannedStart')}</span>
+                    <input
+                      type="datetime-local"
+                      value={taskPlannedStart}
+                      onChange={(e): void => setTaskPlannedStart(e.target.value)}
+                      disabled={busy}
+                      className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-[13px]"
+                    />
+                  </label>
+                  <label className="block space-y-1 text-[11px]">
+                    <span className="text-muted-foreground">{t('tasks.create.plannedEnd')}</span>
+                    <input
+                      type="datetime-local"
+                      value={taskPlannedEnd}
+                      onChange={(e): void => setTaskPlannedEnd(e.target.value)}
+                      disabled={busy}
+                      className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-[13px]"
+                    />
+                  </label>
+                </div>
+                <label className="block space-y-1 text-[11px]">
+                  <span className="text-muted-foreground">{t('tasks.create.due')}</span>
+                  <input
+                    type="date"
+                    value={taskDue}
+                    onChange={(e): void => setTaskDue(e.target.value)}
+                    disabled={busy}
+                    className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-[13px]"
+                  />
+                </label>
+                <label className="block space-y-1 text-[11px]">
+                  <span className="text-muted-foreground">{t('tasks.create.notes')}</span>
+                  <textarea
+                    value={taskNotes}
+                    onChange={(e): void => setTaskNotes(e.target.value)}
+                    disabled={busy}
+                    rows={4}
+                    className="w-full resize-y rounded-md border border-border bg-background px-2 py-1.5 text-[13px]"
+                  />
+                </label>
+              </div>
+            ) : (
             <div className="border-b border-border py-3">
               <div className="mb-2 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                 <CalendarIcon className="h-3.5 w-3.5 shrink-0" />
@@ -1179,8 +1653,9 @@ export function CalendarEventDialog({
                 </div>
               )}
             </div>
+            )}
 
-            {mode === 'create' ? (
+            {mode === 'create' && createKind === 'event' ? (
               <div className="border-b border-border py-3">
                 <div className="mb-2 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   <Repeat2 className="h-3.5 w-3.5" />
@@ -1272,7 +1747,8 @@ export function CalendarEventDialog({
               </div>
             ) : null}
 
-            {selectedAccount?.provider === 'google' ? (
+            {(mode !== 'create' || createKind === 'event') &&
+            (selectedAccount?.provider === 'google' ? (
               <div className="border-b border-border py-1">
                 <PropertyRow icon={Users} label={t('calendar.eventDialog.attendeesRowLabel')}>
                   <span className="text-[11px] text-muted-foreground">
@@ -1297,12 +1773,6 @@ export function CalendarEventDialog({
                     {isAllDay ? (
                       <p className="text-[10px] text-muted-foreground">{t('calendar.eventDialog.teamsDisabledAllDay')}</p>
                     ) : null}
-                    {mode === 'edit' && initialEvent?.source === 'microsoft' && msEventDetailsLoading ? (
-                      <p className="inline-flex items-center gap-2 text-[11px] text-muted-foreground">
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        {t('calendar.eventDialog.loadingEventDetails')}
-                      </p>
-                    ) : null}
                     {msEventDetailsError ? (
                       <p className="text-[10px] text-destructive" role="status">
                         {msEventDetailsError}
@@ -1321,41 +1791,62 @@ export function CalendarEventDialog({
                   />
                 </PropertyRow>
               </div>
-            ) : null}
+            ) : null)}
 
-            {mode === 'edit' ? (
-              <div className="flex items-center gap-3 border-b border-border py-3">
-                <span
-                  className="h-3 w-3 shrink-0 rounded-sm ring-1 ring-border"
-                  style={{
-                    backgroundColor: selectedAccount
-                      ? resolvedAccountColorCss(selectedAccount.color)
-                      : 'hsl(var(--primary))'
-                  }}
-                />
-                <div className="min-w-0 flex-1">
-                  {calendarAccounts.length > 1 ? (
-                    <select
-                      value={accountId}
-                      disabled
-                      className="w-full cursor-not-allowed border-0 bg-transparent text-[13px] font-medium text-foreground outline-none focus:ring-0 disabled:opacity-60"
-                    >
-                      {calendarAccounts.map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {a.displayName || a.email}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <div className="truncate text-[13px] font-medium">
-                      {selectedAccount?.displayName || selectedAccount?.email || t('calendar.eventDialog.summaryDash')}
-                    </div>
-                  )}
-                  <div className="text-[11px] text-muted-foreground">{t('calendar.eventDialog.accountHeading')}</div>
+            {mode === 'edit' && calendarAccounts.length > 0 ? (
+              <div className="border-b border-border py-3">
+                <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  {t('calendar.eventDialog.destinationHeadingShort')}
                 </div>
+                <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+                  {t('calendar.eventDialog.destinationMoveHelp')}
+                </p>
+                <select
+                  value={destinationSelectValue}
+                  disabled={busy || calendarsLoading || initialEvent?.calendarCanEdit === false}
+                  onChange={(e): void => {
+                    const v = e.target.value
+                    setDestinationSelectValue(v)
+                    const parsed = parseCalendarDestinationKey(v)
+                    if (parsed) {
+                      setAccountId(parsed.accountId)
+                      setGraphCalendarId(parsed.graphCalendarId)
+                    }
+                  }}
+                  aria-label={t('calendar.eventDialog.targetCalendarAria')}
+                  className="mt-2 w-full rounded-md border border-border bg-background px-2 py-2 text-[13px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {calendarsLoading ? (
+                    <option value="">{t('calendar.eventDialog.submitLoadingCalendars')}</option>
+                  ) : (
+                    calendarsByAccount.map(({ account, calendars }) => {
+                      const accLabel = destinationAccountOptgroupLabel(account)
+                      return (
+                        <optgroup key={account.id} label={accLabel}>
+                          {calendars.length === 0 ? (
+                            <option value={calendarDestinationKey(account.id, '')}>
+                              {t('calendar.eventDialog.primaryCalendarStandard')}
+                            </option>
+                          ) : (
+                            calendars.map((c) => (
+                              <option
+                                key={`${account.id}:${c.id}`}
+                                value={calendarDestinationKey(account.id, c.id)}
+                              >
+                                {c.name}
+                                {c.isDefaultCalendar ? t('calendar.eventDialog.standardCalendarSuffix') : ''}
+                              </option>
+                            ))
+                          )}
+                        </optgroup>
+                      )
+                    })
+                  )}
+                </select>
               </div>
             ) : null}
 
+            {(mode !== 'create' || createKind === 'event') ? (
             <div className="border-b border-border py-1">
               <PropertyRow icon={CircleDot} label={t('calendar.eventDialog.categories')}>
                 {selectedAccount?.provider !== 'microsoft' ? (
@@ -1416,16 +1907,37 @@ export function CalendarEventDialog({
                 />
               </PropertyRow>
               <PropertyRow icon={AlignLeft} label={t('calendar.eventDialog.description')}>
-                <textarea
-                  value={description}
-                  onChange={(e): void => setDescription(e.target.value)}
-                  disabled={eventFieldsLocked}
-                  placeholder={t('calendar.eventDialog.descriptionPlaceholder')}
-                  rows={4}
-                  className="mt-1 w-full resize-y rounded-md border border-border bg-background px-2 py-1.5 text-[13px] text-foreground outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-60"
-                />
+                <div className="mt-1 min-w-0 space-y-2">
+                  {mode === 'edit' && Boolean(initialEvent?.graphEventId) && msEventDetailsLoading ? (
+                    <p className="inline-flex items-center gap-2 text-[11px] text-muted-foreground">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      {t('calendar.eventDialog.loadingEventDetails')}
+                    </p>
+                  ) : null}
+                  {msEventDetailsError && mode === 'edit' && initialEvent?.graphEventId ? (
+                    <p className="text-[10px] text-destructive" role="alert">
+                      {msEventDetailsError}
+                    </p>
+                  ) : null}
+                  {eventFieldsLocked ? (
+                    <CalendarEventDescriptionPreview
+                      html={descriptionHtml}
+                      viewerTheme={viewerTheme}
+                      className="w-full"
+                    />
+                  ) : (
+                    <TipTapBody
+                      valueHtml={descriptionHtml}
+                      onChangeHtml={setDescriptionHtml}
+                      placeholder={t('calendar.eventDialog.descriptionEditorPlaceholder')}
+                      editorMinHeightClass="min-h-[440px]"
+                      className="min-h-[520px] rounded-md border border-border bg-background !border-t-0"
+                    />
+                  )}
+                </div>
               </PropertyRow>
             </div>
+            ) : null}
 
             {mode === 'edit' && initialEvent?.graphEventId ? (
               <div className="border-b border-border py-3">
@@ -1493,36 +2005,31 @@ export function CalendarEventDialog({
             </button>
             <button
               type="submit"
-              disabled={
-                busy ||
-                calendarAccounts.length === 0 ||
-                (mode === 'create' && calendarsLoading) ||
-                (mode === 'edit' && initialEvent?.calendarCanEdit === false) ||
-                (mode === 'edit' && initialEvent?.source === 'microsoft' && msEventDetailsLoading)
-              }
+              disabled={submitDisabled}
               title={
-                calendarAccounts.length === 0
-                  ? t('calendar.eventDialog.submitNoAccount')
-                  : mode === 'create' && calendarsLoading
-                    ? t('calendar.eventDialog.submitLoadingCalendars')
-                    : mode === 'edit' && initialEvent?.calendarCanEdit === false
-                      ? t('calendar.eventDialog.submitReadOnly')
-                      : mode === 'edit' && initialEvent?.source === 'microsoft' && msEventDetailsLoading
-                        ? t('calendar.eventDialog.loadingEventDetails')
-                        : undefined
+                isTaskCreate
+                  ? taskAccounts.length === 0
+                    ? t('tasks.create.noAccounts')
+                    : taskListsLoading
+                      ? t('calendar.eventDialog.loadingShort')
+                      : undefined
+                  : calendarAccounts.length === 0
+                    ? t('calendar.eventDialog.submitNoAccount')
+                    : mode === 'create' && calendarsLoading
+                      ? t('calendar.eventDialog.submitLoadingCalendars')
+                      : mode === 'edit' && initialEvent?.calendarCanEdit === false
+                        ? t('calendar.eventDialog.submitReadOnly')
+                        : mode === 'edit' && Boolean(initialEvent?.graphEventId) && msEventDetailsLoading
+                          ? t('calendar.eventDialog.loadingEventDetails')
+                          : undefined
               }
               className={cn(
                 'inline-flex min-w-[100px] items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-[13px] font-medium text-primary-foreground hover:bg-primary/90',
-                (busy ||
-                  calendarAccounts.length === 0 ||
-                  (mode === 'create' && calendarsLoading) ||
-                  (mode === 'edit' && initialEvent?.calendarCanEdit === false) ||
-                  (mode === 'edit' && initialEvent?.source === 'microsoft' && msEventDetailsLoading)) &&
-                  'cursor-not-allowed opacity-50'
+                submitDisabled && 'cursor-not-allowed opacity-50'
               )}
             >
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              {t('calendar.eventDialog.save')}
+              {submitLabel}
             </button>
           </footer>
         </form>

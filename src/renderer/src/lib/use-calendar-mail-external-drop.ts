@@ -1,6 +1,6 @@
 import { useLayoutEffect, type RefObject } from 'react'
 import { DateTime } from 'luxon'
-import type { MailListItem } from '@shared/types'
+import { MIME_CLOUD_TASK_KEY } from '@/app/tasks/tasks-cloud-task-dnd'
 import { MIME_THREAD_IDS, readDraggedWorkflowMessageIds } from '@/lib/workflow-dnd'
 
 const DEFAULT_APPOINTMENT_MINUTES = 30
@@ -26,6 +26,7 @@ function defaultScheduleForCalendarDay(
 
 function dataTransferLooksLikeMailDrag(dt: DataTransfer): boolean {
   const types = Array.from(dt.types ?? [])
+  if (types.includes(MIME_CLOUD_TASK_KEY)) return false
   return (
     types.includes(MIME_THREAD_IDS) ||
     types.includes('text/plain') ||
@@ -112,16 +113,6 @@ export function useCalendarMailExternalDrop(
       return defaultScheduleForCalendarDay(dateStr, fcTimeZone)
     }
 
-    async function expandConversationMessageIds(mail: MailListItem): Promise<number[]> {
-      const tk = mail.remoteThreadId?.trim()
-      if (!tk) return [mail.id]
-      const list = await window.mailClient.mail
-        .listMessagesByThreads({ accountId: mail.accountId, threadKeys: [tk] })
-        .catch(() => [] as MailListItem[])
-      const ids = [...new Set(list.map((x) => x.id))]
-      return ids.length > 0 ? ids : [mail.id]
-    }
-
     const onDragHoverNative = (e: DragEvent): void => {
       if (!e.dataTransfer) return
       if (!dataTransferLooksLikeMailDrag(e.dataTransfer)) return
@@ -145,17 +136,7 @@ export function useCalendarMailExternalDrop(
       const range = scheduleRangeFromInboxDrop(e.clientX, e.clientY, dateStr, timeZone)
       void (async (): Promise<void> => {
         try {
-          const idSet = new Set<number>()
-          for (const id of dragged) {
-            const anchor = await window.mailClient.mail.getMessage(id).catch(() => null)
-            if (anchor) {
-              const expanded = await expandConversationMessageIds(anchor as MailListItem)
-              for (const x of expanded) idSet.add(x)
-            } else {
-              idSet.add(id)
-            }
-          }
-          await onScheduleMany([...idSet], range.startIso, range.endIso)
+          await onScheduleMany(dragged, range.startIso, range.endIso)
         } catch {
           /* still */
         }

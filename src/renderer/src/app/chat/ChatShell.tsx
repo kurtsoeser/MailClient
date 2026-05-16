@@ -8,6 +8,8 @@ import {
   moduleColumnHeaderShellBarClass
 } from '@/components/ModuleColumnHeader'
 import { TeamsChatPanel } from './TeamsChatPanel'
+import { GLOBAL_CREATE_EVENT, useGlobalCreateNavigateStore } from '@/lib/global-create'
+import { openExternalUrl } from '@/lib/open-external'
 
 const WHATSAPP_WEB_URL = 'https://web.whatsapp.com/'
 /** Reduziert "Browser wird nicht unterstuetzt"-Hinweise gegueber dem Standard-Electron-UA. */
@@ -62,6 +64,30 @@ export function ChatShell({ onOpenAccountDialog }: Props): JSX.Element {
   const [surface, setSurface] = useState<ChatServiceId>('teams')
   const webviewRef = useRef<WebviewEl | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
+
+  const openTeamsNewChat = useCallback((): void => {
+    setSurface('teams')
+    void openExternalUrl('https://teams.microsoft.com/l/chat/0/0').catch((e) => {
+      console.warn('[ChatShell] open new Teams chat failed', e)
+    })
+  }, [])
+
+  useEffect(() => {
+    const pending = useGlobalCreateNavigateStore.getState().takePendingAfterNavigate()
+    if (pending === 'chat') {
+      window.setTimeout((): void => openTeamsNewChat(), 0)
+    }
+  }, [openTeamsNewChat])
+
+  useEffect(() => {
+    function onGlobalCreate(e: Event): void {
+      const ce = e as CustomEvent<{ kind?: string }>
+      if (ce.detail?.kind !== 'chat') return
+      openTeamsNewChat()
+    }
+    window.addEventListener(GLOBAL_CREATE_EVENT, onGlobalCreate as EventListener)
+    return (): void => window.removeEventListener(GLOBAL_CREATE_EVENT, onGlobalCreate as EventListener)
+  }, [openTeamsNewChat])
 
   useEffect(() => {
     const wv = webviewRef.current

@@ -47,9 +47,14 @@ import {
   buildMailContextItems,
   type MailContextHandlers
 } from '@/lib/mail-context-menu'
+import { accountSupportsCloudTasks } from '@/lib/cloud-task-accounts'
 import { useAccountsStore } from '@/stores/accounts'
 import { useInboxCalendarAgendaCacheStore } from '@/stores/inbox-calendar-agenda-cache'
 import { useMailStore, mailListUsesCrossAccountThreadScope } from '@/stores/mail'
+import {
+  buildMailboxFlagExcludedFolderIds,
+  threadMatchesMailboxFlaggedFilter
+} from '@/lib/mail-flagged-mailbox-view'
 import { useAppModeStore } from '@/stores/app-mode'
 import { useCalendarPendingFocusStore } from '@/stores/calendar-pending-focus'
 import { useComposeStore } from '@/stores/compose'
@@ -74,7 +79,11 @@ import { DashboardNextMeetingTile } from '@/app/home/DashboardNextMeetingTile'
 import { DashboardDeskNoteTile } from '@/app/home/DashboardDeskNoteTile'
 import { pushRecentSearch, readRecentSearches } from '@/app/home/dashboard-recent-searches'
 import type { DashboardCustomTileStored } from '@/app/home/dashboard-custom-tiles'
-import { buildCalendarIncludeCalendars } from '@/lib/build-calendar-include-calendars'
+import {
+  filterCalendarEventsForMonth,
+  filterCalendarEventsForWeek,
+  pickNextOnlineMeetingFromEvents
+} from '@/lib/calendar-dashboard-range'
 import { CALENDAR_VISIBILITY_CHANGED_EVENT } from '@/lib/calendar-visibility-storage'
 
 const UNIFIED_STRIPE = 'pointer-events-none absolute left-0 top-0 bottom-0 z-[1] w-[3px] rounded-r opacity-90'
@@ -253,6 +262,7 @@ export function HomeDashboard(): JSX.Element {
   const loading = useMailStore((s) => s.loading)
   const error = useMailStore((s) => s.error)
   const mailFilter = useMailStore((s) => s.mailFilter)
+  const flaggedFilterExcludeDeletedJunk = useMailStore((s) => s.flaggedFilterExcludeDeletedJunk)
   const mailListChronoOrder = useMailStore((s) => s.mailListChronoOrder)
   const selectUnifiedInbox = useMailStore((s) => s.selectUnifiedInbox)
   const selectMessage = useMailStore((s) => s.selectMessage)
@@ -267,6 +277,7 @@ export function HomeDashboard(): JSX.Element {
   const toggleMessageFlag = useMailStore((s) => s.toggleMessageFlag)
   const archiveMessage = useMailStore((s) => s.archiveMessage)
   const deleteMessage = useMailStore((s) => s.deleteMessage)
+  const removeMailTodoRecordsForMessage = useMailStore((s) => s.removeMailTodoRecordsForMessage)
   const setTodoForMessage = useMailStore((s) => s.setTodoForMessage)
   const completeTodoForMessage = useMailStore((s) => s.completeTodoForMessage)
   const setWaitingForMessage = useMailStore((s) => s.setWaitingForMessage)
@@ -277,22 +288,34 @@ export function HomeDashboard(): JSX.Element {
   const openSnoozePicker = useSnoozeUiStore((s) => s.open)
 
   const upcomingEvents = useInboxCalendarAgendaCacheStore((s) => s.dashboardUpcomingCalendar)
+  const previewRangeEvents = useInboxCalendarAgendaCacheStore((s) => s.previewRangeEvents)
   const calendarError = useInboxCalendarAgendaCacheStore((s) => s.error)
   const calendarFetchInFlight = useInboxCalendarAgendaCacheStore((s) => s.inFlight)
   const loadLinkedCalendarPreview = useInboxCalendarAgendaCacheStore((s) => s.loadAgenda)
   const calendarLoading =
     calendarFetchInFlight && upcomingEvents.length === 0 && calendarError == null
 
+  const weekEvents = useMemo(
+    () => filterCalendarEventsForWeek(previewRangeEvents),
+    [previewRangeEvents]
+  )
+  const monthEvents = useMemo(
+    () => filterCalendarEventsForMonth(previewRangeEvents),
+    [previewRangeEvents]
+  )
+  const nextOnlineMeeting = useMemo(
+    () => pickNextOnlineMeetingFromEvents(previewRangeEvents),
+    [previewRangeEvents]
+  )
+  const weekEventsLoading =
+    calendarFetchInFlight && previewRangeEvents.length === 0 && calendarLinkedAccounts.length > 0
+  const nextOnlineMeetingLoading =
+    calendarFetchInFlight && previewRangeEvents.length === 0 && calendarLinkedAccounts.length > 0
+
   const [waitingMessages, setWaitingMessages] = useState<MailListItem[]>([])
   const [waitingLoading, setWaitingLoading] = useState(true)
   const [snoozedItems, setSnoozedItems] = useState<SnoozedMessageItem[]>([])
   const [snoozedLoading, setSnoozedLoading] = useState(true)
-  const [weekEvents, setWeekEvents] = useState<CalendarEventView[]>([])
-  const [weekEventsLoading, setWeekEventsLoading] = useState(true)
-  const [monthEvents, setMonthEvents] = useState<CalendarEventView[]>([])
-  const [nextOnlineMeeting, setNextOnlineMeeting] = useState<CalendarEventView | null>(null)
-  const [nextOnlineMeetingLoading, setNextOnlineMeetingLoading] = useState(true)
-  const [nextOnlineMeetingError, setNextOnlineMeetingError] = useState<string | null>(null)
   const [dashSearchQuery, setDashSearchQuery] = useState('')
   const [dashSearchHits, setDashSearchHits] = useState<SearchHit[]>([])
   const [dashSearchLoading, setDashSearchLoading] = useState(false)
@@ -394,115 +417,38 @@ export function HomeDashboard(): JSX.Element {
     }
   }, [])
 
-  const loadWeekEvents = useCallback(async (): Promise<void> => {
-    setWeekEventsLoading(true)
-    try {
-      const start = startOfWeek(new Date(), { weekStartsOn: 1 })
-      const end = addDays(start, 7)
-      const includeCalendars = await buildCalendarIncludeCalendars(calendarLinkedAccounts)
-      const list = await window.mailClient.calendar.listEvents({
-        startIso: start.toISOString(),
-        endIso: end.toISOString(),
-        focusCalendar: null,
-        includeCalendars
-      })
-      setWeekEvents(list)
-    } catch {
-      setWeekEvents([])
-    } finally {
-      setWeekEventsLoading(false)
-    }
-  }, [calendarLinkedAccounts])
-
-  const loadMonthEvents = useCallback(async (): Promise<void> => {
-    try {
-      const start = startOfMonth(new Date())
-      const end = addMonths(start, 1)
-      const includeCalendars = await buildCalendarIncludeCalendars(calendarLinkedAccounts)
-      const list = await window.mailClient.calendar.listEvents({
-        startIso: start.toISOString(),
-        endIso: end.toISOString(),
-        focusCalendar: null,
-        includeCalendars
-      })
-      setMonthEvents(list)
-    } catch {
-      setMonthEvents([])
-    }
-  }, [calendarLinkedAccounts])
-
-  const loadNextOnlineMeeting = useCallback(async (): Promise<void> => {
-    if (calendarLinkedAccounts.length === 0) {
-      setNextOnlineMeeting(null)
-      setNextOnlineMeetingError(null)
-      setNextOnlineMeetingLoading(false)
-      return
-    }
-
-    setNextOnlineMeetingLoading(true)
-    setNextOnlineMeetingError(null)
-    try {
-      const now = new Date()
-      const end = addDays(now, 7)
-      const includeCalendars = await buildCalendarIncludeCalendars(calendarLinkedAccounts)
-      const list = await window.mailClient.calendar.listEvents({
-        startIso: now.toISOString(),
-        endIso: end.toISOString(),
-        focusCalendar: null,
-        includeCalendars
-      })
-      const nowMs = Date.now()
-      const next = list
-        .filter((ev) => {
-          const joinUrl = ev.joinUrl?.trim()
-          if (!joinUrl) return false
-          const startMs = Date.parse(ev.startIso)
-          return !Number.isNaN(startMs) && startMs > nowMs
-        })
-        .sort((a, b) => Date.parse(a.startIso) - Date.parse(b.startIso))[0] ?? null
-      setNextOnlineMeeting(next)
-    } catch (err) {
-      setNextOnlineMeeting(null)
-      setNextOnlineMeetingError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setNextOnlineMeetingLoading(false)
-    }
-  }, [calendarLinkedAccounts])
-
   useEffect(() => {
     void loadWaiting()
     void loadSnoozed()
-    void loadWeekEvents()
-    void loadMonthEvents()
-    void loadNextOnlineMeeting()
     void loadDashboardTodos()
-  }, [loadDashboardTodos, loadMonthEvents, loadNextOnlineMeeting, loadSnoozed, loadWaiting, loadWeekEvents])
+  }, [loadDashboardTodos, loadSnoozed, loadWaiting])
 
   useEffect(() => {
     const off = window.mailClient.events.onMailChanged(() => {
       void loadWaiting()
       void loadSnoozed()
-      void loadWeekEvents()
-      void loadMonthEvents()
-      void loadNextOnlineMeeting()
       void loadDashboardTodos()
       refreshLinkedCalendarPreview({ force: true })
     })
     return (): void => {
       off()
     }
-  }, [loadDashboardTodos, loadMonthEvents, loadNextOnlineMeeting, loadSnoozed, loadWaiting, loadWeekEvents, refreshLinkedCalendarPreview])
+  }, [loadDashboardTodos, loadSnoozed, loadWaiting, refreshLinkedCalendarPreview])
+
+  useEffect(() => {
+    const offCal = window.mailClient.events.onCalendarChanged(() => {
+      refreshLinkedCalendarPreview({ force: true })
+    })
+    return offCal
+  }, [refreshLinkedCalendarPreview])
 
   useEffect(() => {
     const onVis = (): void => {
       refreshLinkedCalendarPreview({ force: true })
-      void loadWeekEvents()
-      void loadMonthEvents()
-      void loadNextOnlineMeeting()
     }
     window.addEventListener(CALENDAR_VISIBILITY_CHANGED_EVENT, onVis)
     return () => window.removeEventListener(CALENDAR_VISIBILITY_CHANGED_EVENT, onVis)
-  }, [refreshLinkedCalendarPreview, loadMonthEvents, loadNextOnlineMeeting, loadWeekEvents])
+  }, [refreshLinkedCalendarPreview])
 
   const refreshDashboardMailLists = useCallback((): void => {
     void refreshNow()
@@ -547,7 +493,11 @@ export function HomeDashboard(): JSX.Element {
       },
       deleteMessage: async (messageId): Promise<void> => {
         try {
-          await deleteMessage(messageId)
+          if (listKind === 'todo') {
+            await removeMailTodoRecordsForMessage(messageId)
+          } else {
+            await deleteMessage(messageId)
+          }
         } finally {
           refreshDashboardMailLists()
         }
@@ -591,10 +541,12 @@ export function HomeDashboard(): JSX.Element {
       openForward,
       selectMessage,
       t,
+      listKind,
       setMessageRead,
       toggleMessageFlag,
       archiveMessage,
       deleteMessage,
+      removeMailTodoRecordsForMessage,
       setTodoForMessage,
       completeTodoForMessage,
       setWaitingForMessage,
@@ -622,14 +574,17 @@ export function HomeDashboard(): JSX.Element {
       const categorySubmenu = await buildMailCategorySubmenuItems(message, ui, async () => {
         refreshDashboardMailLists()
       })
+      const primaryAcc = accounts.find((a) => a.id === message.accountId)
       const items = buildMailContextItems(message, mailContextHandlers, {
         ...ui,
         categorySubmenu: categorySubmenu.length > 0 ? categorySubmenu : undefined,
+        allowsCloudTaskCreate: accountSupportsCloudTasks(primaryAcc),
+        removeMailTodoOnly: listKind === 'todo',
         t
       })
       setContextMenu({ x: anchor.x, y: anchor.y, items })
     },
-    [mailContextHandlers, refreshDashboardMailLists, t]
+    [mailContextHandlers, refreshDashboardMailLists, accounts, t, listKind]
   )
 
   const accountById = useMemo(
@@ -655,13 +610,32 @@ export function HomeDashboard(): JSX.Element {
     [messages, threadMessages, listKind]
   )
 
+  const mailboxFlagExcludedFolderIds = useMemo(
+    () => buildMailboxFlagExcludedFolderIds(foldersByAccount),
+    [foldersByAccount]
+  )
+
   const filteredThreads = useMemo(() => {
     if (mailFilter === 'all') return threads
     if (mailFilter === 'unread') return threads.filter((t) => t.unreadCount > 0)
-    if (mailFilter === 'flagged') return threads.filter((t) => t.isFlagged)
+    if (mailFilter === 'flagged')
+      return threads.filter((t) =>
+        threadMatchesMailboxFlaggedFilter(
+          t,
+          messagesByThread,
+          mailboxFlagExcludedFolderIds,
+          flaggedFilterExcludeDeletedJunk
+        )
+      )
     if (mailFilter === 'with_todo') return threads.filter((t) => t.openTodoDueKind != null)
     return threads
-  }, [threads, mailFilter])
+  }, [
+    threads,
+    mailFilter,
+    messagesByThread,
+    mailboxFlagExcludedFolderIds,
+    flaggedFilterExcludeDeletedJunk
+  ])
 
   const { groupLabels, groupCounts, groupTodoDueKinds, flatRows } = useMemo(
     () =>
@@ -1433,7 +1407,7 @@ export function HomeDashboard(): JSX.Element {
           <DashboardNextMeetingTile
             event={nextOnlineMeeting}
             loading={nextOnlineMeetingLoading}
-            error={nextOnlineMeetingError}
+            error={calendarError}
             hasLinkedCalendars={calendarLinkedAccounts.length > 0}
           />
         )
@@ -1703,8 +1677,8 @@ export function HomeDashboard(): JSX.Element {
       loading,
       messagesByThread,
       nextOnlineMeeting,
-      nextOnlineMeetingError,
       nextOnlineMeetingLoading,
+      previewRangeEvents,
       openDashboardMailContext,
       openFromDashboard,
       openFullSearchCb,

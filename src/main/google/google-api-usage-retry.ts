@@ -37,7 +37,7 @@ export function isGoogleApiUsageLimitError(err: unknown): boolean {
   const status = httpStatus(e)
   if (status !== 403 && status !== 429) return false
   for (const sub of collectGoogleErrors(e)) {
-    if (sub.domain === 'usageLimits') return true
+    if (sub.reason === 'accessNotConfigured') return false
     const r = sub.reason
     if (
       r === 'rateLimitExceeded' ||

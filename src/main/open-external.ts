@@ -1,14 +1,7 @@
 import { shell } from 'electron'
+import { normalizeExternalOpenUrl } from '@shared/external-open-url'
 
-/** Nur diese Ziele duerfen per `shell.openExternal` geoeffnet werden (Renderer + Main konsistent). */
-export function normalizeExternalOpenUrl(url: string): string | null {
-  let raw = url.trim()
-  if (!raw) return null
-  if (raw.startsWith('//')) raw = `https:${raw}`
-  const allowed = /^(https?:\/\/|notion:\/\/|mailto:|tel:|msteams:\/\/|ms-teams:\/\/)/i
-  if (!allowed.test(raw)) return null
-  return raw
-}
+export { normalizeExternalOpenUrl }
 
 /** `file:` / localhost / about: / data: / blob: — Navigation bleibt in der App. */
 export function isAppInternalNavigationUrl(url: string): boolean {

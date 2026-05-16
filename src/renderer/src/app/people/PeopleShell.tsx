@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 
-import { Loader2, Plus, RefreshCw, Search, Star, LayoutGrid, LayoutList } from 'lucide-react'
+import { Loader2, RefreshCw, Search, Star, LayoutGrid, LayoutList, UserPlus } from 'lucide-react'
 
 import { useTranslation } from 'react-i18next'
 
@@ -14,7 +14,13 @@ import {
 } from '@dnd-kit/core'
 import { SortableContext, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable'
 
-import type { PeopleContactView, PeopleListFilter, PeopleListSort, PeopleNavCounts } from '@shared/types'
+import type {
+  ConnectedAccount,
+  PeopleContactView,
+  PeopleListFilter,
+  PeopleListSort,
+  PeopleNavCounts
+} from '@shared/types'
 
 import { useAccountsStore } from '@/stores/accounts'
 
@@ -32,14 +38,15 @@ import { groupPeopleListRows } from '@/app/people/people-list-groups'
 import { useContactPhotoDataUrl } from '@/app/people/useContactPhotoDataUrl'
 import { PeopleContactTile } from '@/app/people/PeopleContactTile'
 import { PeopleShellSortableAccountNavRow } from '@/app/people/PeopleShellAccountNavRow'
+import { ContextMenu, type ContextMenuItem } from '@/components/ContextMenu'
+import { buildAccountColorAndNewContextItems } from '@/lib/account-sidebar-context-menu'
 import {
   moduleColumnHeaderOutlineSmClass,
   moduleColumnHeaderShellBarClass,
   moduleColumnHeaderTitleClass
 } from '@/components/ModuleColumnHeader'
 
-
-
+import { GLOBAL_CREATE_EVENT, useGlobalCreateNavigateStore } from '@/lib/global-create'
 type NavKey =
 
   | { kind: 'all' }
@@ -104,6 +111,8 @@ export function PeopleShell(): JSX.Element {
 
   const profilePhotoDataUrls = useAccountsStore((s) => s.profilePhotoDataUrls)
 
+  const patchAccountColor = useAccountsStore((s) => s.patchAccountColor)
+
 
 
   const mailAccounts = useMemo(
@@ -141,6 +150,36 @@ export function PeopleShell(): JSX.Element {
   const [peopleAccountSyncError, setPeopleAccountSyncError] = useState<Record<string, string>>({})
 
   const [createOpen, setCreateOpen] = useState(false)
+
+  const [newContactAccountOverride, setNewContactAccountOverride] = useState<string | null>(null)
+
+  const [accountSidebarContextMenu, setAccountSidebarContextMenu] = useState<{
+    x: number
+    y: number
+    items: ContextMenuItem[]
+  } | null>(null)
+
+  useEffect(() => {
+    const pending = useGlobalCreateNavigateStore.getState().takePendingAfterNavigate()
+    if (pending === 'contact' && mailAccounts.length > 0) {
+      window.setTimeout((): void => {
+        setNewContactAccountOverride(null)
+        setCreateOpen(true)
+      }, 0)
+    }
+  }, [mailAccounts.length])
+
+  useEffect(() => {
+    function onGlobalCreate(e: Event): void {
+      const ce = e as CustomEvent<{ kind?: string }>
+      if (ce.detail?.kind !== 'contact') return
+      if (mailAccounts.length === 0) return
+      setNewContactAccountOverride(null)
+      setCreateOpen(true)
+    }
+    window.addEventListener(GLOBAL_CREATE_EVENT, onGlobalCreate as EventListener)
+    return (): void => window.removeEventListener(GLOBAL_CREATE_EVENT, onGlobalCreate as EventListener)
+  }, [mailAccounts.length])
 
   const [error, setError] = useState<string | null>(null)
 
@@ -199,7 +238,37 @@ export function PeopleShell(): JSX.Element {
 
   const accountFilter = nav.kind === 'account' ? nav.accountId : null
 
-  const preferredAccountIdForCreate = nav.kind === 'account' ? nav.accountId : null
+  const preferredAccountIdForCreate =
+    newContactAccountOverride ?? (nav.kind === 'account' ? nav.accountId : null)
+
+
+
+  const openPeopleAccountContextMenu = useCallback(
+    (e: MouseEvent, account: ConnectedAccount): void => {
+      e.preventDefault()
+      e.stopPropagation()
+      setAccountSidebarContextMenu({
+        x: e.clientX,
+        y: e.clientY,
+        items: buildAccountColorAndNewContextItems({
+          account,
+          patchAccountColor,
+          onPatchError: (msg) => setError(msg),
+          newItem: {
+            id: `people-new-${account.id}`,
+            label: t('people.shell.newContact'),
+            icon: UserPlus,
+            onSelect: (): void => {
+              setAccountSidebarContextMenu(null)
+              setNewContactAccountOverride(account.id)
+              setCreateOpen(true)
+            }
+          }
+        })
+      })
+    },
+    [patchAccountColor, t]
+  )
 
 
 
@@ -811,24 +880,6 @@ export function PeopleShell(): JSX.Element {
 
             type="button"
 
-            disabled={syncBusy || peopleAccountSyncId != null || mailAccounts.length === 0}
-
-            onClick={(): void => setCreateOpen(true)}
-
-            className={cn(moduleColumnHeaderOutlineSmClass, 'disabled:opacity-50')}
-
-          >
-
-            <Plus className="h-3.5 w-3.5 shrink-0" />
-
-            {t('people.shell.newContact')}
-
-          </button>
-
-          <button
-
-            type="button"
-
             disabled={syncBusy || peopleAccountSyncId != null}
 
             onClick={(): void => void runSyncAll()}
@@ -1009,6 +1060,8 @@ export function PeopleShell(): JSX.Element {
 
                       onSync={(): void => void runSyncAccount(acc.id)}
 
+                      onAccountContextMenu={(e): void => openPeopleAccountContextMenu(e, acc)}
+
                     />
 
                   )
@@ -1029,9 +1082,12 @@ export function PeopleShell(): JSX.Element {
 
           <div
 
-            style={{ width: listColumnWidth }}
+            style={viewMode === 'tiles' ? undefined : { width: listColumnWidth }}
 
-            className="flex shrink-0 flex-col border-r border-border bg-background"
+            className={cn(
+              'flex flex-col bg-background',
+              viewMode === 'tiles' ? 'min-h-0 min-w-0 flex-1' : 'shrink-0 border-r border-border'
+            )}
 
           >
 
@@ -1269,7 +1325,7 @@ export function PeopleShell(): JSX.Element {
 
                           </div>
 
-                          <div className="grid grid-cols-1 gap-2.5 p-2.5 min-[380px]:grid-cols-2 min-[560px]:grid-cols-3">
+                          <div className="grid grid-cols-[repeat(auto-fill,minmax(450px,1fr))] gap-4 p-3">
 
                             {g.items.map((c) => renderContactTile(c))}
 
@@ -1291,19 +1347,23 @@ export function PeopleShell(): JSX.Element {
 
           </div>
 
-          <VerticalSplitter
+          {viewMode === 'list' ? (
+            <>
+              <VerticalSplitter
 
-            onDrag={(delta): void => setListColumnWidth((w) => w + delta)}
+                onDrag={(delta): void => setListColumnWidth((w) => w + delta)}
 
-            ariaLabel={t('people.shell.splitterListAria')}
+                ariaLabel={t('people.shell.splitterListAria')}
 
-          />
+              />
 
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card">
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card">
 
-            {detailBody}
+                {detailBody}
 
-          </div>
+              </div>
+            </>
+          ) : null}
 
         </div>
 
@@ -1313,7 +1373,13 @@ export function PeopleShell(): JSX.Element {
 
         open={createOpen}
 
-        onClose={(): void => setCreateOpen(false)}
+        onClose={(): void => {
+
+          setCreateOpen(false)
+
+          setNewContactAccountOverride(null)
+
+        }}
 
         accounts={mailAccounts}
 
@@ -1328,6 +1394,22 @@ export function PeopleShell(): JSX.Element {
         }}
 
       />
+
+      {accountSidebarContextMenu ? (
+
+        <ContextMenu
+
+          x={accountSidebarContextMenu.x}
+
+          y={accountSidebarContextMenu.y}
+
+          items={accountSidebarContextMenu.items}
+
+          onClose={(): void => setAccountSidebarContextMenu(null)}
+
+        />
+
+      ) : null}
 
     </div>
 

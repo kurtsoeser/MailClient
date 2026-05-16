@@ -56,6 +56,12 @@ const M_LIST = `
   m.snoozed_until, m.waiting_for_reply_until, m.list_unsubscribe, m.list_unsubscribe_post
 `
 
+/** Offene Mail-ToDos: nur bei aktivem Follow-up (Graph `flagged`; Legacy NULL). */
+const OPEN_TODO_MAIL_FOLLOW_UP_SQL = `(m.follow_up_flag_status IS NULL OR m.follow_up_flag_status = 'flagged')`
+
+/** Erledigt-Liste: ausblenden sobald die Mail `notFlagged` ist (Message = Quelle der Wahrheit). */
+const DONE_TODO_MAIL_FOLLOW_UP_SQL = `(m.follow_up_flag_status IS NULL OR m.follow_up_flag_status != 'notFlagged')`
+
 function rowToTodoListItem(
   r: MessageJoinRow & {
     todo_id: number
@@ -273,6 +279,13 @@ export function deleteTodoById(todoId: number): void {
   db.prepare('DELETE FROM todos WHERE id = ?').run(todoId)
 }
 
+/** Entfernt alle Mail-ToDos zu einer Nachricht (offen und erledigt). Gibt die Anzahl geloeschter Zeilen zurueck. */
+export function deleteTodosByMessageId(messageId: number): number {
+  const db = getDb()
+  const r = db.prepare('DELETE FROM todos WHERE message_id = ?').run(messageId)
+  return r.changes
+}
+
 type OpenTodoDisplayKind = Exclude<TodoDueKindList, 'done'>
 
 function listOpenTodoMessagesByDueAtBucket(
@@ -319,6 +332,7 @@ function listOpenTodoMessagesByDueAtBucket(
        INNER JOIN messages m ON m.id = t.message_id
        WHERE t.status = 'open'
          AND (${whereSql})
+         AND ${OPEN_TODO_MAIL_FOLLOW_UP_SQL}
          ${accountClause}
        ORDER BY
          CASE WHEN t.due_at IS NULL THEN 1 ELSE 0 END,
@@ -381,6 +395,7 @@ export function listTodoMessagesWithMeta(
            INNER JOIN messages m ON m.id = t.message_id
            WHERE m.account_id = ?
              AND t.status = 'done'
+             AND ${DONE_TODO_MAIL_FOLLOW_UP_SQL}
            ORDER BY t.completed_at DESC NULLS LAST, t.id DESC
            LIMIT ?`
         )
@@ -402,6 +417,7 @@ export function listTodoMessagesWithMeta(
          FROM todos t
          INNER JOIN messages m ON m.id = t.message_id
          WHERE t.status = 'done'
+           AND ${DONE_TODO_MAIL_FOLLOW_UP_SQL}
          ORDER BY t.completed_at DESC NULLS LAST, t.id DESC
          LIMIT ?`
       )
@@ -432,6 +448,7 @@ export function listOpenTodoMessagesWithDueAtInRange(
    INNER JOIN messages m ON m.id = t.message_id
    WHERE t.status = 'open'
      AND (t.due_at IS NOT NULL OR t.todo_start_at IS NOT NULL)
+     AND ${OPEN_TODO_MAIL_FOLLOW_UP_SQL}
      ${accountClause}
    ORDER BY COALESCE(t.todo_start_at, t.due_at, '') DESC
    LIMIT ?`
@@ -470,12 +487,13 @@ export function countOpenTodosGlobal(timeZone: string): TodoOpenCounts {
       }
     >(
       `SELECT
-        COALESCE(SUM(CASE WHEN t.due_at IS NOT NULL AND t.due_at < ? THEN 1 ELSE 0 END), 0) as overdue,
-        COALESCE(SUM(CASE WHEN t.due_at IS NOT NULL AND t.due_at >= ? AND t.due_at <= ? THEN 1 ELSE 0 END), 0) as today,
-        COALESCE(SUM(CASE WHEN t.due_at IS NOT NULL AND t.due_at >= ? AND t.due_at <= ? THEN 1 ELSE 0 END), 0) as tomorrow,
-        COALESCE(SUM(CASE WHEN t.due_at IS NOT NULL AND t.due_at > ? AND t.due_at <= ? THEN 1 ELSE 0 END), 0) as this_week,
-        COALESCE(SUM(CASE WHEN t.due_at IS NULL OR t.due_at > ? THEN 1 ELSE 0 END), 0) as later
+        COALESCE(SUM(CASE WHEN t.due_at IS NOT NULL AND t.due_at < ? AND ${OPEN_TODO_MAIL_FOLLOW_UP_SQL} THEN 1 ELSE 0 END), 0) as overdue,
+        COALESCE(SUM(CASE WHEN t.due_at IS NOT NULL AND t.due_at >= ? AND t.due_at <= ? AND ${OPEN_TODO_MAIL_FOLLOW_UP_SQL} THEN 1 ELSE 0 END), 0) as today,
+        COALESCE(SUM(CASE WHEN t.due_at IS NOT NULL AND t.due_at >= ? AND t.due_at <= ? AND ${OPEN_TODO_MAIL_FOLLOW_UP_SQL} THEN 1 ELSE 0 END), 0) as tomorrow,
+        COALESCE(SUM(CASE WHEN t.due_at IS NOT NULL AND t.due_at > ? AND t.due_at <= ? AND ${OPEN_TODO_MAIL_FOLLOW_UP_SQL} THEN 1 ELSE 0 END), 0) as this_week,
+        COALESCE(SUM(CASE WHEN (t.due_at IS NULL OR t.due_at > ?) AND ${OPEN_TODO_MAIL_FOLLOW_UP_SQL} THEN 1 ELSE 0 END), 0) as later
        FROM todos t
+       INNER JOIN messages m ON m.id = t.message_id
        WHERE t.status = 'open'`
     )
     .get(
@@ -500,7 +518,12 @@ export function countOpenTodosGlobal(timeZone: string): TodoOpenCounts {
 export function countDoneTodosGlobal(): number {
   const db = getDb()
   const row = db
-    .prepare<[string], { c: number }>('SELECT COUNT(*) as c FROM todos WHERE status = ?')
-    .get('done')
+    .prepare<[], { c: number }>(
+      `SELECT COUNT(*) as c
+       FROM todos t
+       INNER JOIN messages m ON m.id = t.message_id
+       WHERE t.status = 'done' AND ${DONE_TODO_MAIL_FOLLOW_UP_SQL}`
+    )
+    .get()
   return row?.c ?? 0
 }

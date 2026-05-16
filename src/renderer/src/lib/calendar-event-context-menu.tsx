@@ -1,9 +1,27 @@
 import type { Locale } from 'date-fns'
 import type { TFunction } from 'i18next'
-import { Copy, ExternalLink, Files, Pencil, SquareArrowOutUpRight, StickyNote, Tag, Trash2, Video } from 'lucide-react'
-import type { CalendarEventView } from '@shared/types'
+import {
+  ArrowRightLeft,
+  Copy,
+  ExternalLink,
+  Files,
+  Pencil,
+  SquareArrowOutUpRight,
+  StickyNote,
+  Tag,
+  Trash2,
+  Video
+} from 'lucide-react'
+import type { CalendarEventView, CalendarGraphCalendarRow, ConnectedAccount } from '@shared/types'
+import {
+  calendarDestinationKey,
+  destinationAccountOptgroupLabel,
+  isWritableCalendarTarget,
+  parseCalendarDestinationKey
+} from '@/app/calendar/calendar-create-destination'
 import { formatCalendarEventClipboardText as formatCalendarEventClipboardTextShared } from '@shared/calendar-event-clipboard'
 import type { ContextMenuItem } from '@/components/ContextMenu'
+import { showAppAlert } from '@/stores/app-dialog'
 
 export function formatCalendarEventClipboardText(
   ev: CalendarEventView,
@@ -42,6 +60,127 @@ export interface CalendarEventContextHandlers {
 
 export interface CalendarEventContextMenuExtra {
   categorySubmenu?: ContextMenuItem[]
+  copyToSubmenu?: ContextMenuItem[]
+  moveToSubmenu?: ContextMenuItem[]
+}
+
+function isCurrentEventDestination(
+  ev: CalendarEventView,
+  accountId: string,
+  graphCalendarId: string
+): boolean {
+  return (
+    ev.accountId === accountId &&
+    (ev.graphCalendarId?.trim() ?? '') === graphCalendarId.trim()
+  )
+}
+
+async function runCalendarTransfer(
+  ev: CalendarEventView,
+  mode: 'copy' | 'move',
+  accountId: string,
+  graphCalendarId: string,
+  onAfterChange: () => void | Promise<void>,
+  t: TFunction
+): Promise<void> {
+  const parsed = parseCalendarDestinationKey(calendarDestinationKey(accountId, graphCalendarId))
+  if (!parsed || !ev.graphEventId?.trim()) return
+  try {
+    await window.mailClient.calendar.transferEvent({
+      source: {
+        accountId: ev.accountId,
+        graphEventId: ev.graphEventId,
+        graphCalendarId: ev.graphCalendarId ?? null,
+        title: ev.title,
+        startIso: ev.startIso,
+        endIso: ev.endIso,
+        isAllDay: ev.isAllDay,
+        location: ev.location ?? null,
+        categories: ev.categories ?? null,
+        calendarCanEdit: ev.calendarCanEdit
+      },
+      targetAccountId: parsed.accountId,
+      targetGraphCalendarId: parsed.graphCalendarId,
+      mode
+    })
+    await onAfterChange()
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    await showAppAlert(message, {
+      title:
+        mode === 'copy'
+          ? t('calendar.eventContextMenu.copyFailedTitle')
+          : t('calendar.eventContextMenu.moveFailedTitle')
+    })
+  }
+}
+
+function calendarTargetItemsForAccount(
+  ev: CalendarEventView,
+  mode: 'copy' | 'move',
+  account: ConnectedAccount,
+  calendars: CalendarGraphCalendarRow[],
+  onAfterChange: () => void | Promise<void>,
+  t: TFunction
+): ContextMenuItem[] {
+  const rows =
+    calendars.length > 0
+      ? calendars.filter(isWritableCalendarTarget)
+      : [{ id: '', name: t('calendar.eventDialog.primaryCalendarStandard'), isDefaultCalendar: true }]
+
+  const items: ContextMenuItem[] = []
+  for (const cal of rows) {
+    const calId = cal.id?.trim() ?? ''
+    if (isCurrentEventDestination(ev, account.id, calId)) continue
+    const calName = cal.name?.trim() || t('calendar.eventDialog.primaryCalendarStandard')
+    const suffix = cal.isDefaultCalendar ? t('calendar.eventDialog.standardCalendarSuffix') : ''
+    items.push({
+      id: `cal-xfer-${mode}-${account.id}-${calId || 'default'}`,
+      label: `${calName}${suffix}`,
+      onSelect: (): void => {
+        void runCalendarTransfer(ev, mode, account.id, calId, onAfterChange, t)
+      }
+    })
+  }
+  return items
+}
+
+export async function buildCalendarEventTransferSubmenuItems(
+  ev: CalendarEventView,
+  mode: 'copy' | 'move',
+  calendarAccounts: ConnectedAccount[],
+  onAfterChange: () => void | Promise<void>,
+  t: TFunction,
+  collatorLocale: string
+): Promise<ContextMenuItem[]> {
+  if (!ev.graphEventId?.trim()) return []
+  if (mode === 'move' && ev.calendarCanEdit === false) return []
+
+  const bundles = await Promise.all(
+    calendarAccounts.map((account) =>
+      window.mailClient.calendar
+        .listCalendars({ accountId: account.id })
+        .then((calendars) => ({ account, calendars }))
+        .catch(() => ({ account, calendars: [] as CalendarGraphCalendarRow[] }))
+    )
+  )
+
+  const accountMenus: ContextMenuItem[] = []
+  for (const { account, calendars } of bundles) {
+    const submenu = calendarTargetItemsForAccount(ev, mode, account, calendars, onAfterChange, t)
+    if (submenu.length === 0) continue
+    accountMenus.push({
+      id: `cal-xfer-${mode}-acc-${account.id}`,
+      label: destinationAccountOptgroupLabel(account),
+      submenu
+    })
+  }
+
+  accountMenus.sort((a, b) => a.label.localeCompare(b.label, collatorLocale))
+  if (accountMenus.length === 0) {
+    return [{ id: `cal-xfer-${mode}-empty`, label: t('calendar.eventContextMenu.transferEmpty'), disabled: true }]
+  }
+  return accountMenus
 }
 
 export async function buildCalendarEventCategorySubmenuItems(
@@ -88,6 +227,8 @@ export async function buildCalendarEventCategorySubmenuItems(
 export function buildCalendarEventContextItems(
   ev: CalendarEventView,
   canMutateEvent: boolean,
+  canCopyToOtherCalendar: boolean,
+  canMoveToOtherCalendar: boolean,
   canDuplicate: boolean,
   h: CalendarEventContextHandlers,
   t: TFunction,
@@ -108,6 +249,28 @@ export function buildCalendarEventContextItems(
       disabled: !canDuplicate,
       onSelect: h.onDuplicate
     },
+    ...(extra?.copyToSubmenu && extra.copyToSubmenu.length > 0
+      ? [
+          {
+            id: 'copy-to',
+            label: t('calendar.eventContextMenu.copyTo'),
+            icon: Copy,
+            disabled: !canCopyToOtherCalendar,
+            submenu: extra.copyToSubmenu
+          }
+        ]
+      : []),
+    ...(extra?.moveToSubmenu && extra.moveToSubmenu.length > 0
+      ? [
+          {
+            id: 'move-to',
+            label: t('calendar.eventContextMenu.moveTo'),
+            icon: ArrowRightLeft,
+            disabled: !canMoveToOtherCalendar,
+            submenu: extra.moveToSubmenu
+          }
+        ]
+      : []),
     {
       id: 'note',
       label: t('notes.contextNew'),
@@ -136,7 +299,7 @@ export function buildCalendarEventContextItems(
                   onSelect: h.onSendToNotionAsNewPage
                 }
               ]
-            : [])
+            : []),
         ]
       : []),
     ...(extra?.categorySubmenu && extra.categorySubmenu.length > 0

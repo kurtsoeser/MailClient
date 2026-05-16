@@ -1,7 +1,6 @@
 import {
   House,
   Inbox,
-  LayoutDashboard,
   Calendar,
   Search,
   Settings,
@@ -14,13 +13,17 @@ import {
   Moon,
   Monitor,
   Check,
-  ListFilter,
   MessageCircle,
   BookOpen,
   StickyNote,
   ListTodo,
+  ListChecks,
   Users,
-  WifiOff
+  WifiOff,
+  ChevronDown,
+  Mail,
+  UserPlus,
+  Filter
 } from 'lucide-react'
 import {
   DndContext,
@@ -53,7 +56,7 @@ import {
   type ThemeMode,
   type DarkPalette
 } from '@/stores/theme'
-import type { SearchHit } from '@shared/types'
+import type { ConnectedAccount, SearchHit } from '@shared/types'
 import { useAppModeStore, type AppShellMode } from '@/stores/app-mode'
 import {
   readTopbarModuleOrder,
@@ -64,6 +67,16 @@ import { useMailWorkspaceLayoutStore } from '@/stores/mail-workspace-layout'
 import { useConnectivityStore } from '@/stores/connectivity'
 import { FOCUS_MAIN_SEARCH_EVENT } from '@/lib/search-focus'
 import { pushRecentSearch } from '@/app/home/dashboard-recent-searches'
+import {
+  defaultCreateKindForMode,
+  dispatchGlobalCreate,
+  RULE_CREATE_FLUSH_EVENT,
+  RULE_CREATE_PENDING_SESSION_KEY,
+  targetShellModeForCreateKind,
+  useGlobalCreateNavigateStore,
+  type GlobalCreateKind
+} from '@/lib/global-create'
+import { requestOpenAccountSettings } from '@/lib/open-account-settings'
 
 interface Props {
   onOpenAccountDialog: () => void
@@ -125,6 +138,235 @@ function SortableTopbarModeTab({
   )
 }
 
+const TOPBAR_CREATE_KINDS: GlobalCreateKind[] = [
+  'mail',
+  'task',
+  'calendar_event',
+  'note',
+  'chat',
+  'contact',
+  'rule'
+]
+
+function createKindIcon(kind: GlobalCreateKind): React.ComponentType<{ className?: string }> {
+  switch (kind) {
+    case 'mail':
+      return Mail
+    case 'task':
+      return ListTodo
+    case 'calendar_event':
+      return Calendar
+    case 'note':
+      return StickyNote
+    case 'chat':
+      return MessageCircle
+    case 'contact':
+      return UserPlus
+    case 'rule':
+      return Filter
+    default:
+      return PenSquare
+  }
+}
+
+function TopbarGlobalCreateSplit({
+  mode,
+  accounts,
+  setAppMode,
+  onOpenAccountDialog,
+  openNew
+}: {
+  mode: AppShellMode
+  accounts: ConnectedAccount[]
+  setAppMode: (m: AppShellMode) => void
+  onOpenAccountDialog: () => void
+  openNew: (accountId: string) => void
+}): JSX.Element {
+  const { t } = useTranslation()
+  const [menuOpen, setMenuOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({})
+
+  const primaryKind = useMemo(() => defaultCreateKindForMode(mode), [mode])
+  const graphCapableAccounts = useMemo(
+    () => accounts.filter((a) => a.provider === 'microsoft' || a.provider === 'google'),
+    [accounts]
+  )
+
+  const PrimaryIcon = useMemo(() => createKindIcon(primaryKind), [primaryKind])
+
+  function startNewMail(): void {
+    const first = accounts[0]
+    if (!first) {
+      onOpenAccountDialog()
+      return
+    }
+    openNew(first.id)
+  }
+
+  function isCreateKindDisabled(kind: GlobalCreateKind): boolean {
+    if (kind === 'calendar_event' || kind === 'task' || kind === 'contact') {
+      return graphCapableAccounts.length === 0
+    }
+    return false
+  }
+
+  function disabledHint(kind: GlobalCreateKind): string | undefined {
+    if (kind === 'calendar_event' && graphCapableAccounts.length === 0)
+      return t('topbar.create.noCalendarAccount')
+    if (kind === 'task' && graphCapableAccounts.length === 0) return t('topbar.create.noTaskAccount')
+    if (kind === 'contact' && graphCapableAccounts.length === 0) return t('topbar.create.noPeopleAccount')
+    return undefined
+  }
+
+  function runCreateKind(kind: GlobalCreateKind): void {
+    setMenuOpen(false)
+    if (kind === 'mail') {
+      startNewMail()
+      return
+    }
+    if (kind === 'rule') {
+      try {
+        window.sessionStorage.setItem(RULE_CREATE_PENDING_SESSION_KEY, '1')
+      } catch {
+        // ignore
+      }
+      requestOpenAccountSettings({ tab: 'mail', mailSubNav: 'rules' })
+      window.setTimeout((): void => {
+        window.dispatchEvent(new CustomEvent(RULE_CREATE_FLUSH_EVENT))
+      }, 280)
+      return
+    }
+    const target = targetShellModeForCreateKind(kind)
+    if (target == null) return
+    if (mode !== target) {
+      useGlobalCreateNavigateStore.getState().setPendingAfterNavigate(kind)
+      setAppMode(target)
+      return
+    }
+    dispatchGlobalCreate(kind)
+  }
+
+  const primaryDisabled = primaryKind !== 'mail' && isCreateKindDisabled(primaryKind)
+  const primaryTitle = primaryDisabled
+    ? disabledHint(primaryKind)
+    : primaryKind === 'mail'
+      ? t('topbar.newMailTitle')
+      : t(`topbar.create.${primaryKind}`)
+
+  const updateMenuPosition = useCallback((): void => {
+    if (!wrapRef.current) return
+    const r = wrapRef.current.getBoundingClientRect()
+    const width = 220
+    const left = Math.max(8, Math.min(window.innerWidth - width - 8, r.right - width))
+    setMenuStyle({
+      position: 'fixed',
+      top: r.bottom + 4,
+      left,
+      width,
+      zIndex: 210
+    })
+  }, [])
+
+  useLayoutEffect(() => {
+    if (!menuOpen) return
+    updateMenuPosition()
+  }, [menuOpen, updateMenuPosition])
+
+  useEffect(() => {
+    if (!menuOpen) return
+    updateMenuPosition()
+    function onKey(e: KeyboardEvent): void {
+      if (e.key === 'Escape') setMenuOpen(false)
+    }
+    function onDown(e: MouseEvent): void {
+      const target = e.target as Node
+      if (wrapRef.current?.contains(target)) return
+      if (menuRef.current?.contains(target)) return
+      setMenuOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('resize', updateMenuPosition)
+    window.addEventListener('scroll', updateMenuPosition, true)
+    return (): void => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('resize', updateMenuPosition)
+      window.removeEventListener('scroll', updateMenuPosition, true)
+    }
+  }, [menuOpen, updateMenuPosition])
+
+  return (
+    <div ref={wrapRef} className="relative flex shrink-0">
+      <div className="flex h-8 items-stretch overflow-hidden rounded-md bg-primary shadow-sm">
+        <button
+          type="button"
+          disabled={Boolean(primaryDisabled)}
+          onClick={(): void => runCreateKind(primaryKind)}
+          title={primaryTitle}
+          className={cn(
+            'flex items-center gap-1.5 px-2.5 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90 sm:px-3',
+            primaryDisabled && 'cursor-not-allowed opacity-50 hover:bg-primary'
+          )}
+        >
+          <PrimaryIcon className="h-4 w-4 shrink-0" />
+          <span className="hidden max-w-[10rem] truncate sm:inline">{t(`topbar.create.${primaryKind}`)}</span>
+        </button>
+        <button
+          type="button"
+          onClick={(): void => setMenuOpen((o) => !o)}
+          className="border-l border-primary-foreground/25 px-1.5 text-primary-foreground transition-colors hover:bg-primary/90"
+          aria-expanded={menuOpen}
+          aria-haspopup="menu"
+          aria-label={t('topbar.create.splitChevronAria')}
+          title={t('topbar.create.splitChevronAria')}
+        >
+          <ChevronDown className="h-4 w-4" />
+        </button>
+      </div>
+      {menuOpen &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="menu"
+            aria-label={t('topbar.create.menuAria')}
+            className="glass-panel-elevated glass-animate-in overflow-hidden rounded-lg py-1 text-popover-foreground"
+            style={menuStyle}
+          >
+            {TOPBAR_CREATE_KINDS.map((kind) => {
+              const disabled = kind !== 'mail' && kind !== 'rule' && isCreateKindDisabled(kind)
+              const Icon = createKindIcon(kind)
+              const hint = disabled ? disabledHint(kind) : undefined
+              return (
+                <button
+                  key={kind}
+                  type="button"
+                  role="menuitem"
+                  disabled={Boolean(disabled)}
+                  title={hint}
+                  onClick={(): void => {
+                    if (disabled) return
+                    runCreateKind(kind)
+                  }}
+                  className={cn(
+                    'flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-secondary/60',
+                    disabled ? 'cursor-not-allowed opacity-45' : 'text-muted-foreground hover:text-foreground'
+                  )}
+                >
+                  <Icon className="h-3.5 w-3.5 shrink-0" />
+                  <span className="flex-1">{t(`topbar.create.${kind}`)}</span>
+                </button>
+              )
+            })}
+          </div>,
+          document.body
+        )}
+    </div>
+  )
+}
+
 export function Topbar({ onOpenAccountDialog }: Props): JSX.Element {
   const { t, i18n } = useTranslation()
   const shellModes = useMemo(
@@ -132,12 +374,11 @@ export function Topbar({ onOpenAccountDialog }: Props): JSX.Element {
       [
         { id: 'home' as const, label: t('topbar.modeHome'), icon: House },
         { id: 'mail' as const, label: t('topbar.modeMail'), icon: Inbox },
-        { id: 'workflow' as const, label: t('topbar.modeWorkflow'), icon: LayoutDashboard },
         { id: 'calendar' as const, label: t('topbar.modeCalendar'), icon: Calendar },
         { id: 'tasks' as const, label: t('topbar.modeTasks'), icon: ListTodo },
+        { id: 'work' as const, label: t('topbar.modeWork'), icon: ListChecks },
         { id: 'people' as const, label: t('topbar.modePeople'), icon: Users },
         { id: 'notes' as const, label: t('topbar.modeNotes'), icon: StickyNote },
-        { id: 'rules' as const, label: t('topbar.modeRules'), icon: ListFilter },
         { id: 'chat' as const, label: t('topbar.modeChat'), icon: MessageCircle }
       ] satisfies Array<{
         id: AppShellMode
@@ -203,15 +444,6 @@ export function Topbar({ onOpenAccountDialog }: Props): JSX.Element {
   const setCalendarOpenMw = useMailWorkspaceLayoutStore((s) => s.setCalendarOpen)
   const setReadingPlacementMw = useMailWorkspaceLayoutStore((s) => s.setReadingPlacement)
   const setCalendarPlacementMw = useMailWorkspaceLayoutStore((s) => s.setCalendarPlacement)
-
-  function startNewMail(): void {
-    const first = accounts[0]
-    if (!first) {
-      onOpenAccountDialog()
-      return
-    }
-    openNew(first.id)
-  }
 
   async function handleRefresh(): Promise<void> {
     if (!online) return
@@ -323,15 +555,13 @@ export function Topbar({ onOpenAccountDialog }: Props): JSX.Element {
 
         <span className="mx-1 h-5 w-px bg-border" aria-hidden />
 
-        <button
-          type="button"
-          onClick={startNewMail}
-          className="flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
-          title={t('topbar.newMailTitle')}
-        >
-          <PenSquare className="h-4 w-4" />
-          {t('topbar.newMail')}
-        </button>
+        <TopbarGlobalCreateSplit
+          mode={mode}
+          accounts={accounts}
+          setAppMode={setAppMode}
+          onOpenAccountDialog={onOpenAccountDialog}
+          openNew={openNew}
+        />
 
         <button
           type="button"

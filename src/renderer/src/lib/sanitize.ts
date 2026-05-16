@@ -1,4 +1,5 @@
 import DOMPurify from 'dompurify'
+import { normalizeExternalOpenUrl } from '@shared/external-open-url'
 
 const ALLOWED_TAGS = [
   'a','b','blockquote','br','div','em','figure','figcaption','h1','h2','h3','h4','h5','h6',
@@ -40,15 +41,9 @@ function installMailAnchorNeutralizer(): void {
     if (el.nodeName.toLowerCase() !== 'a') return
     const raw = (el.getAttribute('href') || el.getAttribute('xlink:href') || '').trim()
     if (!raw || raw === '#' || raw.startsWith('#')) return
-    let h = raw
-    if (h.startsWith('//')) h = `https:${h}`
-    const ok =
-      /^https?:\/\//i.test(h) ||
-      /^mailto:/i.test(h) ||
-      /^tel:/i.test(h) ||
-      /^(msteams|ms-teams):\/\//i.test(h)
-    if (!ok) return
-    el.setAttribute('data-mail-external', h)
+    const normalized = normalizeExternalOpenUrl(raw)
+    if (!normalized) return
+    el.setAttribute('data-mail-external', normalized)
     el.setAttribute('href', '#')
     el.removeAttribute('xlink:href')
   })
@@ -127,7 +122,7 @@ export function replaceInlineCidImages(
 }
 
 /**
- * Sanitisiert HTML-Mail-Inhalt fuer die sichere Anzeige im Sandbox-Iframe.
+ * Sanitisiert HTML-Mail-Inhalt fuer die sichere Anzeige im srcdoc-Iframe (CSP ohne JS).
  * Externe Bilder werden standardmaessig blockiert (Privacy: kein Tracker-Pixel-Load).
  */
 export function sanitizeMailHtml(html: string, options: { loadImages?: boolean } = {}): string {
@@ -161,9 +156,26 @@ export function sanitizeMailHtml(html: string, options: { loadImages?: boolean }
 
 export type MailViewerTheme = 'light' | 'dark'
 
+/** CSP fuer Mail-/Kalender-srcdoc: kein JS, aber inline-Styles und Bilder (DOMPurify bleibt Pflicht). */
+const mailIframeCspMeta = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data: http: https: blob:; font-src data: http: https:; script-src 'none'; object-src 'none'; base-uri 'none';">`
+
 export function buildIframeSrcDoc(html: string, theme: MailViewerTheme = 'light'): string {
-  const css = theme === 'dark' ? darkThemeCss : lightThemeCss
-  return `<!doctype html><html lang="de"><head><meta charset="utf-8">${css}</head><body>${html}</body></html>`
+  if (theme === 'dark') {
+    return `<!doctype html><html lang="de"><head><meta charset="utf-8">${mailIframeCspMeta}${darkThemeCss}</head><body><div class="mail-html-root">${html}</div></body></html>`
+  }
+  return `<!doctype html><html lang="de"><head><meta charset="utf-8">${mailIframeCspMeta}${lightThemeCss}</head><body>${html}</body></html>`
+}
+
+/**
+ * Markup fuer Shadow-Root der Mail-Leseansicht (kein iframe): gleiche Styles wie im srcdoc,
+ * aber `html, body` -> `:host`, damit Klicks zuverlässig im Electron-Hauptdokument landen.
+ */
+export function buildMailShadowRootInnerHtml(html: string, theme: MailViewerTheme): string {
+  const adapt = (css: string): string => css.replace(':root', ':host').replace(/html,\s*body/g, ':host')
+  if (theme === 'dark') {
+    return `${mailReadingShadowDarkThemeCss}<div class="mail-html-root">${html}</div>`
+  }
+  return `${adapt(lightThemeCss)}${html}`
 }
 
 const lightThemeCss = `
@@ -185,24 +197,160 @@ const lightThemeCss = `
 `
 
 /**
- * Dark-Mode-Anzeige: Wir koennen Inline-Styles aus dem Mail-Markup nicht
- * vollstaendig invertieren. Wir setzen daher nur Defaults, lassen aber
- * Inline-Styles unangetastet. Dadurch sehen "dark-mode-fertige" Mails gut aus,
- * waehrend klassische Mails ggf. besser im Hell-Mode angezeigt werden.
+ * Dunkelmodus: grauer Rahmen ueber body-Padding (`MAIL_DARK_SURFACE`).
+ * Unter `.mail-html-root` liegt eine undurchsichtige helle Flaeche, dann invertieren wir sie.
+ * Reines Weiss wuerde nach invert() zu Schwarz (#000); stattdessen `#d5d5d5` (= invert(#2a2a2a)),
+ * damit „leere“ Flaechen nach dem Filter dasselbe Dunkelgrau wie der Rahmen haben.
+ * Bilder/SVG/Video doppelt invertieren (wieder naturgetreu).
+ * Im iframe `color-scheme: light`, damit keine UA-Dunkel-Anpassungen mit invert() kollidieren.
  */
+const MAIL_DARK_SURFACE_HEX = '#2a2a2a'
+/** Vor invert(): Komplement zu MAIL_DARK_SURFACE (gleiches Grau nach invert+hue fuer Achromaten). */
+const MAIL_DARK_PAPER_BEFORE_INVERT_HEX = '#d5d5d5'
+
 const darkThemeCss = `
   <style>
-    :root { color-scheme: dark; }
-    html, body { margin: 0; padding: 14px 18px; background: #1c1c20; color: #e6e6e8;
-      font: 14px/1.55 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      word-wrap: break-word; }
-    a { color: #6aa3ff; }
+    :root { color-scheme: light; }
+    html, body {
+      margin: 0;
+      padding: 14px 18px;
+      box-sizing: border-box;
+      min-height: 100%;
+      background: ${MAIL_DARK_SURFACE_HEX};
+      font: 14px/1.55 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+      word-wrap: break-word;
+      color-scheme: light;
+    }
+    *, *::before, *::after { box-sizing: inherit; }
+    .mail-html-root {
+      isolation: isolate;
+      forced-color-adjust: none;
+      min-height: calc(100vh - 28px);
+      padding: 0;
+      margin: 0;
+      border-radius: 2px;
+      background: ${MAIL_DARK_PAPER_BEFORE_INVERT_HEX};
+      color: #1f1f23;
+      filter: invert(1) hue-rotate(180deg);
+    }
+    .mail-html-root img,
+    .mail-html-root svg,
+    .mail-html-root video {
+      filter: invert(1) hue-rotate(180deg);
+      forced-color-adjust: none;
+    }
     img { max-width: 100%; height: auto; }
-    blockquote { border-left: 3px solid #2a2a32; margin: 0 0 0 4px; padding: 4px 12px;
-      color: #9a9aa3; }
     table { max-width: 100%; }
-    pre, code { background: #14141a; padding: 2px 4px; border-radius: 3px; font-size: 12px;
-      color: #e6e6e8; }
-    pre { padding: 8px 12px; overflow: auto; }
   </style>
 `
+
+/** Shadow-Root Mail-Leseansicht: kein 100vh-Mindestmaß (iframe-Überbleibsel), sonst kein Scroll im Panel. */
+const mailReadingShadowDarkThemeCss = `
+  <style>
+    :host {
+      color-scheme: light;
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      display: block;
+      background: ${MAIL_DARK_SURFACE_HEX};
+      font: 14px/1.55 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+      word-wrap: break-word;
+    }
+    *, *::before, *::after { box-sizing: inherit; }
+    .mail-html-root {
+      isolation: isolate;
+      forced-color-adjust: none;
+      min-height: 0;
+      padding: 14px 18px;
+      margin: 0;
+      border-radius: 2px;
+      background: ${MAIL_DARK_PAPER_BEFORE_INVERT_HEX};
+      color: #1f1f23;
+      filter: invert(1) hue-rotate(180deg);
+    }
+    .mail-html-root img,
+    .mail-html-root svg,
+    .mail-html-root video {
+      filter: invert(1) hue-rotate(180deg);
+      forced-color-adjust: none;
+    }
+    img { max-width: 100%; height: auto; }
+    table { max-width: 100%; }
+  </style>
+`
+
+/** Kalender-Beschreibung: kein Vollbild-Mindestmaß wie bei Mail (vermeidet leere Scrollbars). */
+export function isEffectivelyEmptyDescriptionHtml(html: string): boolean {
+  const t = html.replace(/<[^>]+>/gi, '').replace(/\u00a0/g, ' ').trim()
+  return t.length === 0
+}
+
+const calendarDescriptionDarkThemeCss = `
+  <style>
+    :root { color-scheme: light; }
+    html, body {
+      margin: 0;
+      padding: 14px 18px;
+      box-sizing: border-box;
+      background: ${MAIL_DARK_SURFACE_HEX};
+      font: 14px/1.55 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+      word-wrap: break-word;
+      color-scheme: light;
+      overflow: hidden;
+    }
+    *, *::before, *::after { box-sizing: inherit; }
+    .mail-html-root {
+      isolation: isolate;
+      forced-color-adjust: none;
+      min-height: 0;
+      padding: 0;
+      margin: 0;
+      border-radius: 2px;
+      background: ${MAIL_DARK_PAPER_BEFORE_INVERT_HEX};
+      color: #1f1f23;
+      filter: invert(1) hue-rotate(180deg);
+    }
+    .mail-html-root img,
+    .mail-html-root svg,
+    .mail-html-root video {
+      filter: invert(1) hue-rotate(180deg);
+      forced-color-adjust: none;
+    }
+    img { max-width: 100%; height: auto; }
+    table { max-width: 100%; }
+    pre { padding: 8px 12px; overflow: auto; scrollbar-width: thin; }
+  </style>
+`
+
+const calendarDescriptionLightThemeCss = `
+  <style>
+    :root { color-scheme: light; }
+    html, body {
+      margin: 0;
+      padding: 14px 18px;
+      background: #ffffff;
+      color: #1f1f23;
+      font: 14px/1.55 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+      word-wrap: break-word;
+      overflow: hidden;
+    }
+    a { color: #0b66c2; }
+    img { max-width: 100%; height: auto; }
+    blockquote { border-left: 3px solid #d6d6db; margin: 0 0 0 4px; padding: 4px 12px; color: #555; }
+    table { max-width: 100%; }
+    pre, code { background: #f4f4f6; padding: 2px 4px; border-radius: 3px; font-size: 12px; color: #1f1f23; }
+    pre { padding: 8px 12px; overflow: auto; scrollbar-width: thin; }
+    hr { border: 0; border-top: 1px solid #e5e5ea; margin: 12px 0; }
+  </style>
+`
+
+export function buildCalendarDescriptionIframeSrcDoc(
+  html: string,
+  theme: MailViewerTheme = 'light'
+): string {
+  if (theme === 'dark') {
+    return `<!doctype html><html lang="de"><head><meta charset="utf-8">${mailIframeCspMeta}${calendarDescriptionDarkThemeCss}</head><body><div class="mail-html-root">${html}</div></body></html>`
+  }
+  return `<!doctype html><html lang="de"><head><meta charset="utf-8">${mailIframeCspMeta}${calendarDescriptionLightThemeCss}</head><body>${html}</body></html>`
+}

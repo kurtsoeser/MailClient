@@ -24,10 +24,10 @@ describe('topbar-module-order', () => {
   })
 
   it('readTopbarModuleOrder / persistTopbarModuleOrder runden korrekt ab', () => {
-    persistTopbarModuleOrder(['chat', 'rules'])
+    persistTopbarModuleOrder(['chat', 'notes'])
     const read = readTopbarModuleOrder()
     expect(read[0]).toBe('chat')
-    expect(read[1]).toBe('rules')
+    expect(read[1]).toBe('notes')
     expect(new Set(read)).toEqual(new Set(DEFAULT_TOPBAR_MODULE_ORDER))
   })
 })

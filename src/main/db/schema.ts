@@ -495,5 +495,201 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_compose_scheduled_pending
         ON compose_scheduled(send_at_iso) WHERE status = 'pending';
     `
+  },
+  {
+    version: 17,
+    description: 'Cloud-Aufgaben: lokale Planungszeit (Kalender-Blöcke)',
+    sql: `
+      CREATE TABLE IF NOT EXISTS task_planned_schedule (
+        task_key          TEXT PRIMARY KEY,
+        planned_start_iso TEXT NOT NULL,
+        planned_end_iso   TEXT NOT NULL,
+        updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_task_planned_schedule_start
+        ON task_planned_schedule(planned_start_iso);
+    `
+  },
+  {
+    version: 18,
+    description: 'Mail ↔ Cloud-Aufgabe Verknüpfung (Variante C, 1:n)',
+    sql: `
+      CREATE TABLE IF NOT EXISTS mail_cloud_task_link (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        message_id   INTEGER NOT NULL,
+        account_id   TEXT NOT NULL,
+        list_id      TEXT NOT NULL,
+        task_id      TEXT NOT NULL,
+        created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(message_id, account_id, list_id, task_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_mail_cloud_task_link_message
+        ON mail_cloud_task_link(message_id);
+      CREATE INDEX IF NOT EXISTS idx_mail_cloud_task_link_task
+        ON mail_cloud_task_link(account_id, list_id, task_id);
+    `
+  },
+  {
+    version: 19,
+    description: 'Kalender-Termine: lokaler Cache und Sync-Fenster pro Konto',
+    sql: `
+      CREATE TABLE IF NOT EXISTS calendar_events (
+        id                    TEXT PRIMARY KEY,
+        account_id            TEXT NOT NULL,
+        source                TEXT NOT NULL CHECK (source IN ('microsoft','google')),
+        graph_event_id        TEXT NOT NULL,
+        graph_calendar_id     TEXT,
+        account_email         TEXT NOT NULL,
+        account_color_class   TEXT NOT NULL,
+        title                 TEXT NOT NULL,
+        start_iso             TEXT NOT NULL,
+        end_iso               TEXT NOT NULL,
+        is_all_day            INTEGER NOT NULL DEFAULT 0,
+        location              TEXT,
+        web_link              TEXT,
+        join_url              TEXT,
+        organizer             TEXT,
+        categories_json       TEXT,
+        display_color_hex     TEXT,
+        calendar_can_edit     INTEGER,
+        synced_at             TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(account_id, source, graph_event_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_calendar_events_range
+        ON calendar_events(start_iso, end_iso);
+      CREATE INDEX IF NOT EXISTS idx_calendar_events_account
+        ON calendar_events(account_id);
+      CREATE INDEX IF NOT EXISTS idx_calendar_events_calendar
+        ON calendar_events(account_id, graph_calendar_id);
+
+      CREATE TABLE IF NOT EXISTS calendar_sync_state (
+        account_id        TEXT PRIMARY KEY,
+        window_start_iso  TEXT NOT NULL,
+        window_end_iso    TEXT NOT NULL,
+        last_synced_at    TEXT NOT NULL
+      );
+    `
+  },
+  {
+    version: 20,
+    description: 'Cloud-Aufgaben (MS To Do / Google Tasks): Listen + Aufgaben lokal',
+    sql: `
+      CREATE TABLE IF NOT EXISTS task_lists (
+        account_id    TEXT NOT NULL,
+        list_id       TEXT NOT NULL,
+        name          TEXT NOT NULL,
+        is_default    INTEGER NOT NULL DEFAULT 0,
+        provider      TEXT NOT NULL CHECK (provider IN ('microsoft','google')),
+        synced_at     TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (account_id, list_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_task_lists_account
+        ON task_lists(account_id);
+
+      CREATE TABLE IF NOT EXISTS cloud_tasks (
+        account_id    TEXT NOT NULL,
+        list_id       TEXT NOT NULL,
+        task_id       TEXT NOT NULL,
+        title         TEXT NOT NULL,
+        completed     INTEGER NOT NULL DEFAULT 0,
+        due_iso       TEXT,
+        notes         TEXT,
+        synced_at     TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (account_id, list_id, task_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_cloud_tasks_account_list
+        ON cloud_tasks(account_id, list_id);
+
+      CREATE TABLE IF NOT EXISTS task_lists_sync_state (
+        account_id      TEXT PRIMARY KEY,
+        last_synced_at  TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS task_list_sync_state (
+        account_id      TEXT NOT NULL,
+        list_id         TEXT NOT NULL,
+        last_synced_at  TEXT NOT NULL,
+        PRIMARY KEY (account_id, list_id)
+      );
+    `
+  },
+  {
+    version: 21,
+    description: 'Kalender-Ordner, Termin-Details, Outlook-Masterkategorien (lokal)',
+    sql: `
+      CREATE TABLE IF NOT EXISTS calendar_folders (
+        account_id         TEXT NOT NULL,
+        calendar_id        TEXT NOT NULL,
+        name               TEXT NOT NULL,
+        is_default         INTEGER NOT NULL DEFAULT 0,
+        color              TEXT,
+        hex_color          TEXT,
+        can_edit           INTEGER,
+        provider           TEXT NOT NULL CHECK (provider IN ('microsoft','google')),
+        access_role        TEXT,
+        calendar_kind      TEXT NOT NULL DEFAULT 'standard'
+                           CHECK (calendar_kind IN ('standard','m365Group')),
+        group_sort_index   INTEGER,
+        synced_at          TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (account_id, calendar_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_calendar_folders_account
+        ON calendar_folders(account_id, calendar_kind, group_sort_index);
+
+      CREATE TABLE IF NOT EXISTS calendar_folders_sync_state (
+        account_id           TEXT PRIMARY KEY,
+        last_synced_at       TEXT NOT NULL,
+        m365_groups_total    INTEGER
+      );
+
+      CREATE TABLE IF NOT EXISTS master_categories (
+        account_id     TEXT NOT NULL,
+        category_id    TEXT NOT NULL,
+        display_name   TEXT NOT NULL,
+        color          TEXT NOT NULL,
+        synced_at      TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (account_id, category_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS master_categories_sync_state (
+        account_id      TEXT PRIMARY KEY,
+        last_synced_at  TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS calendar_event_details (
+        account_id            TEXT NOT NULL,
+        graph_event_id        TEXT NOT NULL,
+        graph_calendar_id     TEXT,
+        subject               TEXT,
+        attendee_emails_json  TEXT NOT NULL DEFAULT '[]',
+        join_url              TEXT,
+        is_online_meeting     INTEGER NOT NULL DEFAULT 0,
+        synced_at             TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (account_id, graph_event_id)
+      );
+    `
+  },
+  {
+    version: 22,
+    description: 'Graph follow-up flag status (flagged|complete|notFlagged) auf messages',
+    sql: `
+      ALTER TABLE messages ADD COLUMN follow_up_flag_status TEXT;
+      UPDATE messages
+      SET follow_up_flag_status = CASE WHEN is_flagged = 1 THEN 'flagged' ELSE NULL END;
+    `
+  },
+  {
+    version: 23,
+    description: 'Kalender-Termin-Details: HTML-Beschreibung (body_html) cachen',
+    sql: `
+      ALTER TABLE calendar_event_details ADD COLUMN body_html TEXT;
+    `
+  },
+  {
+    version: 24,
+    description: 'Kalender-Termine: lokales Anzeige-Icon (icon_id)',
+    sql: `
+      ALTER TABLE calendar_events ADD COLUMN icon_id TEXT;
+    `
   }
 ]

@@ -9,28 +9,46 @@ import {
   type CalendarGetEventInput,
   type CalendarGetEventResult,
   type CalendarDeleteEventInput,
+  type CalendarPatchEventIconInput,
   type CalendarPatchScheduleInput,
+  type CalendarTransferEventInput,
   type CalendarPatchCalendarColorInput,
   type CalendarGraphCalendarRow,
+  type CalendarAccountSyncStateRow,
   type CalendarListCalendarsInput,
   type CalendarListEventsInput,
   type CalendarM365GroupCalendarsPage
 } from '@shared/types'
 import { listAccounts } from '../accounts'
 import {
-  listMergedCalendarEvents,
-  listMicrosoftCalendars,
-  listMicrosoft365GroupCalendars,
+  afterCalendarEventCreated,
+  afterCalendarEventDeleted,
+  afterCalendarEventIconPatched,
+  afterCalendarEventSchedulePatched,
+  afterCalendarEventUpdated
+} from '../calendar-cache-mutations'
+import {
+  listCalendarAccountSyncStates,
+  listCalendarEventsCached,
+  syncCalendarAccount
+} from '../calendar-cache-service'
+import { syncCalendarFoldersForAccount } from '../calendar-folders-cache-service'
+import { getCalendarEventCached } from '../calendar-event-details-cache-service'
+import {
+  listCalendarsCached,
+  listM365GroupCalendarsCached
+} from '../calendar-folders-cache-service'
+import {
   patchMicrosoftCalendarColor,
   createTeamsMeetingForAccount,
   createSimpleCalendarEventForAccount,
   updateCalendarEventForAccount,
-  getCalendarEventForAccount,
   deleteCalendarEventForAccount,
   patchCalendarEventScheduleForAccount,
   patchCalendarEventCategories,
   buildCalendarSuggestionFromMessage
 } from '../calendar-service'
+import { transferCalendarEvent } from '../calendar-event-transfer'
 import { assertAppOnline } from '../network-status'
 
 export function registerCalendarIpc(): void {
@@ -38,11 +56,11 @@ export function registerCalendarIpc(): void {
   ipcMain.handle(
     IPC.calendar.listEvents,
     async (_event, args: CalendarListEventsInput): Promise<CalendarEventView[]> => {
-      assertAppOnline()
       const include = args.includeCalendars
-      return listMergedCalendarEvents(args.startIso, args.endIso, {
+      return listCalendarEventsCached(args.startIso, args.endIso, {
         focus: args.focusCalendar ?? undefined,
-        includeCalendars: Array.isArray(include) ? include : undefined
+        includeCalendars: Array.isArray(include) ? include : undefined,
+        forceRefresh: args.forceRefresh === true
       })
     }
   )
@@ -51,7 +69,7 @@ export function registerCalendarIpc(): void {
     IPC.calendar.listCalendars,
     async (_event, args: CalendarListCalendarsInput): Promise<CalendarGraphCalendarRow[]> => {
       assertAppOnline()
-      return listMicrosoftCalendars(args.accountId, { forceRefresh: args.forceRefresh === true })
+      return listCalendarsCached(args.accountId, { forceRefresh: args.forceRefresh === true })
     }
   )
   ipcMain.removeHandler(IPC.calendar.listMicrosoft365GroupCalendars)
@@ -62,7 +80,7 @@ export function registerCalendarIpc(): void {
       args: { accountId: string; offset?: number; limit?: number }
     ): Promise<CalendarM365GroupCalendarsPage> => {
       assertAppOnline()
-      return listMicrosoft365GroupCalendars(args.accountId, {
+      return listM365GroupCalendarsCached(args.accountId, {
         offset: args.offset,
         limit: args.limit
       })
@@ -104,7 +122,7 @@ export function registerCalendarIpc(): void {
       }
     ) => {
       assertAppOnline()
-      return createTeamsMeetingForAccount(args.accountId, {
+      const result = await createTeamsMeetingForAccount(args.accountId, {
         subject: args.subject,
         startIso: args.startIso,
         endIso: args.endIso,
@@ -112,6 +130,22 @@ export function registerCalendarIpc(): void {
         graphCalendarId: args.graphCalendarId ?? null,
         attendeeEmails: args.attendeeEmails
       })
+      await afterCalendarEventCreated(
+        args.accountId,
+        {
+          accountId: args.accountId,
+          graphCalendarId: args.graphCalendarId ?? null,
+          subject: args.subject,
+          startIso: args.startIso,
+          endIso: args.endIso,
+          isAllDay: false,
+          bodyHtml: args.bodyHtml ?? null,
+          attendeeEmails: args.attendeeEmails ?? null,
+          teamsMeeting: true
+        },
+        { id: result.id, webLink: result.webLink }
+      )
+      return result
     }
   )
   ipcMain.removeHandler(IPC.calendar.suggestFromMessage)
@@ -126,7 +160,9 @@ export function registerCalendarIpc(): void {
     IPC.calendar.createEvent,
     async (_event, input: CalendarSaveEventInput): Promise<CalendarSaveEventResult> => {
       assertAppOnline()
-      return createSimpleCalendarEventForAccount(input)
+      const result = await createSimpleCalendarEventForAccount(input)
+      await afterCalendarEventCreated(input.accountId, input, result)
+      return result
     }
   )
 
@@ -134,6 +170,7 @@ export function registerCalendarIpc(): void {
   ipcMain.handle(IPC.calendar.updateEvent, async (_event, input: CalendarUpdateEventInput): Promise<void> => {
     assertAppOnline()
     await updateCalendarEventForAccount(input)
+    await afterCalendarEventUpdated(input.accountId, input)
   })
 
   ipcMain.removeHandler(IPC.calendar.getEvent)
@@ -144,11 +181,14 @@ export function registerCalendarIpc(): void {
       if (!input?.accountId?.trim() || !input.graphEventId?.trim()) {
         throw new Error('Ungueltige Parameter fuer calendar:get-event.')
       }
-      return getCalendarEventForAccount({
-        accountId: input.accountId.trim(),
-        graphEventId: input.graphEventId.trim(),
-        graphCalendarId: input.graphCalendarId?.trim() || null
-      })
+      return getCalendarEventCached(
+        {
+          accountId: input.accountId.trim(),
+          graphEventId: input.graphEventId.trim(),
+          graphCalendarId: input.graphCalendarId?.trim() || null
+        },
+        { forceRefresh: input.forceRefresh === true }
+      )
     }
   )
 
@@ -156,6 +196,7 @@ export function registerCalendarIpc(): void {
   ipcMain.handle(IPC.calendar.deleteEvent, async (_event, input: CalendarDeleteEventInput): Promise<void> => {
     assertAppOnline()
     await deleteCalendarEventForAccount(input)
+    afterCalendarEventDeleted(input.accountId, input.graphEventId)
   })
 
   ipcMain.removeHandler(IPC.calendar.patchEventSchedule)
@@ -164,6 +205,26 @@ export function registerCalendarIpc(): void {
     async (_event, input: CalendarPatchScheduleInput): Promise<void> => {
       assertAppOnline()
       await patchCalendarEventScheduleForAccount(input)
+      afterCalendarEventSchedulePatched(input)
+    }
+  )
+
+  ipcMain.removeHandler(IPC.calendar.transferEvent)
+  ipcMain.handle(
+    IPC.calendar.transferEvent,
+    async (_event, input: CalendarTransferEventInput): Promise<CalendarSaveEventResult> => {
+      assertAppOnline()
+      return transferCalendarEvent(input)
+    }
+  )
+
+  ipcMain.removeHandler(IPC.calendar.patchEventIcon)
+  ipcMain.handle(
+    IPC.calendar.patchEventIcon,
+    async (_event, input: CalendarPatchEventIconInput): Promise<void> => {
+      const graphEventId = input.graphEventId?.trim()
+      if (!graphEventId) throw new Error('graphEventId fehlt.')
+      afterCalendarEventIconPatched(input)
     }
   )
 
@@ -182,5 +243,22 @@ export function registerCalendarIpc(): void {
         args.graphCalendarId ?? null
       )
     }
+  )
+
+  ipcMain.removeHandler(IPC.calendar.syncAccount)
+  ipcMain.handle(IPC.calendar.syncAccount, async (_event, accountId: unknown): Promise<void> => {
+    assertAppOnline()
+    const id = typeof accountId === 'string' ? accountId.trim() : ''
+    if (!id) throw new Error('accountId fehlt.')
+    await syncCalendarFoldersForAccount(id).catch((e) => {
+      console.warn('[calendar] Ordner-Sync:', id, e)
+    })
+    await syncCalendarAccount(id)
+  })
+
+  ipcMain.removeHandler(IPC.calendar.getAccountSyncStates)
+  ipcMain.handle(
+    IPC.calendar.getAccountSyncStates,
+    async (): Promise<CalendarAccountSyncStateRow[]> => listCalendarAccountSyncStates()
   )
 }

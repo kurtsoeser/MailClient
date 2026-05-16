@@ -63,3 +63,10 @@ export async function clearGoogleSyncMetaForAccount(accountId: string): Promise<
   delete meta.calendarEventSyncTokenByAccount[accountId]
   await saveGoogleSyncMeta(meta)
 }
+
+/** Nur Gmail-Mail-History-Cursor — Kalender-SyncToken bleiben erhalten. */
+export async function clearGmailMailHistoryCursorForAccount(accountId: string): Promise<void> {
+  const meta = await loadGoogleSyncMeta()
+  delete meta.gmailHistoryIdByAccount[accountId]
+  await saveGoogleSyncMeta(meta)
+}

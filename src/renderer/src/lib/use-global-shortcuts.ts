@@ -51,7 +51,6 @@ export function useGlobalShortcuts(): void {
       const shellMode = useAppModeStore.getState().mode
       if (
         shellMode === 'home' ||
-        shellMode === 'rules' ||
         shellMode === 'calendar' ||
         shellMode === 'chat'
       ) {
@@ -130,7 +129,11 @@ export function useGlobalShortcuts(): void {
       }
       if (key === 'Delete' || key === 'Backspace') {
         e.preventDefault()
-        void mail.deleteMessage(selected.id)
+        if (mail.listKind === 'todo') {
+          void mail.removeMailTodoRecordsForMessage(selected.id)
+        } else {
+          void mail.deleteMessage(selected.id)
+        }
         return
       }
 

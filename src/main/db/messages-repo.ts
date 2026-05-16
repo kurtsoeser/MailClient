@@ -20,6 +20,7 @@ interface MessageRow {
   received_at: string | null
   is_read: number
   is_flagged: number
+  follow_up_flag_status?: string | null
   has_attachments: number
   importance: string | null
   snoozed_until?: string | null
@@ -96,6 +97,8 @@ export interface UpsertMessageInput {
   receivedAt: string | null
   isRead: number
   isFlagged: number
+  /** Graph: notFlagged | flagged | complete — Gmail: notFlagged | flagged */
+  followUpFlagStatus: string
   hasAttachments: number
   importance: string | null
   changeKey: string | null
@@ -130,13 +133,13 @@ export function upsertMessages(input: UpsertMessageInput[]): void {
       account_id, folder_id, thread_id, remote_id, remote_thread_id,
       subject, from_addr, from_name, to_addrs, cc_addrs, bcc_addrs,
       snippet, body_html, body_text, sent_at, received_at,
-      is_read, is_flagged, has_attachments, importance, change_key,
+      is_read, is_flagged, follow_up_flag_status, has_attachments, importance, change_key,
       list_unsubscribe, list_unsubscribe_post, list_id, last_synced_at
     ) VALUES (
       @accountId, @folderId, @threadId, @remoteId, @remoteThreadId,
       @subject, @fromAddr, @fromName, @toAddrs, @ccAddrs, @bccAddrs,
       @snippet, @bodyHtml, @bodyText, @sentAt, @receivedAt,
-      @isRead, @isFlagged, @hasAttachments, @importance, @changeKey,
+      @isRead, @isFlagged, @followUpFlagStatus, @hasAttachments, @importance, @changeKey,
       @listUnsubscribe, @listUnsubscribePost, @listId, datetime('now')
     )
     ON CONFLICT(account_id, remote_id) DO UPDATE SET
@@ -156,6 +159,7 @@ export function upsertMessages(input: UpsertMessageInput[]): void {
       received_at      = excluded.received_at,
       is_read          = excluded.is_read,
       is_flagged       = excluded.is_flagged,
+      follow_up_flag_status = excluded.follow_up_flag_status,
       has_attachments  = excluded.has_attachments,
       importance       = excluded.importance,
       change_key       = excluded.change_key,
@@ -226,6 +230,38 @@ export function listMessageIdsByRemoteIds(
     )
     .all(accountId, ...uniq)
   for (const row of rows) out.set(row.remote_id, row.id)
+  return out
+}
+
+/** Vor Mail-Upsert: Follow-up-Status fuer Abgleich mit Graph (flagged|complete|notFlagged). */
+export interface MessageFollowUpSyncSnapshot {
+  localId: number
+  followUpFlagStatus: string | null
+  wasActivelyFlagged: boolean
+}
+
+export function getMessageFlagSnapshotsByRemoteIds(
+  accountId: string,
+  remoteIds: string[]
+): Map<string, MessageFollowUpSyncSnapshot> {
+  const out = new Map<string, MessageFollowUpSyncSnapshot>()
+  const uniq = Array.from(new Set(remoteIds.filter((x) => x.length > 0)))
+  if (uniq.length === 0) return out
+  const db = getDb()
+  const placeholders = uniq.map(() => '?').join(',')
+  const rows = db
+    .prepare<unknown[], { id: number; remote_id: string; is_flagged: number; follow_up_flag_status: string | null }>(
+      `SELECT id, remote_id, is_flagged, follow_up_flag_status FROM messages
+       WHERE account_id = ? AND remote_id IN (${placeholders})`
+    )
+    .all(accountId, ...uniq)
+  for (const row of rows) {
+    out.set(row.remote_id, {
+      localId: row.id,
+      followUpFlagStatus: row.follow_up_flag_status ?? null,
+      wasActivelyFlagged: !!row.is_flagged
+    })
+  }
   return out
 }
 
@@ -609,7 +645,10 @@ export function setMessageReadLocal(id: number, isRead: boolean): void {
 
 export function setMessageFlaggedLocal(id: number, isFlagged: boolean): void {
   const db = getDb()
-  db.prepare('UPDATE messages SET is_flagged = ? WHERE id = ?').run(isFlagged ? 1 : 0, id)
+  const status = isFlagged ? 'flagged' : 'notFlagged'
+  db.prepare(
+    'UPDATE messages SET is_flagged = ?, follow_up_flag_status = ? WHERE id = ?'
+  ).run(isFlagged ? 1 : 0, status, id)
 }
 
 export function setMessageHasAttachmentsLocal(id: number, value: boolean): void {
@@ -1020,6 +1059,64 @@ export function searchMessageParticipantEmails(args: {
     if (out.length >= lim) break
   }
   return out.slice(0, lim)
+}
+
+const BULK_UNFLAG_MAX_IDS = 50_000
+
+/**
+ * Lokale Mails mit Kennzeichnung fuer Batch-Entkennung (Graph/Gmail PATCH).
+ * `excludeDeletedJunk`: Ordner well_known deleteditems/junkemail auslassen (wie UI-Filter).
+ */
+export function countFlaggedMessageIdsForBulkUnflag(
+  accountId: string,
+  excludeDeletedJunk: boolean
+): number {
+  const id = accountId.trim()
+  if (!id) return 0
+  const exclude = excludeDeletedJunk ? 1 : 0
+  const row = getDb()
+    .prepare(
+      `SELECT COUNT(*) as c
+       FROM messages m
+       LEFT JOIN folders f ON f.id = m.folder_id
+       WHERE m.account_id = ?
+         AND m.is_flagged = 1
+         AND (
+           ? = 0
+           OR m.folder_id IS NULL
+           OR f.id IS NULL
+           OR LOWER(COALESCE(f.well_known, '')) NOT IN ('deleteditems', 'junkemail')
+         )`
+    )
+    .get(id, exclude) as { c: number } | undefined
+  return row?.c ?? 0
+}
+
+export function listFlaggedMessageIdsForBulkUnflag(
+  accountId: string,
+  excludeDeletedJunk: boolean
+): number[] {
+  const id = accountId.trim()
+  if (!id) return []
+  const exclude = excludeDeletedJunk ? 1 : 0
+  const rows = getDb()
+    .prepare(
+      `SELECT m.id
+       FROM messages m
+       LEFT JOIN folders f ON f.id = m.folder_id
+       WHERE m.account_id = ?
+         AND m.is_flagged = 1
+         AND (
+           ? = 0
+           OR m.folder_id IS NULL
+           OR f.id IS NULL
+           OR LOWER(COALESCE(f.well_known, '')) NOT IN ('deleteditems', 'junkemail')
+         )
+       ORDER BY m.id ASC
+       LIMIT ${BULK_UNFLAG_MAX_IDS}`
+    )
+    .all(id, exclude) as Array<{ id: number }>
+  return rows.map((r) => r.id)
 }
 
 /** Zuletzt vorkommende Empfaenger-Adressen ohne Suchbegriff (Compose-Autocomplete beim Fokus). */

@@ -32,11 +32,13 @@ import {
   Tag,
   StickyNote,
   FolderInput,
-  SquareArrowOutUpRight
+  SquareArrowOutUpRight,
+  ListTodo
 
 } from 'lucide-react'
 
 import type { TFunction } from 'i18next'
+import { useCreateCloudTaskUiStore } from '@/stores/create-cloud-task-ui'
 
 const MAIL_CTX_TODO_FALLBACK = {
   today: 'ToDo: Heute',
@@ -115,6 +117,10 @@ export interface MailContextMenuUi {
 
   deletedItemsFolder?: boolean
 
+  /** ToDo-Mail-Ansicht: Loeschen entfernt nur lokale Mail-ToDos, nicht die Mail. */
+
+  removeMailTodoOnly?: boolean
+
   /** Optional i18next translate function for dynamic menu labels. */
 
   t?: TFunction
@@ -122,6 +128,10 @@ export interface MailContextMenuUi {
   /** Panel „Verschieben“ (Suche, Zuletzt, …). */
 
   moveSubmenuContent?: ReactNode
+
+  /** Microsoft/Google-Konto – „Als Cloud-Aufgabe anlegen“ anzeigen. */
+
+  allowsCloudTaskCreate?: boolean
 
 }
 
@@ -309,20 +319,22 @@ export function buildMailContextItems(
 
   const isBulk = ids.length > 1
 
-  const deleteLabel =
+  const tr = ui.t
 
-    ui.deletedItemsFolder === true
-
+  const deleteLabel = ui.removeMailTodoOnly
+    ? isBulk
+      ? tr
+        ? tr('mail.contextMenu.removeTodoOnlyBulk', { count: ids.length })
+        : `To-Do-Eintraege entfernen (${ids.length})`
+      : tr
+        ? tr('mail.contextMenu.removeTodoOnly')
+        : 'To-Do-Eintrag entfernen (Mail bleibt)'
+    : ui.deletedItemsFolder === true
       ? isBulk
-
         ? `Endgueltig loeschen (${ids.length})`
-
         : 'Endgueltig loeschen'
-
       : isBulk
-
         ? `Loeschen (${ids.length})`
-
         : 'Loeschen'
 
   const ctx = resolveContextMessages(msg, ui)
@@ -370,8 +382,6 @@ export function buildMailContextItems(
 
 
   const anyWaiting = ctx.some((m) => m.waitingForReplyUntil)
-
-  const tr = ui.t
 
 
 
@@ -664,6 +674,32 @@ export function buildMailContextItems(
       }
 
     },
+
+    ...(ui.allowsCloudTaskCreate && !isBulk
+
+      ? [
+
+          { id: 'sep-cloud-task', label: '', separator: true },
+
+          {
+
+            id: 'create-cloud-task',
+
+            label: tr ? tr('mail.createCloudTask.menu') : 'Als Cloud-Aufgabe anlegen',
+
+            icon: ListTodo,
+
+            onSelect: (): void => {
+
+              useCreateCloudTaskUiStore.getState().open(msg)
+
+            }
+
+          }
+
+        ]
+
+      : []),
 
     { id: 'sep-wait', label: '', separator: true },
 

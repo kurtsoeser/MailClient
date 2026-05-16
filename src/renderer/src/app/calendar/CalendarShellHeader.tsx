@@ -19,7 +19,7 @@ import {
 import {
   CalendarPosteingangToolbarButton,
   CalendarPreviewPaneToolbarButton
-} from '@/app/calendar/CalendarRightPosteingang'
+} from '@/app/calendar/CalendarPosteingangToolbar'
 import { MAX_TIME_GRID_SPAN_DAYS, viewIdToLabel } from '@/app/calendar/calendar-shell-view-helpers'
 import type { TimeGridSlotMinutes } from '@/app/calendar/calendar-shell-storage'
 import {
@@ -140,42 +140,44 @@ export function CalendarShellHeader(props: CalendarShellHeaderProps): JSX.Elemen
           'calendar-shell-header-area-date flex min-h-0 min-w-0 items-center justify-center gap-1 sm:gap-2'
         )}
       >
-        <button
-          type="button"
-          aria-label={t('calendar.header.prevAria')}
-          onClick={onCalendarPrev}
-          className={weekNavBtnClass}
-        >
-          <ChevronLeft className={moduleColumnHeaderIconGlyphClass} />
-        </button>
-        <div className="min-w-0 max-w-full flex-1 text-center sm:max-w-[min(100%,28rem)]">
-          <h1
-            className={cn(
-              'truncate font-semibold tracking-tight text-foreground',
-              'text-[15px] leading-snug sm:text-[16px] lg:text-[18px]'
-            )}
+        <>
+          <button
+            type="button"
+            aria-label={t('calendar.header.prevAria')}
+            onClick={onCalendarPrev}
+            className={weekNavBtnClass}
           >
-            {rangeTitle}
-          </h1>
-          <p className="truncate text-[11px] text-muted-foreground sm:text-[12px]">
-            {t('calendar.header.weekPrefix')}{' '}
-            {getWeek(weekAnchor, { weekStartsOn: 1, firstWeekContainsDate: 4 })} ·{' '}
-            {format(weekAnchor, 'MMMM yyyy', { locale: dateFnsLocale })}
-          </p>
-          {dragCreateHint ? (
-            <p className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-muted-foreground sm:text-[11px]">
-              {dragCreateHint}
+            <ChevronLeft className={moduleColumnHeaderIconGlyphClass} />
+          </button>
+          <div className="min-w-0 max-w-full flex-1 text-center sm:max-w-[min(100%,28rem)]">
+            <h1
+              className={cn(
+                'truncate font-semibold tracking-tight text-foreground',
+                'text-[15px] leading-snug sm:text-[16px] lg:text-[18px]'
+              )}
+            >
+              {rangeTitle}
+            </h1>
+            <p className="truncate text-[11px] text-muted-foreground sm:text-[12px]">
+              {t('calendar.header.weekPrefix')}{' '}
+              {getWeek(weekAnchor, { weekStartsOn: 1, firstWeekContainsDate: 4 })} ·{' '}
+              {format(weekAnchor, 'MMMM yyyy', { locale: dateFnsLocale })}
             </p>
-          ) : null}
-        </div>
-        <button
-          type="button"
-          aria-label={t('calendar.header.nextAria')}
-          onClick={onCalendarNext}
-          className={weekNavBtnClass}
-        >
-          <ChevronRight className={moduleColumnHeaderIconGlyphClass} />
-        </button>
+            {dragCreateHint ? (
+              <p className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-muted-foreground sm:text-[11px]">
+                {dragCreateHint}
+              </p>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            aria-label={t('calendar.header.nextAria')}
+            onClick={onCalendarNext}
+            className={weekNavBtnClass}
+          >
+            <ChevronRight className={moduleColumnHeaderIconGlyphClass} />
+          </button>
+        </>
       </div>
 
       <div

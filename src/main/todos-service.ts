@@ -17,8 +17,10 @@ import {
   listTodoMessagesWithMeta,
   listOpenTodoMessagesWithDueAtInRange,
   countOpenTodosGlobal,
-  countDoneTodosGlobal
+  countDoneTodosGlobal,
+  deleteTodosByMessageId
 } from './db/todos-repo'
+import { graphTryDeleteFlaggedEmailTasksForMessage } from './graph/tasks-graph'
 
 function broadcastMailChanged(accountId: string): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -246,6 +248,38 @@ export function setTodoScheduleForMessage(
   broadcastMailChanged(msg.accountId)
 }
 
+/**
+ * Wenn Microsoft Graph den Follow-up-Status auf `complete` setzt, offenes lokales
+ * Mail-ToDo abschliessen (OWA „Erledigt“ ohne Klick in dieser App).
+ */
+export function completeOpenTodoFromGraphFlagIfNeeded(messageId: number): boolean {
+  const msg = getMessageById(messageId)
+  if (!msg) return false
+  const open = getOpenTodoByMessageId(messageId)
+  if (!open) return false
+
+  const prevK = open.dueKind
+  const prevA = open.dueAt
+  markTodoDone(open.id)
+  const subj = truncate(msg.subject ?? '(Kein Betreff)', 50)
+  recordAction({
+    messageId,
+    accountId: msg.accountId,
+    actionType: 'remove-todo',
+    source: 'graph-flag',
+    payload: {
+      todoRowId: open.id,
+      previousTodoDueKind: prevK,
+      previousTodoDueAt: prevA,
+      previousTodoStartAt: open.todoStartAt ?? null,
+      previousTodoEndAt: open.todoEndAt ?? null,
+      label: `ToDo erledigt (Mail follow-up complete): ${subj}`
+    }
+  })
+  broadcastMailChanged(msg.accountId)
+  return true
+}
+
 export function completeTodoForMessage(messageId: number): void {
   const msg = getMessageById(messageId)
   if (!msg) throw new Error('Mail nicht gefunden.')
@@ -271,6 +305,31 @@ export function completeTodoForMessage(messageId: number): void {
     }
   })
   broadcastMailChanged(msg.accountId)
+}
+
+/**
+ * Entfernt alle lokalen Mail-ToDo-Zeilen zu einer Nachricht (offen und erledigt),
+ * ohne die Mail zu loeschen oder zu verschieben.
+ * Microsoft 365: zusaetzlich Aufgaben in „Gekennzeichnete E-Mail“ loeschen, falls per Graph auffindbar.
+ */
+export async function removeMailTodoRecordsForMessage(messageId: number): Promise<{ removed: number }> {
+  const msg = getMessageById(messageId)
+  if (!msg) throw new Error('Mail nicht gefunden.')
+
+  const n = deleteTodosByMessageId(messageId)
+  if (n > 0) {
+    broadcastMailChanged(msg.accountId)
+  }
+
+  if (n > 0 && msg.accountId.startsWith('ms:') && msg.remoteId) {
+    try {
+      await graphTryDeleteFlaggedEmailTasksForMessage(msg.accountId, msg.remoteId)
+    } catch {
+      // optional: Graph-Filter nicht unterstuetzt oder offline
+    }
+  }
+
+  return { removed: n }
 }
 
 export function undoAddTodo(todoRowId: number): string {

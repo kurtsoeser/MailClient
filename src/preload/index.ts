@@ -25,6 +25,7 @@ import {
   type ComposeRenameDriveExplorerFavoriteInput,
   type ComposeReorderDriveExplorerFavoritesInput,
   type UndoResult,
+  type RemoveMailTodoRecordsResult,
   type TodoDueKindOpen,
   type TodoDueKindList,
   type TodoCountsAll,
@@ -42,6 +43,7 @@ import {
   type CalendarListCalendarsInput,
   type CalendarM365GroupCalendarsPage,
   type CalendarListEventsInput,
+  type CalendarPatchEventIconInput,
   type CalendarPatchScheduleInput,
   type CalendarPatchCalendarColorInput,
   type PatchAccountInput,
@@ -49,10 +51,18 @@ import {
   type TaskListRow,
   type TasksCreateTaskInput,
   type TasksDeleteTaskInput,
+  type TasksBulkDeleteCompletedFlaggedEmailInput,
+  type TasksBulkDeleteCompletedFlaggedEmailResult,
   type TasksListListsInput,
   type TasksListTasksInput,
   type TasksPatchTaskInput,
+  type TasksClearPlannedScheduleInput,
+  type TasksListPlannedSchedulesInput,
+  type TasksSetPlannedScheduleInput,
+  type TaskPlannedScheduleDto,
   type TasksUpdateTaskInput,
+  type TasksCreateMailCloudTaskFromMessageInput,
+  type MailCloudTaskLinkDto,
   type WorkflowBoard,
   type WorkflowColumn,
   type MailMasterCategory,
@@ -63,6 +73,9 @@ import {
   type MetaFolderUpdateInput,
   type TeamsChatSummary,
   type TeamsChatMessageView,
+  type TeamsChatPopoutOpenInput,
+  type TeamsChatPopoutRef,
+  type TeamsChatPopoutListItem,
   type SettingsBackupExportResult,
   type SettingsBackupPickResult,
   type SettingsBackupPayload,
@@ -86,6 +99,11 @@ import {
   type PeopleSetFavoriteInput,
   type PeopleSyncAccountResult,
   type PeopleUpdateContactInput,
+  type ClearLocalMailCacheResult,
+  type MailBulkUnflagInput,
+  type MailBulkUnflagResult,
+  type MailBulkUnflagProgressPayload,
+  type ClearLocalTasksCacheResult,
   type NotionAppendEventInput,
   type NotionAppendMailInput,
   type NotionAppendResult,
@@ -216,6 +234,23 @@ const api = {
       text: string
     }): Promise<void> => ipcRenderer.invoke(IPC.graph.sendTeamsChatMessage, args)
   },
+  teamsChatPopout: {
+    open: (input: TeamsChatPopoutOpenInput): Promise<void> =>
+      ipcRenderer.invoke(IPC.teamsChatPopout.open, input),
+    close: (ref: TeamsChatPopoutRef): Promise<void> =>
+      ipcRenderer.invoke(IPC.teamsChatPopout.close, ref),
+    closeAll: (): Promise<void> => ipcRenderer.invoke(IPC.teamsChatPopout.closeAll),
+    focus: (ref: TeamsChatPopoutRef): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.teamsChatPopout.focus, ref),
+    isOpen: (ref: TeamsChatPopoutRef): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.teamsChatPopout.isOpen, ref),
+    listOpen: (): Promise<TeamsChatPopoutListItem[]> =>
+      ipcRenderer.invoke(IPC.teamsChatPopout.listOpen),
+    getAlwaysOnTop: (ref: TeamsChatPopoutRef): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.teamsChatPopout.getAlwaysOnTop, ref),
+    setAlwaysOnTop: (ref: TeamsChatPopoutRef & { alwaysOnTop: boolean }): Promise<void> =>
+      ipcRenderer.invoke(IPC.teamsChatPopout.setAlwaysOnTop, ref)
+  },
   notes: {
     getMail: (messageId: number): Promise<UserNote | null> =>
       ipcRenderer.invoke(IPC.notes.getMail, messageId),
@@ -298,6 +333,10 @@ const api = {
       ipcRenderer.invoke(IPC.mail.search, { query, limit }),
     syncAccount: (accountId: string): Promise<{ folders: number; inboxMessages: number }> =>
       ipcRenderer.invoke(IPC.mail.syncAccount, accountId),
+    clearLocalMailCache: (accountId: string): Promise<ClearLocalMailCacheResult> =>
+      ipcRenderer.invoke(IPC.mail.clearLocalMailCache, accountId),
+    bulkUnflagFlaggedMessages: (input: MailBulkUnflagInput): Promise<MailBulkUnflagResult> =>
+      ipcRenderer.invoke(IPC.mail.bulkUnflagFlaggedMessages, input),
     syncFolder: (folderId: number): Promise<number> =>
       ipcRenderer.invoke(IPC.mail.syncFolder, folderId),
     setRead: (messageId: number, isRead: boolean): Promise<void> =>
@@ -347,6 +386,8 @@ const api = {
     }): Promise<void> => ipcRenderer.invoke(IPC.mail.setTodoScheduleForMessage, args),
     completeTodoForMessage: (messageId: number): Promise<void> =>
       ipcRenderer.invoke(IPC.mail.completeTodoForMessage, messageId),
+    removeMailTodoRecordsForMessage: (messageId: number): Promise<RemoveMailTodoRecordsResult> =>
+      ipcRenderer.invoke(IPC.mail.removeMailTodoRecordsForMessage, messageId),
     listWaitingMessages: (args?: { limit?: number }): Promise<MailListItem[]> =>
       ipcRenderer.invoke(IPC.mail.listWaitingMessages, args ?? {}),
     setWaitingForMessage: (args: {
@@ -467,20 +508,32 @@ const api = {
       ipcRenderer.invoke(IPC.calendar.getEvent, input),
     deleteEvent: (input: CalendarDeleteEventInput): Promise<void> =>
       ipcRenderer.invoke(IPC.calendar.deleteEvent, input),
+    transferEvent: (
+      input: import('@shared/types').CalendarTransferEventInput
+    ): Promise<import('@shared/types').CalendarSaveEventResult> =>
+      ipcRenderer.invoke(IPC.calendar.transferEvent, input),
     patchEventSchedule: (input: CalendarPatchScheduleInput): Promise<void> =>
       ipcRenderer.invoke(IPC.calendar.patchEventSchedule, input),
+    patchEventIcon: (input: CalendarPatchEventIconInput): Promise<void> =>
+      ipcRenderer.invoke(IPC.calendar.patchEventIcon, input),
     patchEventCategories: (args: {
       accountId: string
       graphEventId: string
       categories: string[]
       graphCalendarId?: string | null
-    }): Promise<void> => ipcRenderer.invoke(IPC.calendar.patchEventCategories, args)
+    }): Promise<void> => ipcRenderer.invoke(IPC.calendar.patchEventCategories, args),
+    syncAccount: (accountId: string): Promise<void> =>
+      ipcRenderer.invoke(IPC.calendar.syncAccount, accountId),
+    getAccountSyncStates: (): Promise<import('@shared/types').CalendarAccountSyncStateRow[]> =>
+      ipcRenderer.invoke(IPC.calendar.getAccountSyncStates)
   },
   tasks: {
     listLists: (args: TasksListListsInput): Promise<TaskListRow[]> =>
       ipcRenderer.invoke(IPC.tasks.listLists, args),
     listTasks: (args: TasksListTasksInput): Promise<TaskItemRow[]> =>
       ipcRenderer.invoke(IPC.tasks.listTasks, args),
+    clearLocalTasksCache: (accountId: string): Promise<ClearLocalTasksCacheResult> =>
+      ipcRenderer.invoke(IPC.tasks.clearLocalTasksCache, accountId),
     createTask: (input: TasksCreateTaskInput): Promise<TaskItemRow> =>
       ipcRenderer.invoke(IPC.tasks.createTask, input),
     updateTask: (input: TasksUpdateTaskInput): Promise<TaskItemRow> =>
@@ -488,7 +541,22 @@ const api = {
     patchTask: (input: TasksPatchTaskInput): Promise<TaskItemRow> =>
       ipcRenderer.invoke(IPC.tasks.patchTask, input),
     deleteTask: (input: TasksDeleteTaskInput): Promise<void> =>
-      ipcRenderer.invoke(IPC.tasks.deleteTask, input)
+      ipcRenderer.invoke(IPC.tasks.deleteTask, input),
+    bulkDeleteCompletedFlaggedEmailTasks: (
+      input: TasksBulkDeleteCompletedFlaggedEmailInput
+    ): Promise<TasksBulkDeleteCompletedFlaggedEmailResult> =>
+      ipcRenderer.invoke(IPC.tasks.bulkDeleteCompletedFlaggedEmailTasks, input),
+    listPlannedSchedules: (args: TasksListPlannedSchedulesInput): Promise<TaskPlannedScheduleDto[]> =>
+      ipcRenderer.invoke(IPC.tasks.listPlannedSchedules, args),
+    setPlannedSchedule: (input: TasksSetPlannedScheduleInput): Promise<void> =>
+      ipcRenderer.invoke(IPC.tasks.setPlannedSchedule, input),
+    clearPlannedSchedule: (input: TasksClearPlannedScheduleInput): Promise<void> =>
+      ipcRenderer.invoke(IPC.tasks.clearPlannedSchedule, input),
+    listMailCloudTaskLinks: (): Promise<MailCloudTaskLinkDto[]> =>
+      ipcRenderer.invoke(IPC.tasks.listMailCloudTaskLinks),
+    createMailCloudTaskFromMessage: (
+      input: TasksCreateMailCloudTaskFromMessageInput
+    ): Promise<TaskItemRow> => ipcRenderer.invoke(IPC.tasks.createMailCloudTaskFromMessage, input)
   },
   people: {
     list: (input: PeopleListInput): Promise<PeopleContactView[]> =>
@@ -589,6 +657,37 @@ const api = {
         ipcRenderer.off('mail:changed', listener)
       }
     },
+    onMailBulkUnflagProgress: (handler: (payload: MailBulkUnflagProgressPayload) => void): (() => void) => {
+      const listener = (_e: IpcRendererEvent, payload: MailBulkUnflagProgressPayload): void =>
+        handler(payload)
+      ipcRenderer.on('mail:bulk-unflag-progress', listener)
+      return (): void => {
+        ipcRenderer.off('mail:bulk-unflag-progress', listener)
+      }
+    },
+    onCalendarChanged: (handler: (payload: { accountId: string }) => void): (() => void) => {
+      const listener = (_e: IpcRendererEvent, payload: { accountId: string }): void =>
+        handler(payload)
+      ipcRenderer.on('calendar:changed', listener)
+      return (): void => {
+        ipcRenderer.off('calendar:changed', listener)
+      }
+    },
+    onCalendarSyncStatus: (handler: (status: SyncStatus) => void): (() => void) => {
+      const listener = (_e: IpcRendererEvent, status: SyncStatus): void => handler(status)
+      ipcRenderer.on('calendar:sync-status', listener)
+      return (): void => {
+        ipcRenderer.off('calendar:sync-status', listener)
+      }
+    },
+    onTasksChanged: (handler: (payload: { accountId: string }) => void): (() => void) => {
+      const listener = (_e: IpcRendererEvent, payload: { accountId: string }): void =>
+        handler(payload)
+      ipcRenderer.on('tasks:changed', listener)
+      return (): void => {
+        ipcRenderer.off('tasks:changed', listener)
+      }
+    },
     onNotesChanged: (
       handler: (payload: {
         kind?: UserNoteKind
@@ -609,6 +708,13 @@ const api = {
       ipcRenderer.on('notes:changed', listener)
       return (): void => {
         ipcRenderer.off('notes:changed', listener)
+      }
+    },
+    onTeamsChatPopoutClosed: (handler: (payload: TeamsChatPopoutRef) => void): (() => void) => {
+      const listener = (_e: IpcRendererEvent, payload: TeamsChatPopoutRef): void => handler(payload)
+      ipcRenderer.on('teams-chat-popout:closed', listener)
+      return (): void => {
+        ipcRenderer.off('teams-chat-popout:closed', listener)
       }
     }
   },

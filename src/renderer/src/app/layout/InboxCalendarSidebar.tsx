@@ -106,16 +106,6 @@ export function InboxCalendarSidebar({
     [accounts]
   )
 
-  const expandConversationMessageIds = useCallback(async (mail: MailListItem): Promise<number[]> => {
-    const tk = mail.remoteThreadId?.trim()
-    if (!tk) return [mail.id]
-    const list = await window.mailClient.mail
-      .listMessagesByThreads({ accountId: mail.accountId, threadKeys: [tk] })
-      .catch(() => [] as MailListItem[])
-    const ids = list.map((m) => m.id).filter((n) => Number.isFinite(n))
-    return ids.length > 0 ? [...new Set(ids)] : [mail.id]
-  }, [])
-
   const loadAgenda = useCallback(
     (opts?: { force?: boolean }): void => {
       void loadAgendaFromCache(calendarLinkedAccounts, opts)
@@ -136,6 +126,9 @@ export function InboxCalendarSidebar({
   }, [loadAgenda])
 
   useEffect(() => {
+    if (!window.mailClient?.events?.onMailChanged) {
+      return undefined
+    }
     const off = window.mailClient.events.onMailChanged(() => {
       loadAgenda({ force: true })
     })
@@ -165,17 +158,7 @@ export function InboxCalendarSidebar({
       const range = defaultScheduleForCalendarDayFc(dateStr, 'local')
       void (async (): Promise<void> => {
         try {
-          const idSet = new Set<number>()
-          for (const id of dragged) {
-            const anchor = await window.mailClient.mail.getMessage(id).catch(() => null)
-            if (anchor) {
-              const expanded = await expandConversationMessageIds(anchor as MailListItem)
-              for (const x of expanded) idSet.add(x)
-            } else {
-              idSet.add(id)
-            }
-          }
-          for (const mid of idSet) {
+          for (const mid of dragged) {
             await setTodoScheduleForMessage(mid, range.startIso, range.endIso, {
               skipSelectedRefresh: true
             })
@@ -187,7 +170,7 @@ export function InboxCalendarSidebar({
         }
       })()
     },
-    [expandConversationMessageIds, setTodoScheduleForMessage, loadAgenda]
+    [setTodoScheduleForMessage, loadAgenda]
   )
 
   const inboxDropHandlers = useMemo(
