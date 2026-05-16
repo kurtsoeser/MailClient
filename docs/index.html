@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      data-i18n="meta.description"
+      content="Chronell ist kein E-Mail-Client. Es ist ein System für deine Zeit."
+    />
+    <title>Chronell</title>
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Chronell" />
+    <meta property="og:description" content="Stop managing your inbox. Start managing your time." />
+    <meta property="og:image" content="https://kurtsoeser.github.io/Chronell/assets/og-image.svg" />
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/site.css" />
+  </head>
+  <body>
+    <div class="mesh-bg" aria-hidden="true">
+      <div class="mesh-orb"></div>
+    </div>
+
+    <header class="site-header">
+      <div class="container">
+        <a href="#" class="brand" aria-label="Chronell">
+          <img src="assets/logo-chronell-orbit.svg" alt="" class="brand-logo" width="32" height="32" />
+          Chronell
+        </a>
+        <nav class="nav-desktop" aria-label="Main">
+          <a href="#method" data-i18n="nav.method">Die Methode</a>
+          <a href="#compare" data-i18n="nav.compare">vs Outlook</a>
+          <a href="#features" data-i18n="nav.features">Features</a>
+          <a href="#modules" data-i18n="nav.modules">Module</a>
+        </nav>
+        <div class="header-actions">
+          <div class="lang-toggle" role="group" aria-label="Language">
+            <button type="button" data-lang="de" class="active">DE</button>
+            <button type="button" data-lang="en">EN</button>
+          </div>
+          <a class="btn btn-ghost nav-github" data-i18n="nav.github" href="https://github.com/kurtsoeser/Chronell" target="_blank" rel="noopener">GitHub</a>
+          <a href="#" class="btn btn-primary" data-waitlist data-i18n="nav.waitlist">Warteliste</a>
+          <button type="button" class="nav-toggle" aria-label="Menu" aria-expanded="false">
+            <span></span><span></span><span></span>
+          </button>
+        </div>
+      </div>
+      <nav class="nav-mobile" aria-label="Mobile">
+        <a href="#method" data-i18n="nav.method">Die Methode</a>
+        <a href="#compare" data-i18n="nav.compare">vs Outlook</a>
+        <a href="#features" data-i18n="nav.features">Features</a>
+        <a href="#modules" data-i18n="nav.modules">Module</a>
+        <a href="#" data-waitlist data-i18n="nav.waitlist">Warteliste</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero section">
+        <div class="container">
+          <h1 class="hero-tagline reveal" data-i18n="hero.tagline">
+            Hör auf, deinen Posteingang zu verwalten. Fang an, deine Zeit zu steuern.
+          </h1>
+          <p class="hero-positioning reveal reveal-delay-1" data-i18n="hero.positioning">
+            Chronell ist kein E-Mail-Client. Es ist ein System für deine Zeit.
+          </p>
+          <p class="hero-subline reveal reveal-delay-1" data-i18n="hero.subline">
+            Microsoft 365 und Google in einer ruhigen Desktop-Arbeitszentrale.
+          </p>
+          <div class="hero-ctas reveal reveal-delay-2">
+            <a href="#" class="btn btn-primary" data-waitlist>
+              <span class="full" data-i18n="hero.ctaWaitlist">Auf die Warteliste</span>
+            </a>
+            <a href="#method" class="btn btn-ghost" data-i18n="hero.ctaMethod">Methode entdecken</a>
+          </div>
+          <div class="hero-search glass-panel reveal reveal-delay-3" data-i18n="hero.searchPlaceholder">
+            Suchen, entscheiden, planen…
+          </div>
+        </div>
+      </section>
+
+      <section class="quote-section">
+        <div class="container">
+          <blockquote class="quote-block glass-panel-elevated reveal" data-i18n="quote.text">
+            Dein Posteingang ist kein Arbeitsplatz.
+          </blockquote>
+        </div>
+      </section>
+
+      <section id="method" class="section">
+        <div class="container">
+          <div class="method-intro text-center reveal">
+            <span class="section-eyebrow" data-i18n="method.eyebrow">Die Chronell-Methode</span>
+            <h2 class="section-title" data-i18n="method.title">Ein System, das Zeit in Fortschritt verwandelt</h2>
+            <p class="method-oneliner" data-i18n="method.idea">
+              Die meisten verwalten E-Mails. Mit Chronell verwaltest du deine Zeit.
+            </p>
+            <p class="method-oneliner" data-i18n="method.oneliner">
+              Die Chronell-Methode verwandelt deinen Posteingang in eine Zeitleiste.
+            </p>
+            <p class="method-builtin" data-i18n="method.builtIn">
+              Die Methode ist keine Theorie — sie steckt in der App.
+            </p>
+          </div>
+          <div class="principles-grid">
+            <article class="principle-card glass-panel-elevated reveal">
+              <span class="principle-num">1</span>
+              <h3 data-i18n="method.capture.title">Erfassen</h3>
+              <p class="principle-sub" data-i18n="method.capture.subtitle">Alles an einem Ort</p>
+              <ul>
+                <li data-i18n="method.capture.b1">E-Mails, Aufgaben, Notizen und Termine gehören zusammen.</li>
+                <li data-i18n="method.capture.b2">Kein Tab-Chaos.</li>
+              </ul>
+              <p class="principle-app" data-i18n="method.capture.app">Acht Module, M365 + Google.</p>
+            </article>
+            <article class="principle-card glass-panel-elevated reveal reveal-delay-1">
+              <span class="principle-num">2</span>
+              <h3 data-i18n="method.decide.title">Entscheiden</h3>
+              <p class="principle-sub" data-i18n="method.decide.subtitle">Input wird zur Aktion</p>
+              <ul>
+                <li data-i18n="method.decide.b1">Erledigen, planen, verschieben oder archivieren.</li>
+                <li data-i18n="method.decide.b2">Posteingang = Entscheidungspunkt.</li>
+              </ul>
+              <p class="principle-app" data-i18n="method.decide.app">Mail-ToDos, Snooze, QuickSteps.</p>
+            </article>
+            <article class="principle-card glass-panel-elevated reveal reveal-delay-2">
+              <span class="principle-num">3</span>
+              <h3 data-i18n="method.plan.title">Planen</h3>
+              <p class="principle-sub" data-i18n="method.plan.subtitle">Zeit ist die echte Ressource</p>
+              <ul>
+                <li data-i18n="method.plan.b1">Alles bekommt Zeit, Kontext, Priorität.</li>
+                <li data-i18n="method.plan.b2">Ein Kalender für alles.</li>
+              </ul>
+              <p class="principle-app" data-i18n="method.plan.app">Einheitlicher Kalender, Zeitliste.</p>
+            </article>
+            <article class="principle-card glass-panel-elevated reveal reveal-delay-3">
+              <span class="principle-num">4</span>
+              <h3 data-i18n="method.execute.title">Umsetzen</h3>
+              <p class="principle-sub" data-i18n="method.execute.subtitle">In Blöcken arbeiten</p>
+              <ul>
+                <li data-i18n="method.execute.b1">Fokus in Zeitblöcken.</li>
+                <li data-i18n="method.execute.b2">Planbar, ruhig, kontrollierbar.</li>
+              </ul>
+              <p class="principle-app" data-i18n="method.execute.app">Alle Arbeit — Liste & Kanban.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="compare" class="section">
+        <div class="container">
+          <div class="text-center reveal">
+            <span class="section-eyebrow" data-i18n="compare.eyebrow">Posteingang vs. System</span>
+            <h2 class="section-title" data-i18n="compare.title">Outlook zeigt Nachrichten. Chronell zeigt, was zählt.</h2>
+          </div>
+          <div class="compare-columns reveal">
+            <div class="compare-col outlook glass-panel">
+              <h3 data-i18n="compare.outlookTitle">Die Posteingang-Welt</h3>
+              <ul>
+                <li data-i18n="compare.outlook1">Posteingang als Arbeitsort</li>
+                <li data-i18n="compare.outlook2">Chaos und Reaktion</li>
+                <li data-i18n="compare.outlook3">Ständige Kontextwechsel</li>
+                <li data-i18n="compare.outlook4">Tabs zwischen Diensten</li>
+              </ul>
+            </div>
+            <div class="compare-col chronell glass-panel">
+              <h3 data-i18n="compare.chronellTitle">Die Chronell-Welt</h3>
+              <ul>
+                <li data-i18n="compare.chronell1">System als Arbeitsort</li>
+                <li data-i18n="compare.chronell2">Kontrolle und Planung</li>
+                <li data-i18n="compare.chronell3">Flow in einem Fenster</li>
+                <li data-i18n="compare.chronell4">M365 + Google kombiniert</li>
+              </ul>
+            </div>
+          </div>
+          <div class="claims-rotator">
+            <div class="claim-item glass-panel reveal" data-i18n="compare.claims.c1"></div>
+            <div class="claim-item glass-panel reveal reveal-delay-1" data-i18n="compare.claims.c2"></div>
+            <div class="claim-item glass-panel reveal reveal-delay-2" data-i18n="compare.claims.c3"></div>
+            <div class="claim-item glass-panel reveal reveal-delay-3" data-i18n="compare.claims.c4"></div>
+          </div>
+          <div class="compare-table-wrap glass-panel reveal">
+            <table class="compare-table">
+              <thead>
+                <tr>
+                  <th data-i18n="compare.table.aspect">Aspekt</th>
+                  <th data-i18n="compare.table.chronell">Chronell</th>
+                  <th data-i18n="compare.table.typical">Typisch</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td data-i18n="compare.table.focus">Fokus</td>
+                  <td data-i18n="compare.table.focusC"></td>
+                  <td data-i18n="compare.table.focusT"></td>
+                </tr>
+                <tr>
+                  <td data-i18n="compare.table.search">Suche</td>
+                  <td data-i18n="compare.table.searchC"></td>
+                  <td data-i18n="compare.table.searchT"></td>
+                </tr>
+                <tr>
+                  <td data-i18n="compare.table.accounts">Konten</td>
+                  <td data-i18n="compare.table.accountsC"></td>
+                  <td data-i18n="compare.table.accountsT"></td>
+                </tr>
+                <tr>
+                  <td data-i18n="compare.table.weight">Gewicht</td>
+                  <td data-i18n="compare.table.weightC"></td>
+                  <td data-i18n="compare.table.weightT"></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="disclaimer reveal" data-i18n="compare.disclaimer"></p>
+        </div>
+      </section>
+
+      <section id="features" class="section">
+        <div class="container">
+          <div class="text-center reveal">
+            <span class="section-eyebrow" data-i18n="features.eyebrow">Für Handlung gebaut</span>
+            <h2 class="section-title" data-i18n="features.title">Was Chronell liefert</h2>
+          </div>
+          <div class="feature-trio">
+            <article class="feature-card glass-panel-elevated reveal">
+              <h3 data-i18n="features.triage.title">Mail-Triage</h3>
+              <p data-i18n="features.triage.body"></p>
+            </article>
+            <article class="feature-card glass-panel-elevated reveal reveal-delay-1">
+              <h3 data-i18n="features.calendar.title">Kalender</h3>
+              <p data-i18n="features.calendar.body"></p>
+            </article>
+            <article class="feature-card glass-panel-elevated reveal reveal-delay-2">
+              <h3 data-i18n="features.accounts.title">Konten</h3>
+              <p data-i18n="features.accounts.body"></p>
+            </article>
+          </div>
+          <div class="feature-grid">
+            <div class="feature-tile glass-panel reveal">
+              <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+              <h4 data-i18n="features.grid.work">Alle Arbeit</h4>
+              <p data-i18n="features.grid.workDesc"></p>
+            </div>
+            <div class="feature-tile glass-panel reveal reveal-delay-1">
+              <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+              <h4 data-i18n="features.grid.notes">Kernnotizen</h4>
+              <p data-i18n="features.grid.notesDesc"></p>
+            </div>
+            <div class="feature-tile glass-panel reveal reveal-delay-2">
+              <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+              <h4 data-i18n="features.grid.rules">Regeln</h4>
+              <p data-i18n="features.grid.rulesDesc"></p>
+            </div>
+            <div class="feature-tile glass-panel reveal">
+              <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+              <h4 data-i18n="features.grid.people">Personen</h4>
+              <p data-i18n="features.grid.peopleDesc"></p>
+            </div>
+            <div class="feature-tile glass-panel reveal reveal-delay-1">
+              <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+              <h4 data-i18n="features.grid.home">Home</h4>
+              <p data-i18n="features.grid.homeDesc"></p>
+            </div>
+            <div class="feature-tile glass-panel reveal reveal-delay-2">
+              <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              <h4 data-i18n="features.grid.chat">Chat</h4>
+              <p data-i18n="features.grid.chatDesc"></p>
+            </div>
+            <div class="feature-tile glass-panel reveal">
+              <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+              <h4 data-i18n="features.grid.offline">Offline</h4>
+              <p data-i18n="features.grid.offlineDesc"></p>
+            </div>
+            <div class="feature-tile glass-panel reveal reveal-delay-1">
+              <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              <h4 data-i18n="features.grid.privacy">Lokal</h4>
+              <p data-i18n="features.grid.privacyDesc"></p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="screenshots" class="section">
+        <div class="container">
+          <div class="text-center reveal">
+            <span class="section-eyebrow" data-i18n="screenshots.eyebrow">Vorschau</span>
+            <h2 class="section-title" data-i18n="screenshots.title">Chronell in Aktion</h2>
+          </div>
+          <div class="screenshot-grid">
+            <figure class="screenshot-frame reveal">
+              <div class="win-chrome">
+                <span class="win-dot r"></span><span class="win-dot y"></span><span class="win-dot g"></span>
+                <span class="win-title">Chronell</span>
+              </div>
+              <div class="screenshot-body">
+                <svg class="screenshot-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><path d="M22 6l-10 7L2 6"/></svg>
+                <span class="screenshot-label" data-i18n="screenshots.triage">Mail-Triage</span>
+                <span class="screenshot-placeholder" data-i18n="screenshots.placeholder">Screenshot folgt</span>
+              </div>
+            </figure>
+            <figure class="screenshot-frame reveal reveal-delay-1">
+              <div class="win-chrome">
+                <span class="win-dot r"></span><span class="win-dot y"></span><span class="win-dot g"></span>
+                <span class="win-title">Chronell</span>
+              </div>
+              <div class="screenshot-body">
+                <svg class="screenshot-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+                <span class="screenshot-label" data-i18n="screenshots.calendar">Kalender</span>
+                <span class="screenshot-placeholder" data-i18n="screenshots.placeholder">Screenshot folgt</span>
+              </div>
+            </figure>
+            <figure class="screenshot-frame reveal reveal-delay-2">
+              <div class="win-chrome">
+                <span class="win-dot r"></span><span class="win-dot y"></span><span class="win-dot g"></span>
+                <span class="win-title">Chronell</span>
+              </div>
+              <div class="screenshot-body">
+                <svg class="screenshot-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="18"/><rect x="14" y="3" width="7" height="10"/><rect x="14" y="16" width="7" height="5"/></svg>
+                <span class="screenshot-label" data-i18n="screenshots.work">Alle Arbeit</span>
+                <span class="screenshot-placeholder" data-i18n="screenshots.placeholder">Screenshot folgt</span>
+              </div>
+            </figure>
+            <figure class="screenshot-frame reveal reveal-delay-3">
+              <div class="win-chrome">
+                <span class="win-dot r"></span><span class="win-dot y"></span><span class="win-dot g"></span>
+                <span class="win-title">Chronell</span>
+              </div>
+              <div class="screenshot-body">
+                <svg class="screenshot-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                <span class="screenshot-label" data-i18n="screenshots.dashboard">Dashboard</span>
+                <span class="screenshot-placeholder" data-i18n="screenshots.placeholder">Screenshot folgt</span>
+              </div>
+            </figure>
+          </div>
+        </div>
+      </section>
+
+      <section id="modules" class="section">
+        <div class="container text-center">
+          <div class="reveal">
+            <span class="section-eyebrow" data-i18n="modules.eyebrow">Ein Fenster</span>
+            <h2 class="section-title" data-i18n="modules.title">Acht Module, null Tab-Chaos</h2>
+          </div>
+          <div class="modules-row reveal">
+            <span class="module-pill" data-i18n="modules.home">Home</span>
+            <span class="module-pill" data-i18n="modules.mail">Mail</span>
+            <span class="module-pill" data-i18n="modules.calendar">Kalender</span>
+            <span class="module-pill" data-i18n="modules.tasks">Aufgaben</span>
+            <span class="module-pill" data-i18n="modules.work">Alle Arbeit</span>
+            <span class="module-pill" data-i18n="modules.people">Personen</span>
+            <span class="module-pill" data-i18n="modules.notes">Notizen</span>
+            <span class="module-pill" data-i18n="modules.chat">Chat</span>
+          </div>
+        </div>
+      </section>
+
+      <section id="trust" class="section">
+        <div class="container">
+          <div class="text-center reveal">
+            <span class="section-eyebrow" data-i18n="trust.eyebrow">Vertrauen</span>
+            <h2 class="section-title" data-i18n="trust.title">Deine Daten bleiben bei dir</h2>
+          </div>
+          <div class="trust-grid">
+            <div class="trust-item glass-panel reveal">
+              <svg class="trust-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M13.8 12H3"/></svg>
+              <p data-i18n="trust.oauth"></p>
+            </div>
+            <div class="trust-item glass-panel reveal reveal-delay-1">
+              <svg class="trust-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+              <p data-i18n="trust.local"></p>
+            </div>
+            <div class="trust-item glass-panel reveal reveal-delay-2">
+              <svg class="trust-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+              <p data-i18n="trust.platform"></p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="cta-band">
+        <div class="container">
+          <div class="cta-inner glass-panel-elevated reveal">
+            <h2 data-i18n="cta.title">Bereit für ruhigere Arbeit?</h2>
+            <p data-i18n="cta.body"></p>
+            <a href="#" class="btn btn-primary" data-waitlist data-i18n="cta.button">Auf die Warteliste</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-inner">
+        <p class="footer-tagline" data-i18n="footer.tagline">
+          Chronell ist kein Tool. Es ist ein ruhiger Ort für deine Arbeit.
+        </p>
+        <nav class="footer-links">
+          <a href="https://github.com/kurtsoeser/Chronell" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/kurtsoeser/Chronell#readme" data-i18n="footer.dev">Entwickler-Doku</a>
+          <a href="#" data-waitlist data-i18n="nav.waitlist">Warteliste</a>
+          <span data-i18n="footer.imprint">Impressum</span>
+        </nav>
+        <p class="footer-copy">
+          © <span id="year"></span> <span data-i18n="footer.author">Kurt Soeser</span> —
+          <span data-i18n="footer.rights">Alle Rechte vorbehalten.</span>
+        </p>
+      </div>
+    </footer>
+
+    <script>
+      document.getElementById('year').textContent = new Date().getFullYear()
+    </script>
+    <script src="js/site.js"></script>
+  </body>
+</html>

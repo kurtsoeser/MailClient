@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" fill="none">
+  <rect width="1200" height="630" fill="#0d0f14"/>
+  <circle cx="900" cy="120" r="280" fill="#7c3aed" opacity="0.25" filter="url(#b)"/>
+  <circle cx="200" cy="520" r="240" fill="#db2777" opacity="0.2" filter="url(#b)"/>
+  <defs>
+    <filter id="b" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="60"/>
+    </filter>
+  </defs>
+  <text x="80" y="280" fill="#f4f4f5" font-family="Inter,Segoe UI,sans-serif" font-size="72" font-weight="800">Chronell</text>
+  <text x="80" y="360" fill="#5B9CF5" font-family="Inter,Segoe UI,sans-serif" font-size="36" font-weight="600">Stop managing your inbox.</text>
+  <text x="80" y="410" fill="#a1a1aa" font-family="Inter,Segoe UI,sans-serif" font-size="36" font-weight="500">Start managing your time.</text>
+  <circle cx="1000" cy="480" r="80" stroke="#5B9CF5" stroke-width="3" opacity="0.6"/>
+  <circle cx="1000" cy="480" r="50" stroke="#5B9CF5" stroke-width="2" stroke-dasharray="6 8" opacity="0.8"/>
+  <circle cx="1000" cy="480" r="12" fill="#5B9CF5"/>
+</svg>

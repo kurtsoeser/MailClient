@@ -1,0 +1,29 @@
+name: Chronell Beta-Warteliste
+description: Benachrichtigung anfordern, wenn eine Chronell-Beta verfügbar ist
+title: "Chronell Beta-Warteliste"
+labels:
+  - chronell-beta
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Trag dich hier ein — wir melden uns, sobald eine Beta für Windows 11 bereitsteht.
+  - type: checkboxes
+    id: accounts
+    attributes:
+      label: Welche Konten nutzt du?
+      options:
+        - label: Microsoft 365 / Outlook
+        - label: Google / Gmail
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows-Version (optional)
+      placeholder: z. B. Windows 11 24H2
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anmerkungen (optional)
+      placeholder: Was erhoffst du dir von Chronell?
