@@ -20,7 +20,8 @@ import {
   defaultScheduleForCalendarDayFc,
   mailListItemTodoScheduleWindow
 } from '@/app/calendar/mail-todo-calendar'
-import { MiniMonthGrid } from '@/app/calendar/MiniMonthGrid'
+import { ModuleNavMiniMonth } from '@/components/ModuleNavMiniMonth'
+import { moduleNavColumnClass } from '@/components/module-shell-layout'
 import { CALENDAR_VISIBILITY_CHANGED_EVENT } from '@/lib/calendar-visibility-storage'
 import {
   ModuleColumnHeaderIconButton,
@@ -190,8 +191,8 @@ export function InboxCalendarSidebar({
   return (
     <aside
       className={cn(
-        'flex h-full min-h-0 w-full shrink-0 flex-col bg-sidebar text-sidebar-foreground',
-        hideChrome ? 'border-0' : 'border-l border-border'
+        moduleNavColumnClass,
+        hideChrome ? 'border-0 border-r-0' : 'border-l border-r-0'
       )}
       onDragLeave={(e): void => {
         if (e.currentTarget === e.target) stripDragOver()
@@ -217,7 +218,7 @@ export function InboxCalendarSidebar({
       ) : null}
 
       <div className={cn('shrink-0 px-3 pb-2', hideChrome ? 'pt-3' : 'pt-2')}>
-        <MiniMonthGrid
+        <ModuleNavMiniMonth
           monthAnchor={visibleMonth}
           today={new Date()}
           onPrevMonth={(): void => {

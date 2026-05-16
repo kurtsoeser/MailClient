@@ -47,6 +47,7 @@ import {
 } from '@/components/ModuleColumnHeader'
 
 import { GLOBAL_CREATE_EVENT, useGlobalCreateNavigateStore } from '@/lib/global-create'
+import { usePeoplePendingFocusStore } from '@/stores/people-pending-focus'
 type NavKey =
 
   | { kind: 'all' }
@@ -138,6 +139,7 @@ export function PeopleShell(): JSX.Element {
   const [rows, setRows] = useState<PeopleContactView[]>([])
 
   const [selected, setSelected] = useState<PeopleContactView | null>(null)
+  const takePendingContactId = usePeoplePendingFocusStore((s) => s.takePendingContactId)
 
   const detailPanelRef = useRef<PeopleContactDetailPanelHandle | null>(null)
 
@@ -415,6 +417,19 @@ export function PeopleShell(): JSX.Element {
     void loadList()
 
   }, [loadList])
+
+  useEffect(() => {
+    const pendingId = takePendingContactId()
+    if (pendingId == null) return
+    const fromRows = rows.find((r) => r.id === pendingId)
+    if (fromRows) {
+      setSelected(fromRows)
+      return
+    }
+    void window.mailClient.people.getById(pendingId).then((contact) => {
+      if (contact) setSelected(contact)
+    })
+  }, [rows, takePendingContactId])
 
 
 
@@ -914,7 +929,7 @@ export function PeopleShell(): JSX.Element {
 
       <div className="flex min-h-0 flex-1 flex-row overflow-hidden">
 
-        <aside className="flex w-60 min-w-[15rem] shrink-0 flex-col gap-3 border-r border-border bg-card p-3">
+        <aside className={cn('module-nav-column w-60 min-w-[15rem] gap-3 p-3')}>
 
           <div className="space-y-1">
 

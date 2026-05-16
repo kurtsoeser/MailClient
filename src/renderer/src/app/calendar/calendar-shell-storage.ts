@@ -4,6 +4,8 @@ export const CAL_MAIL_TODO_OVERLAY_KEY = 'mailclient.calendar.mailTodoOverlay'
 
 export const CAL_CLOUD_TASK_OVERLAY_KEY = 'mailclient.calendar.cloudTaskOverlay'
 
+export const CAL_USER_NOTE_OVERLAY_KEY = 'mailclient.calendar.notesOverlay'
+
 /** Frueher: Vollbild-Ansicht nur Mail-Termine; wird einmalig in Mail-Overlay migriert. */
 export const LEGACY_CAL_SHELL_SOURCE_KEY = 'mailclient.calendar.shellSource'
 
@@ -201,6 +203,24 @@ export function readCloudTaskOverlayFromStorage(): boolean {
 export function persistCloudTaskOverlay(value: boolean): void {
   try {
     window.localStorage.setItem(CAL_CLOUD_TASK_OVERLAY_KEY, value ? '1' : '0')
+  } catch {
+    // ignore
+  }
+}
+
+export function readUserNoteOverlayFromStorage(): boolean {
+  try {
+    const v = window.localStorage.getItem(CAL_USER_NOTE_OVERLAY_KEY)
+    if (v === '0') return false
+    return true
+  } catch {
+    return true
+  }
+}
+
+export function persistUserNoteOverlay(value: boolean): void {
+  try {
+    window.localStorage.setItem(CAL_USER_NOTE_OVERLAY_KEY, value ? '1' : '0')
   } catch {
     // ignore
   }

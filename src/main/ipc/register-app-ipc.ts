@@ -1,5 +1,6 @@
 import { ipcMain, app, BrowserWindow, Notification } from 'electron'
-import { IPC, type AppConnectivityState } from '@shared/types'
+import { IPC, type AppConnectivityState, type GlobalSearchResult } from '@shared/types'
+import { globalSearch } from '../global-search'
 import { updateConfig } from '../config'
 import { normalizeExternalOpenUrl, openExternalDeduped } from '../open-external'
 import { getAppConnectivity } from '../network-status'
@@ -8,6 +9,18 @@ export function registerAppIpc(): void {
   ipcMain.handle(IPC.app.getVersion, () => app.getVersion())
   ipcMain.handle(IPC.app.getPlatform, () => process.platform)
   ipcMain.handle(IPC.app.getConnectivity, (): AppConnectivityState => getAppConnectivity())
+
+  ipcMain.handle(
+    IPC.app.globalSearch,
+    (_event, args: { query: string; limitPerKind?: number }): GlobalSearchResult => {
+      const query = typeof args?.query === 'string' ? args.query : ''
+      const limitPerKind =
+        typeof args?.limitPerKind === 'number' && Number.isFinite(args.limitPerKind)
+          ? args.limitPerKind
+          : 8
+      return globalSearch(query, limitPerKind)
+    }
+  )
 
   ipcMain.handle(IPC.app.setLaunchOnLogin, async (_event, enabled: boolean): Promise<void> => {
     await updateConfig({ launchOnLogin: enabled })

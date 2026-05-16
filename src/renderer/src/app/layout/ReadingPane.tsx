@@ -48,33 +48,9 @@ import { Avatar } from '@/components/Avatar'
 import { profilePhotoSrcForEmail } from '@/lib/contact-avatar'
 import { InlineReplyBar } from '@/components/InlineReplyBar'
 import { MailCategoriesPopover } from '@/components/MailCategoriesPopover'
-import { ObjectNoteEditor, ObjectNotePreview } from '@/components/ObjectNoteEditor'
+import { ObjectNoteEditor } from '@/components/ObjectNoteEditor'
 import type { AttachmentMeta, MailFull, ConnectedAccount, MailQuickStep } from '@shared/types'
 import { outlookCategoryDotClass } from '@/lib/outlook-category-colors'
-
-const VIEWER_THEME_STORAGE_KEY = 'mailclient.viewerTheme'
-
-/**
- * Liest den persistierten Viewer-Theme-Override. `null` = kein
- * Override gesetzt; in dem Fall folgt der Mail-Viewer dem App-Theme.
- */
-function readStoredTheme(): MailViewerTheme | null {
-  try {
-    const v = window.localStorage.getItem(VIEWER_THEME_STORAGE_KEY)
-    if (v === 'light' || v === 'dark') return v
-  } catch {
-    // localStorage nicht verfuegbar
-  }
-  return null
-}
-
-function persistTheme(theme: MailViewerTheme): void {
-  try {
-    window.localStorage.setItem(VIEWER_THEME_STORAGE_KEY, theme)
-  } catch {
-    // ignore
-  }
-}
 
 /** `datetime-local` im Browser (lokale Zeit) aus ISO-String. */
 function toDatetimeLocalValue(iso: string | null | undefined): string {
@@ -224,17 +200,26 @@ export function ReadingPane({
 
   const appTheme = useThemeStore((s) => s.effective)
 
-  // Override hat Vorrang. Wenn `null`, folgt der Viewer dem App-Theme.
-  const [viewerOverride, setViewerOverride] = useState<MailViewerTheme | null>(() =>
-    readStoredTheme()
-  )
+  // Sitzungs-Override: `null` = App-Theme; manueller Sonne/Mond-Toggle nur bis App-Theme wechselt.
+  const [viewerOverride, setViewerOverride] = useState<MailViewerTheme | null>(null)
   const viewerTheme: MailViewerTheme = viewerOverride ?? appTheme
+
+  useEffect(() => {
+    setViewerOverride(null)
+  }, [appTheme])
 
   function toggleViewerTheme(): void {
     const next: MailViewerTheme = viewerTheme === 'light' ? 'dark' : 'light'
-    persistTheme(next)
     setViewerOverride(next)
   }
+
+  useEffect(() => {
+    try {
+      window.localStorage.removeItem('mailclient.viewerTheme')
+    } catch {
+      // ignore
+    }
+  }, [])
 
   // Auto-Read: nach 800ms im Lesebereich als gelesen markieren (max. ein Versuch pro Nachricht)
   useEffect(() => {
@@ -711,7 +696,7 @@ function MailReader({
     () => buildMailShadowRootInnerHtml(safeHtml, viewerTheme),
     [safeHtml, viewerTheme]
   )
-  useSanitizedHtmlShadowRoot(shadowHostRef, shadowInnerHtml, 'mail')
+  useSanitizedHtmlShadowRoot(shadowHostRef, shadowInnerHtml, 'mail', viewerTheme)
 
   useEffect(() => {
     setLoadImages(autoLoadImages)
@@ -887,21 +872,24 @@ function MailReader({
         )}
       </header>
 
-      <ObjectNotePreview
-        className="shrink-0 border-b border-border bg-secondary/5 px-6"
-        previewHeight={180}
+      <div
+        ref={shadowHostRef}
+        className="mail-reading-shadow-host flex min-h-0 min-w-0 flex-1 flex-col overflow-auto"
+        data-mail-viewer-theme={viewerTheme}
+        role="document"
+        aria-label={t('mail.readingPane.contentIframeTitle')}
+      />
+
+      <ObjectNoteEditor
         target={{
           kind: 'mail',
           messageId: message.id,
           title: message.subject || t('common.noSubject')
         }}
-      />
-
-      <div
-        ref={shadowHostRef}
-        className="mail-reading-shadow-host flex min-h-0 min-w-0 flex-1 flex-col overflow-auto bg-transparent"
-        role="document"
-        aria-label={t('mail.readingPane.contentIframeTitle')}
+        variant="section"
+        sectionCollapsedDefault
+        layout="toggle"
+        className="shrink-0 border-t border-border bg-secondary/5 px-6 py-2"
       />
 
       <InlineReplyBar onReply={onReply} onForward={onForward} onAttach={onReply} />

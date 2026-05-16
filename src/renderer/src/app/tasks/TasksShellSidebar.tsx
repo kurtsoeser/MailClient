@@ -1,17 +1,22 @@
-import { useEffect, useRef, useState, type MouseEvent } from 'react'
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { ChevronDown, ChevronRight, Layers, ListTodo, Loader2, RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { ConnectedAccount, TaskListRow } from '@shared/types'
 import { cn } from '@/lib/utils'
 import { Avatar } from '@/components/Avatar'
 import { AccountColorStripe } from '@/components/AccountColorStripe'
+import { ModuleNavMiniMonth } from '@/components/ModuleNavMiniMonth'
+import {
+  moduleNavColumnInsetClass,
+  moduleNavColumnScrollClass
+} from '@/components/module-shell-layout'
 import {
   persistTasksSidebarAccountExpanded,
   readTasksSidebarAccountExpanded
 } from '@/app/tasks/tasks-sidebar-tree-storage'
 import type { TasksViewSelection } from '@/app/tasks/tasks-types'
 import {
-  moduleColumnHeaderShellBarClass,
+  moduleColumnHeaderNavShellBarClass,
   moduleColumnHeaderTitleClass
 } from '@/components/ModuleColumnHeader'
 
@@ -30,6 +35,11 @@ export interface TasksShellSidebarProps {
   onAccountExpanded: (accountId: string) => void
   /** Rechtsklick auf Konto-Zeile: Kontofarbe, neue Aufgabe */
   onAccountHeaderContextMenu?: (e: MouseEvent, account: ConnectedAccount) => void
+  miniMonth: Date
+  onMiniMonthPrev: () => void
+  onMiniMonthNext: () => void
+  onMiniMonthSelectRange: (start: Date, end: Date) => void
+  miniMonthFooter?: ReactNode
 }
 
 function TasksShellSidebarAccountSection({
@@ -197,17 +207,31 @@ export function TasksShellSidebar({
   onRefreshUnified,
   onRefreshAccountLists,
   onAccountExpanded,
-  onAccountHeaderContextMenu
+  onAccountHeaderContextMenu,
+  miniMonth,
+  onMiniMonthPrev,
+  onMiniMonthNext,
+  onMiniMonthSelectRange,
+  miniMonthFooter
 }: TasksShellSidebarProps): JSX.Element {
   const { t } = useTranslation()
   const unifiedActive = selection?.kind === 'unified'
 
   return (
-    <aside className="glass-sidebar flex h-full w-full flex-col text-sidebar-foreground">
-      <header className={cn(moduleColumnHeaderShellBarClass, 'shrink-0 border-b border-border')}>
+    <aside className="module-nav-column w-full">
+      <header className={moduleColumnHeaderNavShellBarClass}>
         <span className={moduleColumnHeaderTitleClass}>{t('tasks.shell.title')}</span>
       </header>
-      <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-3 pt-3">
+      <div className={cn(moduleNavColumnScrollClass, moduleNavColumnInsetClass)}>
+        <ModuleNavMiniMonth
+          monthAnchor={miniMonth}
+          today={new Date()}
+          onSelectDayRange={onMiniMonthSelectRange}
+          onPrevMonth={onMiniMonthPrev}
+          onNextMonth={onMiniMonthNext}
+          footer={miniMonthFooter}
+        />
+      <nav>
         {taskAccounts.length === 0 ? (
           <p className="px-2 py-3 text-xs text-muted-foreground">{t('tasks.shell.noAccounts')}</p>
         ) : (
@@ -262,6 +286,7 @@ export function TasksShellSidebar({
           </>
         )}
       </nav>
+      </div>
     </aside>
   )
 }

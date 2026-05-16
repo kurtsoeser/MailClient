@@ -542,12 +542,26 @@ export function buildGraphAttendees(emails: string[] | null | undefined): {
   return out
 }
 
+/** Teilnehmer + Einladungs-Flags (unabhaengig von Teams-Besprechung). */
+export function applyGraphMeetingInviteToPayload(
+  payload: Record<string, unknown>,
+  attendeeEmails: string[] | null | undefined
+): void {
+  const att = buildGraphAttendees(attendeeEmails)
+  if (att.length > 0) {
+    payload.attendees = att
+    payload.responseRequested = true
+  }
+}
+
 export interface GraphCalendarEventDetail {
   subject: string | null
   attendeeEmails: string[]
   joinUrl: string | null
   isOnlineMeeting: boolean
   bodyHtml: string | null
+  location: string | null
+  organizer: string | null
 }
 
 function escapeHtmlPlain(s: string): string {
@@ -672,7 +686,7 @@ export async function graphGetCalendarEvent(
   const client = await getClientFor(accountId)
   const path = graphEventInstancePath(graphEventId, graphCalendarId)
   const sel = encodeURIComponent(
-    'id,subject,body,attendees,isOnlineMeeting,onlineMeeting,onlineMeetingProvider,start,end,isAllDay'
+    'id,subject,body,attendees,isOnlineMeeting,onlineMeeting,onlineMeetingProvider,start,end,isAllDay,location,organizer'
   )
   const ev = (await client.api(`${path}?$select=${sel}`).get()) as GraphEvent
   const emails: string[] = []
@@ -683,12 +697,18 @@ export async function graphGetCalendarEvent(
     seen.add(addr)
     emails.push(addr)
   }
+  const organizer =
+    ev.organizer?.emailAddress?.address?.trim() ||
+    ev.organizer?.emailAddress?.name?.trim() ||
+    null
   return {
     subject: ev.subject ?? null,
     attendeeEmails: emails.slice(0, MAX_GRAPH_EVENT_ATTENDEES),
     joinUrl: ev.onlineMeeting?.joinUrl?.trim() || null,
     isOnlineMeeting: !!ev.isOnlineMeeting,
-    bodyHtml: normalizeGraphEventBodyHtml(ev.body ?? null)
+    bodyHtml: normalizeGraphEventBodyHtml(ev.body ?? null),
+    location: ev.location?.displayName?.trim() || null,
+    organizer
   }
 }
 
@@ -715,10 +735,7 @@ export async function graphCreateSimpleCalendarEvent(
     payload.isOnlineMeeting = true
     payload.onlineMeetingProvider = 'teamsForBusiness'
   }
-  const att = buildGraphAttendees(input.attendeeEmails)
-  if (att.length > 0) {
-    payload.attendees = att
-  }
+  applyGraphMeetingInviteToPayload(payload, input.attendeeEmails)
   if (input.recurrence) {
     const appCfg = await loadConfig()
     const iana =
@@ -766,7 +783,11 @@ export async function graphUpdateCalendarEvent(
     payload.categories = core.categories
   }
   if (input.attendeeEmails !== undefined) {
-    payload.attendees = buildGraphAttendees(input.attendeeEmails ?? [])
+    const att = buildGraphAttendees(input.attendeeEmails ?? [])
+    payload.attendees = att
+    if (att.length > 0) {
+      payload.responseRequested = true
+    }
   }
   if (typeof input.teamsMeeting === 'boolean' && !core.isAllDay) {
     if (input.teamsMeeting) {
@@ -868,10 +889,7 @@ export async function graphCreateTeamsCalendarEvent(
     isOnlineMeeting: true,
     onlineMeetingProvider: 'teamsForBusiness'
   }
-  const att = buildGraphAttendees(input.attendeeEmails)
-  if (att.length > 0) {
-    payload.attendees = att
-  }
+  applyGraphMeetingInviteToPayload(payload, input.attendeeEmails)
 
   const created = (await client.api(eventPostPath(input.graphCalendarId)).post(payload)) as GraphEvent
   return {

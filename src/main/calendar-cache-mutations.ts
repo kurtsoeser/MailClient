@@ -2,7 +2,10 @@ import { listAccounts } from './accounts'
 import { patchCachedCalendarEventIcon, patchCachedCalendarEventSchedule } from './calendar-cache-service'
 import { getDb } from './db/index'
 import { deleteCalendarEvent, upsertCalendarEvents } from './db/calendar-events-repo'
-import { deleteCalendarEventDetails } from './db/calendar-event-details-repo'
+import {
+  deleteCalendarEventDetails,
+  upsertCalendarEventDetails
+} from './db/calendar-event-details-repo'
 import { broadcastCalendarChanged } from './ipc/ipc-broadcasts'
 import type {
   CalendarEventView,
@@ -52,6 +55,21 @@ export async function afterCalendarEventCreated(
   const acc = accounts.find((a) => a.id === accountId)
   if (acc && (acc.provider === 'microsoft' || acc.provider === 'google')) {
     upsertCalendarEvents([eventViewFromSaveInput(acc, input, result)])
+    const eventId = result.id?.trim()
+    const attendeeEmails = input.attendeeEmails?.filter((e) => e.trim().length > 0) ?? []
+    const hasDetailCache =
+      attendeeEmails.length > 0 ||
+      Boolean(input.bodyHtml?.trim()) ||
+      (acc.provider === 'microsoft' && input.teamsMeeting === true)
+    if (eventId && hasDetailCache) {
+      upsertCalendarEventDetails(accountId, eventId, input.graphCalendarId ?? null, {
+        subject: input.subject.trim() || null,
+        attendeeEmails,
+        joinUrl: null,
+        isOnlineMeeting: acc.provider === 'microsoft' && input.teamsMeeting === true && !input.isAllDay,
+        bodyHtml: input.bodyHtml?.trim() ? input.bodyHtml.trim() : null
+      })
+    }
   }
   broadcastCalendarChanged(accountId)
 }

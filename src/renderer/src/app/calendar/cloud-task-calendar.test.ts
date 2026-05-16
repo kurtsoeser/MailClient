@@ -2,6 +2,8 @@ import type { EventApi } from '@fullcalendar/core'
 import { describe, expect, it } from 'vitest'
 import {
   CALENDAR_KIND_CLOUD_TASK,
+  CLOUD_TASK_SPAN_KIND_DUE,
+  cloudTaskDropLooksTimed,
   cloudTaskEventId,
   cloudTasksToFullCalendarEvents,
   cloudTaskVisualSpan,
@@ -97,23 +99,98 @@ describe('dueIsoFromCloudTaskScheduleStart', () => {
   })
 })
 
+function mockCloudTaskEvent(
+  key: string,
+  opts: {
+    start: Date
+    end: Date
+    allDay: boolean
+    spanKind?: typeof CLOUD_TASK_SPAN_KIND_DUE
+  }
+): EventApi {
+  return {
+    id: cloudTaskEventId(key),
+    start: opts.start,
+    end: opts.end,
+    allDay: opts.allDay,
+    extendedProps: {
+      calendarKind: CALENDAR_KIND_CLOUD_TASK,
+      taskKey: key,
+      cloudTaskSpanKind: opts.spanKind ?? CLOUD_TASK_SPAN_KIND_DUE
+    }
+  } as unknown as EventApi
+}
+
 describe('computePersistTargetForCloudTask', () => {
   it('typ Ganztag → due', () => {
     const task = sampleTask()
     const key = cloudTaskStableKey(task.accountId, task.listId, task.id)
-    const start = new Date('2026-05-21T00:00:00')
-    const event = {
-      id: cloudTaskEventId(key),
-      start,
+    const event = mockCloudTaskEvent(key, {
+      start: new Date('2026-05-21T00:00:00'),
       end: new Date('2026-05-22T00:00:00'),
-      allDay: true,
-      extendedProps: { calendarKind: CALENDAR_KIND_CLOUD_TASK, taskKey: key }
-    } as unknown as EventApi
+      allDay: true
+    })
 
     const target = computePersistTargetForCloudTask(event, null, 'Europe/Berlin')
     expect(target?.kind).toBe('due')
     if (target?.kind === 'due') {
       expect(target.dueIso).toContain('2026-05-21')
     }
+  })
+
+  it('Ganztags-Fälligkeit in Zeitleiste → Planung', () => {
+    const task = sampleTask()
+    const key = cloudTaskStableKey(task.accountId, task.listId, task.id)
+    const oldEvent = mockCloudTaskEvent(key, {
+      start: new Date('2026-05-21T00:00:00'),
+      end: new Date('2026-05-22T00:00:00'),
+      allDay: true
+    })
+    const event = mockCloudTaskEvent(key, {
+      start: new Date('2026-05-21T10:00:00'),
+      end: new Date('2026-05-21T10:30:00'),
+      allDay: false,
+      spanKind: CLOUD_TASK_SPAN_KIND_DUE
+    })
+
+    const target = computePersistTargetForCloudTask(event, oldEvent, 'Europe/Berlin')
+    expect(target?.kind).toBe('planned')
+    if (target?.kind === 'planned') {
+      expect(target.plannedStartIso).toBe(event.start!.toISOString())
+      expect(target.plannedEndIso).toBe(event.end!.toISOString())
+    }
+  })
+
+  it('Fälligkeitsmodus: Ganztag in Zeitleiste → Planung', () => {
+    const task = sampleTask()
+    const key = cloudTaskStableKey(task.accountId, task.listId, task.id)
+    const oldEvent = mockCloudTaskEvent(key, {
+      start: new Date('2026-05-21T00:00:00'),
+      end: new Date('2026-05-22T00:00:00'),
+      allDay: true
+    })
+    const event = mockCloudTaskEvent(key, {
+      start: new Date('2026-05-21T14:00:00'),
+      end: new Date('2026-05-21T14:30:00'),
+      allDay: false,
+      spanKind: CLOUD_TASK_SPAN_KIND_DUE
+    })
+
+    const target = computePersistTargetForCloudTask(event, oldEvent, 'Europe/Berlin', 'due')
+    expect(target?.kind).toBe('planned')
+  })
+})
+
+describe('cloudTaskDropLooksTimed', () => {
+  it('erkennt Uhrzeit trotz allDay-Flag', () => {
+    const task = sampleTask()
+    const key = cloudTaskStableKey(task.accountId, task.listId, task.id)
+    const event = mockCloudTaskEvent(key, {
+      start: new Date('2026-05-21T10:00:00'),
+      end: new Date('2026-05-21T10:30:00'),
+      allDay: true,
+      spanKind: CLOUD_TASK_SPAN_KIND_DUE
+    })
+    expect(cloudTaskDropLooksTimed(event, 'Europe/Berlin')).toBe(true)
   })
 })

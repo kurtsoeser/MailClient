@@ -438,7 +438,7 @@ export function buildMailContextItems(
       ? [
           {
             id: 'note',
-            label: tr ? tr('notes.contextNew') : 'Kernnotiz...',
+            label: tr ? tr('notes.contextNew') : 'Notiz...',
             icon: StickyNote,
             onSelect: (): void => h.openNote?.(msg)
           }

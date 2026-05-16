@@ -8,6 +8,13 @@ import type { TaskItemWithContext } from '@/app/tasks/tasks-types'
 /** extendedProps.calendarKind: Cloud-Aufgaben vs. Graph-Termine / Mail-ToDos. */
 export const CALENDAR_KIND_CLOUD_TASK = 'cloudTask' as const
 
+/** Anzeige im Kalender: Fälligkeit (Ganztag) oder lokale Planungszeit. */
+export const CLOUD_TASK_SPAN_KIND_DUE = 'due' as const
+export const CLOUD_TASK_SPAN_KIND_PLANNED = 'planned' as const
+export type CloudTaskSpanKind =
+  | typeof CLOUD_TASK_SPAN_KIND_DUE
+  | typeof CLOUD_TASK_SPAN_KIND_PLANNED
+
 const DEFAULT_APPOINTMENT_MINUTES = 30
 
 export type CloudTaskCalendarContext = TaskItemWithContext
@@ -144,11 +151,15 @@ export function cloudTasksToFullCalendarEvents(
 
     const title = task.title?.trim() || '(Ohne Titel)'
     const accountColor = accountColorById[task.accountId] ?? '#6366f1'
+    const spanKind: CloudTaskSpanKind = span.allDay
+      ? CLOUD_TASK_SPAN_KIND_DUE
+      : CLOUD_TASK_SPAN_KIND_PLANNED
     const extendedProps = {
       cloudTask: task,
       taskKey,
       accountColor,
-      calendarKind: CALENDAR_KIND_CLOUD_TASK
+      calendarKind: CALENDAR_KIND_CLOUD_TASK,
+      cloudTaskSpanKind: spanKind
     }
 
     if (span.allDay) {
@@ -211,6 +222,42 @@ function dueIsoFromAllDayStart(start: Date, fcTimeZone: string): string {
   return dueIsoFromCloudTaskScheduleStart(start, fcTimeZone)
 }
 
+function readCloudTaskSpanKind(ev: EventApi | null | undefined): CloudTaskSpanKind | null {
+  if (!ev) return null
+  const k = ev.extendedProps?.cloudTaskSpanKind
+  if (k === CLOUD_TASK_SPAN_KIND_DUE || k === CLOUD_TASK_SPAN_KIND_PLANNED) return k
+  return ev.allDay ? CLOUD_TASK_SPAN_KIND_DUE : CLOUD_TASK_SPAN_KIND_PLANNED
+}
+
+/** Drop in die Zeitleiste (auch wenn FullCalendar allDay noch true laesst). */
+export function cloudTaskDropLooksTimed(event: EventApi, fcTimeZone: string): boolean {
+  if (!event.allDay) return true
+  const s = event.start
+  if (!s) return false
+  const zone = fcTimeZone === 'local' ? 'local' : fcTimeZone
+  const dt = DateTime.fromJSDate(s, { zone })
+  return dt.hour !== 0 || dt.minute !== 0 || dt.second !== 0
+}
+
+function wasAllDayDueDisplay(oldEvent: EventApi | null, event: EventApi): boolean {
+  const before = oldEvent ?? event
+  return readCloudTaskSpanKind(before) === CLOUD_TASK_SPAN_KIND_DUE
+}
+
+function plannedTargetFromTimedEvent(event: EventApi, taskKey: string): CloudTaskPersistTarget {
+  const s = event.start!
+  let e = event.end
+  if (!e || e.getTime() <= s.getTime()) {
+    e = endDateFromStart(s, DEFAULT_APPOINTMENT_MINUTES)
+  }
+  return {
+    kind: 'planned',
+    taskKey,
+    plannedStartIso: s.toISOString(),
+    plannedEndIso: e.toISOString()
+  }
+}
+
 export function isoRangeFromCloudTaskFullCalendarEvent(
   ev: EventApi,
   fcTimeZone: string
@@ -252,12 +299,18 @@ export function computePersistTargetForCloudTask(
   const s = event.start
   if (!s) return null
 
+  const dueToTimed =
+    wasAllDayDueDisplay(oldEvent, event) && cloudTaskDropLooksTimed(event, fcTimeZone)
+
   if (dateMode === 'due') {
+    if (dueToTimed) {
+      return plannedTargetFromTimedEvent(event, taskKey)
+    }
     return { kind: 'due', taskKey, dueIso: dueIsoFromAllDayStart(s, fcTimeZone) }
   }
 
   if (dateMode === 'planned') {
-    if (event.allDay) {
+    if (event.allDay && !cloudTaskDropLooksTimed(event, fcTimeZone)) {
       const dateOnly = `${s.getFullYear()}-${String(s.getMonth() + 1).padStart(2, '0')}-${String(s.getDate()).padStart(2, '0')}`
       const scheduled = defaultScheduleForCalendarDayFc(dateOnly, fcTimeZone)
       return {
@@ -267,45 +320,18 @@ export function computePersistTargetForCloudTask(
         plannedEndIso: scheduled.endIso
       }
     }
-    let e = event.end
-    if (!e || e.getTime() <= s.getTime()) {
-      e = endDateFromStart(s, DEFAULT_APPOINTMENT_MINUTES)
-    }
-    return {
-      kind: 'planned',
-      taskKey,
-      plannedStartIso: s.toISOString(),
-      plannedEndIso: e.toISOString()
-    }
+    return plannedTargetFromTimedEvent(event, taskKey)
   }
 
-  if (oldEvent && oldEvent.allDay === true && event.allDay === false) {
-    let e = event.end
-    if (!e || e.getTime() <= s.getTime()) {
-      e = endDateFromStart(s, DEFAULT_APPOINTMENT_MINUTES)
-    }
-    return {
-      kind: 'planned',
-      taskKey,
-      plannedStartIso: s.toISOString(),
-      plannedEndIso: e.toISOString()
-    }
+  if (dueToTimed || (oldEvent?.allDay === true && event.allDay === false)) {
+    return plannedTargetFromTimedEvent(event, taskKey)
   }
 
   if (event.allDay) {
     return { kind: 'due', taskKey, dueIso: dueIsoFromAllDayStart(s, fcTimeZone) }
   }
 
-  let e = event.end
-  if (!e || e.getTime() <= s.getTime()) {
-    e = endDateFromStart(s, DEFAULT_APPOINTMENT_MINUTES)
-  }
-  return {
-    kind: 'planned',
-    taskKey,
-    plannedStartIso: s.toISOString(),
-    plannedEndIso: e.toISOString()
-  }
+  return plannedTargetFromTimedEvent(event, taskKey)
 }
 
 export function computePersistIsoRangeForCloudTask(

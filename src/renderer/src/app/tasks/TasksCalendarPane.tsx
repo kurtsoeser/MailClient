@@ -8,6 +8,7 @@ import {
   type MutableRefObject,
   type Ref
 } from 'react'
+import { flushSync } from 'react-dom'
 import FullCalendar from '@fullcalendar/react'
 import dayGridPlugin from '@fullcalendar/daygrid'
 import timeGridPlugin from '@fullcalendar/timegrid'
@@ -33,7 +34,14 @@ import {
   type CloudTaskCalendarDateMode
 } from '@/app/calendar/cloud-task-calendar'
 import { applyCloudTaskPersistTarget } from '@/app/calendar/apply-cloud-task-persist'
-import { scheduleRemoveDuplicateFullCalendarEventsById } from '@/app/calendar/calendar-fc-event-source'
+import {
+  scheduleRemoveCloudTaskCalendarEventsByTaskKey,
+  scheduleRemoveDuplicateFullCalendarEventsById
+} from '@/app/calendar/calendar-fc-event-source'
+import {
+  applyOptimisticCloudTaskPersistToLayer,
+  syncFullCalendarCloudTaskEventFromLayer
+} from '@/app/calendar/optimistic-cloud-task-calendar'
 import { cloudTaskEventId } from '@/app/calendar/cloud-task-calendar'
 import {
   filterCloudTasksInCalendarRange,
@@ -118,6 +126,10 @@ export function TasksCalendarPane({
   const [rangeItems, setRangeItems] = useState<TaskItemWithContext[]>([])
   const [plannedByKey, setPlannedByKey] = useState(() => new Map<string, import('@shared/work-item').WorkItemPlannedSchedule>())
   const [loading, setLoading] = useState(false)
+  const allItemsRef = useRef(allItems)
+  allItemsRef.current = allItems
+  const plannedByKeyRef = useRef(plannedByKey)
+  plannedByKeyRef.current = plannedByKey
 
   const accountColorById = useMemo(
     () => Object.fromEntries(taskAccounts.map((a) => [a.id, a.color])),
@@ -229,14 +241,44 @@ export function TasksCalendarPane({
       }
       try {
         await applyCloudTaskPersistTarget(target, task, timeZone)
-        scheduleRemoveDuplicateFullCalendarEventsById(calendarRef.current?.getApi(), [
+        const optimistic = applyOptimisticCloudTaskPersistToLayer(
+          target,
+          task,
+          allItemsRef.current,
+          plannedByKeyRef.current,
+          timeZone
+        )
+        const optimisticTask =
+          optimistic.items.find(
+            (row) => cloudTaskStableKey(row.accountId, row.listId, row.id) === taskKey
+          ) ?? task
+        const optimisticPlanned = optimistic.plannedByKey.get(taskKey)
+        const api = calendarRef.current?.getApi()
+
+        flushSync(() => {
+          setAllItems(optimistic.items)
+          setPlannedByKey(optimistic.plannedByKey)
+          const { start, end } = lastRangeRef.current
+          applyRangeFilter(optimistic.items, optimistic.plannedByKey, start, end)
+        })
+
+        syncFullCalendarCloudTaskEventFromLayer(api, optimisticTask, optimisticPlanned, timeZone)
+        scheduleRemoveCloudTaskCalendarEventsByTaskKey(
+          api,
+          taskKey,
           cloudTaskEventId(taskKey)
-        ])
+        )
+
         const items = await reloadAll()
         const { start, end } = lastRangeRef.current
         const planned = await loadPlannedScheduleMapForTasks(items)
         setPlannedByKey(planned)
         applyRangeFilter(items, planned, start, end)
+        scheduleRemoveCloudTaskCalendarEventsByTaskKey(
+          calendarRef.current?.getApi(),
+          taskKey,
+          cloudTaskEventId(taskKey)
+        )
         onTasksMutated()
       } catch {
         info.revert()

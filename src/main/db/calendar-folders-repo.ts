@@ -1,5 +1,6 @@
 import { getDb } from './index'
 import type { CalendarGraphCalendarRow, CalendarM365GroupCalendarsPage } from '@shared/types'
+import { normalizeGraphHexColor } from '@shared/graph-calendar-colors'
 
 interface CalendarFolderDbRow {
   account_id: string
@@ -8,6 +9,7 @@ interface CalendarFolderDbRow {
   is_default: number
   color: string | null
   hex_color: string | null
+  display_color_override_hex: string | null
   can_edit: number | null
   provider: string
   access_role: string | null
@@ -22,6 +24,7 @@ function rowToCalendarFolder(r: CalendarFolderDbRow): CalendarGraphCalendarRow {
     isDefaultCalendar: r.is_default === 1,
     color: r.color,
     hexColor: r.hex_color,
+    displayColorOverrideHex: r.display_color_override_hex,
     canEdit: r.can_edit == null ? undefined : r.can_edit === 1,
     provider: r.provider as 'microsoft' | 'google',
     accessRole: r.access_role,
@@ -47,7 +50,8 @@ const UPSERT_FOLDER = `
     access_role = excluded.access_role,
     calendar_kind = excluded.calendar_kind,
     group_sort_index = excluded.group_sort_index,
-    synced_at = datetime('now')
+    synced_at = datetime('now'),
+    display_color_override_hex = calendar_folders.display_color_override_hex
 `
 
 export function upsertCalendarFolders(
@@ -85,9 +89,20 @@ export function replaceStandardCalendarFolders(
 ): void {
   const db = getDb()
   const tx = db.transaction(() => {
-    db.prepare(
-      `DELETE FROM calendar_folders WHERE account_id = ? AND calendar_kind = 'standard'`
-    ).run(accountId)
+    const keepIds = new Set(rows.map((r) => r.id))
+    const existing = db
+      .prepare(
+        `SELECT calendar_id FROM calendar_folders
+         WHERE account_id = ? AND calendar_kind = 'standard'`
+      )
+      .all(accountId) as { calendar_id: string }[]
+    for (const row of existing) {
+      if (!keepIds.has(row.calendar_id)) {
+        db.prepare(
+          `DELETE FROM calendar_folders WHERE account_id = ? AND calendar_id = ?`
+        ).run(accountId, row.calendar_id)
+      }
+    }
     upsertCalendarFolders(accountId, rows, 'standard')
   })
   tx()
@@ -96,9 +111,20 @@ export function replaceStandardCalendarFolders(
 export function replaceM365GroupCalendarFolders(accountId: string, rows: CalendarGraphCalendarRow[]): void {
   const db = getDb()
   const tx = db.transaction(() => {
-    db.prepare(
-      `DELETE FROM calendar_folders WHERE account_id = ? AND calendar_kind = 'm365Group'`
-    ).run(accountId)
+    const keepIds = new Set(rows.map((r) => r.id))
+    const existing = db
+      .prepare(
+        `SELECT calendar_id FROM calendar_folders
+         WHERE account_id = ? AND calendar_kind = 'm365Group'`
+      )
+      .all(accountId) as { calendar_id: string }[]
+    for (const row of existing) {
+      if (!keepIds.has(row.calendar_id)) {
+        db.prepare(
+          `DELETE FROM calendar_folders WHERE account_id = ? AND calendar_id = ?`
+        ).run(accountId, row.calendar_id)
+      }
+    }
     upsertCalendarFolders(accountId, rows, 'm365Group', 0)
   })
   tx()
@@ -108,7 +134,8 @@ export function listStandardCalendarFoldersFromCache(accountId: string): Calenda
   const db = getDb()
   const rows = db
     .prepare(
-      `SELECT account_id, calendar_id, name, is_default, color, hex_color, can_edit,
+      `SELECT account_id, calendar_id, name, is_default, color, hex_color,
+              display_color_override_hex, can_edit,
               provider, access_role, calendar_kind, group_sort_index
        FROM calendar_folders
        WHERE account_id = ? AND calendar_kind = 'standard'
@@ -130,7 +157,8 @@ export function listM365GroupCalendarFoldersPageFromCache(
   const lim = Math.max(1, limit)
   const rows = db
     .prepare(
-      `SELECT account_id, calendar_id, name, is_default, color, hex_color, can_edit,
+      `SELECT account_id, calendar_id, name, is_default, color, hex_color,
+              display_color_override_hex, can_edit,
               provider, access_role, calendar_kind, group_sort_index
        FROM calendar_folders
        WHERE account_id = ? AND calendar_kind = 'm365Group'
@@ -204,6 +232,24 @@ export function isCalendarFoldersSyncFresh(accountId: string, staleMs: number): 
   const t = Date.parse(st.lastSyncedAt)
   if (Number.isNaN(t)) return false
   return Date.now() - t < staleMs
+}
+
+export function setCalendarFolderDisplayColorOverride(
+  accountId: string,
+  calendarId: string,
+  hex: string | null
+): void {
+  const db = getDb()
+  const normalized = hex == null || hex.trim() === '' ? null : normalizeGraphHexColor(hex)
+  db.prepare(
+    `UPDATE calendar_folders
+     SET display_color_override_hex = @hex
+     WHERE account_id = @account_id AND calendar_id = @calendar_id`
+  ).run({
+    account_id: accountId,
+    calendar_id: calendarId,
+    hex: normalized
+  })
 }
 
 export function deleteCalendarFoldersDataForAccount(accountId: string): void {

@@ -2,7 +2,10 @@ import type { WorkItem } from '@shared/work-item'
 import { PanelRightClose, SquareArrowOutUpRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
-import type { CloudTaskSaveDraft } from '@/app/work/CloudTaskWorkItemDetail'
+import type {
+  CloudTaskDisplayPatch,
+  CloudTaskSaveDraft
+} from '@/app/work/CloudTaskWorkItemDetail'
 import { WorkItemPreviewPanel } from '@/app/work/WorkItemPreviewPanel'
 import type { ConnectedAccount } from '@shared/types'
 import {
@@ -18,6 +21,7 @@ export interface TasksDetailPanelBodyProps {
   saving: boolean
   onCloudSave: (draft: CloudTaskSaveDraft) => Promise<void>
   onCloudDelete: () => Promise<void>
+  onCloudDisplayChange?: (patch: CloudTaskDisplayPatch) => Promise<void>
 }
 
 export function TasksDetailPanelBody({
@@ -25,7 +29,8 @@ export function TasksDetailPanelBody({
   accountById,
   saving,
   onCloudSave,
-  onCloudDelete
+  onCloudDelete,
+  onCloudDisplayChange
 }: TasksDetailPanelBodyProps): JSX.Element {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
@@ -35,6 +40,7 @@ export function TasksDetailPanelBody({
         saving={saving}
         onCloudSave={onCloudSave}
         onCloudDelete={onCloudDelete}
+        onCloudDisplayChange={onCloudDisplayChange}
       />
     </div>
   )

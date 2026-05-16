@@ -21,6 +21,9 @@ export interface WorkItemPreviewPanelProps {
   onOpenInMail?: () => void
   onCloudSave?: (draft: CloudTaskSaveDraft) => void | Promise<void>
   onCloudDelete?: () => void | Promise<void>
+  onCloudDisplayChange?: (
+    patch: import('@/app/work/CloudTaskWorkItemDetail').CloudTaskDisplayPatch
+  ) => void | Promise<void>
 }
 
 export function WorkItemPreviewPanel({
@@ -29,7 +32,8 @@ export function WorkItemPreviewPanel({
   saving,
   onOpenInMail,
   onCloudSave,
-  onCloudDelete
+  onCloudDelete,
+  onCloudDisplayChange
 }: WorkItemPreviewPanelProps): JSX.Element {
   const { t } = useTranslation()
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -103,6 +107,7 @@ export function WorkItemPreviewPanel({
       onDelete={(): void => {
         if (onCloudDelete) void onCloudDelete()
       }}
+      onDisplayChange={onCloudDisplayChange}
     />
   )
 }

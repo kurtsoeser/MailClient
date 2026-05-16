@@ -1,6 +1,7 @@
 import type { tasks_v1 } from 'googleapis'
 import type { TaskItemRow, TaskListRow } from '@shared/types'
 import { getGoogleApis } from './google-auth-client'
+import { dueIsoToGoogleTasksDue } from './tasks-google-due'
 
 interface GoogleTasksApiErrLike {
   message?: string
@@ -109,8 +110,7 @@ export async function googleInsertTask(
     notes: input.notes?.trim() ? input.notes : undefined
   }
   if (input.dueIso != null && String(input.dueIso).trim() !== '') {
-    const d = String(input.dueIso).trim()
-    body.due = /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : d.slice(0, 10)
+    body.due = dueIsoToGoogleTasksDue(String(input.dueIso))
   }
   const res = await tasks.tasks.insert({
     tasklist: listId,
@@ -145,8 +145,7 @@ export async function googlePatchTask(
     if (patch.dueIso === null || String(patch.dueIso).trim() === '') {
       body.due = null
     } else {
-      const d = String(patch.dueIso).trim()
-      body.due = /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : d.slice(0, 10)
+      body.due = dueIsoToGoogleTasksDue(String(patch.dueIso))
     }
   }
   if (patch.completed !== undefined) {
@@ -181,8 +180,7 @@ export async function googleUpdateTask(
     merged.notes = ''
   }
   if (input.dueIso != null && String(input.dueIso).trim() !== '') {
-    const d = String(input.dueIso).trim()
-    merged.due = /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : d.slice(0, 10)
+    merged.due = dueIsoToGoogleTasksDue(String(input.dueIso))
   } else {
     merged.due = null
   }

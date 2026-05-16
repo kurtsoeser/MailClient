@@ -175,15 +175,22 @@ export function buildMailShadowRootInnerHtml(html: string, theme: MailViewerThem
   if (theme === 'dark') {
     return `${mailReadingShadowDarkThemeCss}<div class="mail-html-root">${html}</div>`
   }
-  return `${adapt(lightThemeCss)}${html}`
+  return `${adapt(lightThemeCss)}<div class="mail-html-root mail-html-root--light">${html}</div>`
 }
 
 const lightThemeCss = `
   <style>
     :root { color-scheme: light; }
-    html, body { margin: 0; padding: 14px 18px; background: #ffffff; color: #1f1f23;
+    html, body { margin: 0; padding: 0; background: #ffffff; color: #1f1f23;
       font: 14px/1.55 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
-      word-wrap: break-word; }
+      word-wrap: break-word; forced-color-adjust: none; }
+    .mail-html-root--light {
+      padding: 14px 18px;
+      min-height: 0;
+      background: #ffffff;
+      color: #1f1f23;
+      forced-color-adjust: none;
+    }
     a { color: #0b66c2; }
     img { max-width: 100%; height: auto; }
     blockquote { border-left: 3px solid #d6d6db; margin: 0 0 0 4px; padding: 4px 12px;

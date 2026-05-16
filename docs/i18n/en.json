@@ -1,0 +1,173 @@
+{
+  "meta": {
+    "title": "Chronell — Manage your time, not your inbox",
+    "description": "Chronell is not an email client. It's a system to manage your time — Microsoft 365 and Google in one calm desktop workspace for Windows 11."
+  },
+  "nav": {
+    "method": "The Method",
+    "compare": "vs Outlook",
+    "features": "Features",
+    "modules": "Modules",
+    "waitlist": "Join waitlist",
+    "github": "GitHub",
+    "lang": "Language"
+  },
+  "hero": {
+    "tagline": "Stop managing your inbox. Start managing your time.",
+    "positioning": "Chronell is not an email client. It's a system to manage your time.",
+    "subline": "Microsoft 365 and Google in one calm desktop workspace — local search, workflow triage, unified calendar. Built for Windows 11.",
+    "ctaWaitlist": "Join the waitlist",
+    "ctaMethod": "Discover the method",
+    "searchPlaceholder": "Search, decide, plan…"
+  },
+  "quote": {
+    "text": "Your inbox is not a workplace."
+  },
+  "method": {
+    "eyebrow": "The Chronell Method",
+    "title": "A system to turn time into progress",
+    "idea": "Most people manage emails. With Chronell, you manage your time.",
+    "oneliner": "The Chronell Method turns your inbox into a timeline.",
+    "builtIn": "The method isn't theory — it's built into the app you use every day.",
+    "capture": {
+      "title": "Capture",
+      "subtitle": "Everything in one place",
+      "b1": "Email, tasks, notes and events belong together — not in separate apps.",
+      "b2": "No tab chaos. No context switching.",
+      "app": "Eight modules, M365 + Google, meta-folders, global search."
+    },
+    "decide": {
+      "title": "Decide",
+      "subtitle": "Turn input into action",
+      "b1": "Every input becomes a decision: do it, plan it, delay it, or archive it.",
+      "b2": "Your inbox is a decision point — not a warehouse.",
+      "app": "Mail to-dos, snooze, waiting-for, quick steps, triage folders."
+    },
+    "plan": {
+      "title": "Plan",
+      "subtitle": "Time is the real resource",
+      "b1": "Tasks are meaningless without time — everything gets time, context, priority.",
+      "b2": "One calendar for appointments, mail tasks, cloud tasks and notes.",
+      "app": "Unified calendar, timeline view, due-date buckets."
+    },
+    "execute": {
+      "title": "Execute",
+      "subtitle": "Work in blocks, not chaos",
+      "b1": "Work happens in focused time blocks — not between emails.",
+      "b2": "Your system becomes plannable, calm, controllable.",
+      "app": "All Work module with list and kanban by due date."
+    }
+  },
+  "compare": {
+    "eyebrow": "Inbox vs. system",
+    "title": "Outlook shows messages. Chronell shows what matters.",
+    "outlookTitle": "The inbox world",
+    "outlook1": "Inbox as workplace",
+    "outlook2": "Chaos and reaction",
+    "outlook3": "Constant context switching",
+    "outlook4": "Tabs between Outlook, Gmail, calendar",
+    "chronellTitle": "The Chronell world",
+    "chronell1": "System as workplace",
+    "chronell2": "Control and planning",
+    "chronell3": "Flow in one window",
+    "chronell4": "M365 + Google combined",
+    "claims": {
+      "c1": "Outlook shows you messages. Chronell shows you what matters.",
+      "c2": "Stop reacting. Start planning.",
+      "c3": "Emails are input. Time is what matters.",
+      "c4": "Work doesn't happen in your inbox. It happens in your calendar."
+    },
+    "table": {
+      "aspect": "Aspect",
+      "chronell": "Chronell",
+      "typical": "Typical web / Outlook",
+      "focus": "Focus",
+      "focusC": "Workflow: to-dos, snooze, rules, one desktop",
+      "focusT": "List-centric, many browser tabs",
+      "search": "Search",
+      "searchC": "SQLite + FTS5 on your device",
+      "searchT": "Often server-centric",
+      "accounts": "Accounts",
+      "accountsC": "Microsoft 365 + Google combined",
+      "accountsT": "Separate apps and logins",
+      "weight": "Footprint",
+      "weightC": "Lean Electron, virtualized lists",
+      "weightT": "Full Office web or heavy suites"
+    },
+    "disclaimer": "Chronell is not a replacement for every enterprise Outlook or Exchange admin scenario. Strengths: workflow, local data, multi-provider, modern UI for power users."
+  },
+  "features": {
+    "eyebrow": "Built for action",
+    "title": "What Chronell delivers",
+    "triage": {
+      "title": "Decide — mail triage",
+      "body": "Turn messages into to-dos with due buckets. Auto folders for in progress and done. Snooze, waiting-for, and one-click quick steps."
+    },
+    "calendar": {
+      "title": "Plan — unified calendar",
+      "body": "Microsoft and Google calendars plus mail to-dos, cloud tasks, and scheduled notes — with a timeline view for your day."
+    },
+    "accounts": {
+      "title": "Capture — all accounts",
+      "body": "Every mailbox in one window. Meta-folders across accounts. Global search with Ctrl+K over local full-text index."
+    },
+    "grid": {
+      "work": "All Work",
+      "workDesc": "Mail to-dos and cloud tasks in list or kanban",
+      "notes": "Core notes",
+      "notesDesc": "Notes on mail, events, and standalone pages",
+      "rules": "Visual rules",
+      "rulesDesc": "Conditions and actions with dry-run",
+      "people": "People",
+      "peopleDesc": "Contacts cached locally from M365 and Google",
+      "home": "Home dashboard",
+      "homeDesc": "Customizable tiles for your day",
+      "chat": "Teams chat",
+      "chatDesc": "Microsoft Teams alongside mail",
+      "offline": "Offline reading",
+      "offlineDesc": "Your cache stays readable",
+      "privacy": "Local by design",
+      "privacyDesc": "SQLite on your device — OAuth to providers only"
+    }
+  },
+  "screenshots": {
+    "eyebrow": "Preview",
+    "title": "See Chronell in action",
+    "placeholder": "Screenshot coming soon",
+    "triage": "Mail triage",
+    "calendar": "Unified calendar",
+    "work": "All Work",
+    "dashboard": "Home dashboard"
+  },
+  "modules": {
+    "eyebrow": "One window",
+    "title": "Eight modules, zero tab chaos",
+    "home": "Home",
+    "mail": "Mail",
+    "calendar": "Calendar",
+    "tasks": "Tasks",
+    "work": "All Work",
+    "people": "People",
+    "notes": "Notes",
+    "chat": "Chat"
+  },
+  "trust": {
+    "eyebrow": "Trust",
+    "title": "Your data stays with you",
+    "oauth": "Sign in via official Microsoft and Google OAuth flows",
+    "local": "Mail and metadata in local SQLite — search via FTS5",
+    "platform": "Windows 11 desktop (Electron) — Microsoft 365 and Google only, no IMAP"
+  },
+  "footer": {
+    "tagline": "Chronell is not a tool. It's a calm place for your work.",
+    "dev": "Developer docs",
+    "author": "Kurt Soeser",
+    "rights": "All rights reserved.",
+    "imprint": "Legal notice (placeholder)"
+  },
+  "cta": {
+    "title": "Ready for calmer work?",
+    "body": "Chronell is in active development for Windows 11. Join the waitlist — we'll notify you when a beta is ready.",
+    "button": "Join the waitlist"
+  }
+}

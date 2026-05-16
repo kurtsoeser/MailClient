@@ -489,7 +489,7 @@ export function Sidebar({ onOpenAccountDialog }: Props): JSX.Element {
   }
 
   return (
-    <aside className="glass-sidebar flex h-full w-full flex-col text-sidebar-foreground">
+    <aside className="module-nav-column h-full w-full">
       <nav className="flex-1 overflow-y-auto px-2 pb-3 pt-3">
         <SidebarCollapsibleSection title={t('sidebar.quickAccess')}>
           <DndContext

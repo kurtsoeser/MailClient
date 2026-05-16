@@ -1,140 +1,100 @@
-import {
-  Bike,
-  BookOpen,
-  Building2,
-  Bus,
-  Cake,
-  Calendar,
-  Car,
-  Check,
-  CircleDot,
-  Clapperboard,
-  ClipboardList,
-  CreditCard,
-  Dumbbell,
-  Footprints,
-  GraduationCap,
-  Heart,
-  Home,
-  Luggage,
-  MapPin,
-  Music,
-  NotebookPen,
-  PartyPopper,
-  Pill,
-  Plane,
-  Star,
-  Stethoscope,
-  Target,
-  Ticket,
-  Timer,
-  TreePalm,
-  Trophy,
-  Truck,
-  Tv,
-  User,
-  Users,
-  Utensils,
-  Video,
-  Wrench,
-  type LucideIcon
-} from 'lucide-react'
+import { Calendar, icons, type LucideIcon } from 'lucide-react'
+import catalogJson from '@/lib/generated/calendar-event-icon-catalog.json'
 
-/** Persistierte Icon-IDs für Kalender-Termine (lokal, nicht Graph/Google). */
-export const CALENDAR_EVENT_ICON_IDS = [
-  'car',
-  'plane',
-  'luggage',
-  'bus',
-  'bike',
-  'truck',
-  'trophy',
-  'music',
-  'soccer',
-  'film',
-  'book-open',
-  'dumbbell',
-  'sneaker',
-  'target',
-  'home',
-  'users',
-  'user',
-  'party',
-  'heart',
-  'cake',
-  'graduation-cap',
-  'palm-tree',
-  'clipboard',
-  'first-aid',
-  'pill',
-  'stopwatch',
-  'star',
-  'dining',
-  'tv',
-  'ticket',
-  'card',
-  'buildings',
-  'wrench',
-  'check',
-  'notes',
-  'map-pin',
-  'meeting',
-  'calendar'
-] as const
-
-export type CalendarEventIconId = (typeof CALENDAR_EVENT_ICON_IDS)[number]
-
-const ICON_BY_ID: Record<CalendarEventIconId, LucideIcon> = {
-  car: Car,
-  plane: Plane,
-  luggage: Luggage,
-  bus: Bus,
-  bike: Bike,
-  truck: Truck,
-  trophy: Trophy,
-  music: Music,
-  soccer: CircleDot,
-  film: Clapperboard,
-  'book-open': BookOpen,
-  dumbbell: Dumbbell,
-  sneaker: Footprints,
-  target: Target,
-  home: Home,
-  users: Users,
-  user: User,
-  party: PartyPopper,
-  heart: Heart,
-  cake: Cake,
-  'graduation-cap': GraduationCap,
-  'palm-tree': TreePalm,
-  clipboard: ClipboardList,
-  'first-aid': Stethoscope,
-  pill: Pill,
-  stopwatch: Timer,
-  star: Star,
-  dining: Utensils,
-  tv: Tv,
-  ticket: Ticket,
-  card: CreditCard,
-  buildings: Building2,
-  wrench: Wrench,
-  check: Check,
-  notes: NotebookPen,
-  'map-pin': MapPin,
-  meeting: Video,
-  calendar: Calendar
+export type CalendarEventIconCatalogEntry = {
+  id: string
+  /** Anzeigename (Englisch, aus Lucide). */
+  l: string
+  /** Suchindex (kleingeschrieben). */
+  s: string
 }
 
-export function isCalendarEventIconId(id: string): id is CalendarEventIconId {
-  return (CALENDAR_EVENT_ICON_IDS as readonly string[]).includes(id)
+type IconCatalogFile = {
+  version: number
+  icons: CalendarEventIconCatalogEntry[]
+}
+
+const catalogFile = catalogJson as IconCatalogFile
+
+/** Alle wählbaren Icon-IDs (Lucide + Legacy-Aliase). */
+export const CALENDAR_EVENT_ICON_CATALOG: readonly CalendarEventIconCatalogEntry[] = catalogFile.icons
+
+const CATALOG_BY_ID = new Map(CALENDAR_EVENT_ICON_CATALOG.map((e) => [e.id, e]))
+
+export const CALENDAR_EVENT_ICON_IDS = CALENDAR_EVENT_ICON_CATALOG.map((e) => e.id) as readonly string[]
+
+export type CalendarEventIconId = string
+
+/**
+ * Ältere gespeicherte IDs → Lucide-Komponentenname (PascalCase).
+ * Abweichend vom automatischen kebab→Pascal-Mapping.
+ */
+const LEGACY_LUCIDE_NAME: Record<string, string> = {
+  'first-aid': 'Stethoscope',
+  soccer: 'CircleDot',
+  sneaker: 'Footprints',
+  party: 'PartyPopper',
+  dining: 'Utensils',
+  meeting: 'Video',
+  buildings: 'Building2',
+  notes: 'NotebookPen',
+  card: 'CreditCard',
+  stopwatch: 'Timer',
+  'palm-tree': 'TreePalm',
+  'graduation-cap': 'GraduationCap',
+  'book-open': 'BookOpen',
+  'map-pin': 'MapPin'
+}
+
+function kebabToPascal(kebab: string): string {
+  return kebab
+    .split('-')
+    .map((part) => (part ? part.charAt(0).toUpperCase() + part.slice(1) : ''))
+    .join('')
+}
+
+function lucideNameForIconId(iconId: string): string {
+  return LEGACY_LUCIDE_NAME[iconId] ?? kebabToPascal(iconId)
+}
+
+export function isCalendarEventIconId(id: string): boolean {
+  return CATALOG_BY_ID.has(id.trim())
+}
+
+export function getCalendarEventIconCatalogEntry(
+  iconId: string | undefined | null
+): CalendarEventIconCatalogEntry | null {
+  const id = iconId?.trim()
+  if (!id) return null
+  return CATALOG_BY_ID.get(id) ?? null
 }
 
 export function resolveCalendarEventIcon(iconId: string | undefined | null): LucideIcon {
-  if (iconId && isCalendarEventIconId(iconId)) return ICON_BY_ID[iconId]
+  const id = iconId?.trim()
+  if (!id) return Calendar
+  const pascal = lucideNameForIconId(id)
+  const Icon = icons[pascal as keyof typeof icons]
+  if (Icon) return Icon
   return Calendar
 }
 
 /** Kein Icon in der Kalender-Zelle (Standard-Termin ohne Auswahl). */
 export function calendarEventIconIsExplicit(iconId: string | undefined | null): boolean {
-  return Boolean(iconId?.trim() && isCalendarEventIconId(iconId.trim()))
+  const id = iconId?.trim()
+  if (!id) return false
+  if (id === 'calendar') return false
+  return isCalendarEventIconId(id)
+}
+
+export function calendarEventIconLabel(
+  iconId: string,
+  translate?: (key: string) => string
+): string {
+  const entry = getCalendarEventIconCatalogEntry(iconId)
+  if (translate) {
+    const key = `calendar.eventIcon.${iconId}`
+    const localized = translate(key)
+    if (localized !== key) return localized
+  }
+  return entry?.l ?? iconId.replace(/-/g, ' ')
 }

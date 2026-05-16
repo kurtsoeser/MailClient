@@ -11,8 +11,8 @@
   --fc-neutral-bg-color: hsl(var(--muted));
   --fc-neutral-text-color: hsl(var(--muted-foreground));
   --fc-today-bg-color: hsl(var(--accent) / 0.45);
-  /* Auswahl beim Ziehen (neuer Termin) — etwas kräftiger für bessere Sichtbarkeit */
-  --fc-highlight-color: hsl(var(--primary) / 0.22);
+  /* Auswahl beim Ziehen (neuer Termin) — dezent, gestrichelt wie Quick-Create-Platzhalter */
+  --fc-highlight-color: hsl(var(--primary) / 0.14);
   --fc-now-indicator-color: var(--cal-now-line);
   --fc-list-event-hover-bg-color: hsl(var(--muted));
 
@@ -177,11 +177,50 @@
   font-weight: 500;
 }
 
+/* Quick-Create: Ziehauswahl (ein Rahmen — kein selectMirror) */
+.calendar-notion-shell .fc-highlight {
+  border: 2px dashed hsl(var(--primary) / 0.45) !important;
+  border-radius: 4px;
+  box-shadow: none !important;
+  background: hsl(var(--primary) / 0.14) !important;
+}
+
+/* Nach Auswahl nur Platzhalter-Event, nicht zusätzlich .fc-highlight */
+.calendar-notion-shell.calendar-notion-shell--quick-create-open .fc-highlight {
+  display: none !important;
+  pointer-events: none !important;
+}
+
+.calendar-notion-shell .fc-event.fc-quick-create-placeholder,
+.calendar-notion-shell .fc-bg-event.fc-quick-create-placeholder,
+.calendar-notion-shell .fc-timegrid-event.fc-quick-create-placeholder {
+  background: hsl(var(--primary) / 0.14) !important;
+  background-color: hsl(var(--primary) / 0.14) !important;
+  border: 2px dashed hsl(var(--primary) / 0.45) !important;
+  border-radius: 4px;
+  box-shadow: none !important;
+  color: transparent !important;
+  opacity: 1;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.calendar-notion-shell .fc-event.fc-quick-create-placeholder .fc-event-main,
+.calendar-notion-shell .fc-event.fc-quick-create-placeholder .fc-cal-event-custom,
+.calendar-notion-shell .fc-event.fc-quick-create-placeholder .fc-cal-event-kind-icon {
+  display: none !important;
+  visibility: hidden;
+}
+
+.calendar-notion-shell .fc-timegrid-event-harness:has(.fc-quick-create-placeholder) {
+  z-index: 2;
+}
+
 .calendar-notion-shell .fc-cal-event-custom {
   position: relative;
   height: 100%;
   min-height: 0;
-  padding: 2px 18px 2px 4px;
+  padding: 3px 18px 3px 5px;
   overflow: hidden;
 }
 
@@ -198,21 +237,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.calendar-notion-shell .fc-cal-event-custom-title-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 3px;
-  min-width: 0;
-}
-
-.calendar-notion-shell .fc-cal-event-custom-title-icon {
-  width: 13px;
-  height: 13px;
-  flex-shrink: 0;
-  margin-top: 1px;
-  opacity: 0.95;
+  padding-right: 14px;
 }
 
 .calendar-notion-shell .fc-cal-event-custom-title {
@@ -229,16 +254,29 @@
 
 .calendar-notion-shell .fc-cal-event-kind-icon {
   position: absolute;
-  top: 2px;
-  right: 2px;
+  top: 3px;
+  right: 3px;
   width: 14px;
   height: 14px;
-  opacity: 0.92;
+  flex-shrink: 0;
+  display: block;
+  opacity: 0.95;
   pointer-events: none;
 }
 
 .calendar-notion-shell .fc-daygrid-event .fc-cal-event-custom {
-  padding-right: 16px;
+  padding: 3px 18px 4px 5px;
+  min-height: 1.75rem;
+}
+
+.calendar-notion-shell .fc-daygrid-event .fc-cal-event-custom-time {
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.calendar-notion-shell .fc-daygrid-event .fc-cal-event-custom-title {
+  -webkit-line-clamp: 4;
+  margin-top: 1px;
 }
 
 .calendar-notion-shell .fc-event-main-frame {
@@ -313,6 +351,228 @@
 
 .calendar-notion-shell .fc-daygrid-body-natural .fc-daygrid-day-events {
   margin-bottom: 4px;
+}
+
+/* Multi-Month: abgerundete Monatskacheln, Termine nur als Farbpunkte */
+.calendar-notion-shell .fc-multimonth {
+  background: hsl(var(--background));
+  border: none;
+  gap: 0.75rem 0.85rem;
+}
+
+.calendar-notion-shell .fc-multimonth .fc-daygrid-day-frame {
+  min-height: 0;
+}
+
+.calendar-notion-shell .fc-multimonth-multicol .fc-multimonth-month {
+  padding: 0.35rem;
+  box-sizing: border-box;
+}
+
+/* Moderne Monatskachel */
+.calendar-notion-shell .fc-multimonth-month {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: 14px;
+  box-shadow: 0 1px 2px hsl(0 0% 0% / 0.06);
+  overflow: hidden;
+}
+
+.calendar-notion-shell .fc-multimonth-header {
+  background: transparent;
+}
+
+.calendar-notion-shell .fc-multimonth-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+  padding: 0.45rem 0.35rem 0.25rem;
+  text-align: center;
+  letter-spacing: -0.01em;
+}
+
+.calendar-notion-shell .fc-multimonth .fc-col-header-cell {
+  border-color: hsl(var(--border) / 0.45);
+}
+
+.calendar-notion-shell .fc-multimonth .fc-col-header-cell-cushion {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: hsl(var(--muted-foreground));
+  padding: 0 0 4px;
+}
+
+/* Wochenende (Sa/So) dezent hervorheben */
+.calendar-notion-shell .fc-multimonth .fc-col-header-cell.fc-day-sat .fc-col-header-cell-cushion,
+.calendar-notion-shell .fc-multimonth .fc-col-header-cell.fc-day-sun .fc-col-header-cell-cushion {
+  color: hsl(var(--muted-foreground) / 0.72);
+}
+
+.calendar-notion-shell .fc-multimonth td.fc-day-sat,
+.calendar-notion-shell .fc-multimonth td.fc-day-sun {
+  background: hsl(var(--muted) / 0.22);
+}
+
+.calendar-notion-shell .fc-multimonth td.fc-day-today.fc-day-sat,
+.calendar-notion-shell .fc-multimonth td.fc-day-today.fc-day-sun {
+  background: hsl(var(--primary) / 0.08);
+}
+
+.calendar-notion-shell .fc-multimonth .fc-day-sat .fc-day-other .fc-daygrid-day-number,
+.calendar-notion-shell .fc-multimonth .fc-day-sun .fc-day-other .fc-daygrid-day-number {
+  color: hsl(var(--muted-foreground) / 0.28);
+}
+
+.calendar-notion-shell .fc-multimonth .fc-daygrid-day {
+  min-height: 0;
+}
+
+.calendar-notion-shell .fc-multimonth .fc-daygrid-day-top {
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.calendar-notion-shell .fc-multimonth .fc-daygrid-day-number {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 0;
+  color: hsl(var(--foreground));
+  float: none;
+  width: auto;
+}
+
+.calendar-notion-shell .fc-multimonth .fc-day-other .fc-daygrid-day-number {
+  color: hsl(var(--muted-foreground) / 0.38);
+  font-weight: 500;
+}
+
+.calendar-notion-shell .fc-multimonth .fc-day-today .fc-daygrid-day-frame {
+  background: hsl(var(--primary) / 0.1);
+  border-radius: 6px;
+}
+
+.calendar-notion-shell .fc-multimonth .fc-day-today .fc-daygrid-day-number {
+  width: 1.35rem;
+  height: 1.35rem;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 9999px;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  box-shadow: 0 0 0 1px hsl(var(--primary) / 0.35);
+}
+
+.calendar-notion-shell .fc-multimonth .fc-daygrid-day-events {
+  margin: 0;
+  min-height: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px;
+}
+
+.calendar-notion-shell .fc-multimonth .fc-theme-standard td,
+.calendar-notion-shell .fc-multimonth .fc-theme-standard th {
+  border-color: hsl(var(--border) / 0.35);
+}
+
+.calendar-notion-shell .fc-cal-multimonth-event {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  min-height: 0 !important;
+  flex: 0 0 auto;
+}
+
+.calendar-notion-shell .fc-cal-multimonth-event .fc-event-main {
+  padding: 0;
+}
+
+.calendar-notion-shell .fc-cal-multimonth-event .fc-cal-multimonth-dot {
+  display: block;
+  width: 6px;
+  height: 6px;
+  margin: 0;
+  border-radius: 9999px;
+  background-color: var(--fc-cal-multimonth-dot-color, hsl(var(--primary)));
+}
+
+.calendar-notion-shell .fc-multimonth .fc-daygrid-more-link {
+  font-size: 9px;
+  line-height: 1.1;
+  padding: 0 2px;
+  margin: 0;
+  border: none;
+  float: none;
+  color: hsl(var(--muted-foreground));
+}
+
+/* Jahresansicht: 4×3, groessere Typo — Abstand nur per gap (kein width-Override: Resize-Loop) */
+.calendar-notion-shell--multimonth-year .fc-multimonth {
+  overflow-y: auto;
+  align-content: flex-start;
+  gap: 1rem 1.15rem;
+  padding: 0.4rem 0.3rem;
+}
+
+.calendar-notion-shell--multimonth-year .fc-multimonth-multicol .fc-multimonth-month {
+  padding: 0.5rem;
+  box-sizing: border-box;
+}
+
+.calendar-notion-shell--multimonth-year .fc-multimonth-month {
+  border-radius: 16px;
+}
+
+.calendar-notion-shell--multimonth-year .fc-multimonth-title {
+  font-size: 20px;
+  padding: 0.5rem 0.4rem 0.35rem;
+}
+
+.calendar-notion-shell--multimonth-year .fc-multimonth .fc-col-header-cell-cushion {
+  font-size: 13px;
+  padding-bottom: 5px;
+}
+
+.calendar-notion-shell--multimonth-year .fc-multimonth .fc-daygrid-day-number {
+  font-size: 14px;
+  padding: 3px 0;
+}
+
+.calendar-notion-shell--multimonth-year .fc-multimonth .fc-day-today .fc-daygrid-day-frame {
+  background: hsl(var(--primary) / 0.14);
+  border-radius: 8px;
+}
+
+.calendar-notion-shell--multimonth-year .fc-multimonth .fc-day-today .fc-daygrid-day-number {
+  width: 1.65rem;
+  height: 1.65rem;
+  font-size: 13px;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+.calendar-notion-shell--multimonth-year .fc-multimonth td.fc-day-sat,
+.calendar-notion-shell--multimonth-year .fc-multimonth td.fc-day-sun {
+  background: hsl(var(--muted) / 0.28);
+}
+
+.calendar-notion-shell--multimonth-year .fc-cal-multimonth-event .fc-cal-multimonth-dot {
+  width: 7px;
+  height: 7px;
+}
+
+.calendar-notion-shell--multimonth-year .fc-multimonth .fc-daygrid-more-link {
+  font-size: 10px;
 }
 
 .calendar-notion-shell .fc-scrollgrid-section-body > td {

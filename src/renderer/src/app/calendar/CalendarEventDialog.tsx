@@ -63,6 +63,7 @@ import { TipTapBody } from '@/components/TipTapBody'
 import { sanitizeComposeHtmlFragment } from '@/lib/sanitize-compose-html'
 import { CalendarEventDescriptionPreview } from '@/app/calendar/CalendarEventDescriptionPreview'
 import { CalendarEventIconPicker } from '@/components/CalendarEventIconPicker'
+import { LocationAutocompleteInput } from '@/components/LocationAutocompleteInput'
 import { calendarEventIconIsExplicit } from '@/lib/calendar-event-icons'
 import { useThemeStore } from '@/stores/theme'
 
@@ -1082,10 +1083,12 @@ export function CalendarEventDialog({
           location: location.trim() || null,
           bodyHtml,
           categories: eventCategories,
-          ...(selectedAccount?.provider === 'microsoft'
+          ...(parsedAttendees.length > 0 || selectedAccount?.provider === 'microsoft'
             ? {
                 attendeeEmails: parsedAttendees,
-                teamsMeeting: !isAllDay && teamsMeeting
+                ...(selectedAccount?.provider === 'microsoft'
+                  ? { teamsMeeting: !isAllDay && teamsMeeting }
+                  : {})
               }
             : {}),
           ...(recurrence ? { recurrence } : {})
@@ -1121,10 +1124,14 @@ export function CalendarEventDialog({
           location: location.trim() || null,
           bodyHtml,
           categories: eventCategories,
-          ...(initialEvent.source === 'microsoft'
+          ...(parsedAttendees.length > 0 ||
+          initialEvent.source === 'microsoft' ||
+          initialEvent.source === 'google'
             ? {
                 attendeeEmails: parsedAttendees,
-                teamsMeeting: !isAllDay && teamsMeeting
+                ...(initialEvent.source === 'microsoft'
+                  ? { teamsMeeting: !isAllDay && teamsMeeting }
+                  : {})
               }
             : {})
         }
@@ -1751,9 +1758,19 @@ export function CalendarEventDialog({
             (selectedAccount?.provider === 'google' ? (
               <div className="border-b border-border py-1">
                 <PropertyRow icon={Users} label={t('calendar.eventDialog.attendeesRowLabel')}>
-                  <span className="text-[11px] text-muted-foreground">
-                    {t('calendar.eventDialog.googleTeamsAttendeesHint')}
-                  </span>
+                  <div className="space-y-1.5">
+                    <textarea
+                      value={attendeeInput}
+                      onChange={(e): void => setAttendeeInput(e.target.value)}
+                      disabled={eventFieldsLocked}
+                      placeholder={t('calendar.eventDialog.attendeesPlaceholder')}
+                      rows={3}
+                      className="mt-1 w-full resize-y rounded-md border border-border bg-background px-2 py-1.5 font-mono text-[12px] text-foreground outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-60"
+                    />
+                    <p className="text-[10px] leading-snug text-muted-foreground">
+                      {t('calendar.eventDialog.attendeesInviteHint')}
+                    </p>
+                  </div>
                 </PropertyRow>
               </div>
             ) : selectedAccount?.provider === 'microsoft' ? (
@@ -1781,14 +1798,19 @@ export function CalendarEventDialog({
                   </div>
                 </PropertyRow>
                 <PropertyRow icon={Users} label={t('calendar.eventDialog.attendeesRowLabel')}>
-                  <textarea
-                    value={attendeeInput}
-                    onChange={(e): void => setAttendeeInput(e.target.value)}
-                    disabled={msTeamsUiLocked}
-                    placeholder={t('calendar.eventDialog.attendeesPlaceholder')}
-                    rows={3}
-                    className="mt-1 w-full resize-y rounded-md border border-border bg-background px-2 py-1.5 font-mono text-[12px] text-foreground outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-60"
-                  />
+                  <div className="space-y-1.5">
+                    <textarea
+                      value={attendeeInput}
+                      onChange={(e): void => setAttendeeInput(e.target.value)}
+                      disabled={msTeamsUiLocked}
+                      placeholder={t('calendar.eventDialog.attendeesPlaceholder')}
+                      rows={3}
+                      className="mt-1 w-full resize-y rounded-md border border-border bg-background px-2 py-1.5 font-mono text-[12px] text-foreground outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-60"
+                    />
+                    <p className="text-[10px] leading-snug text-muted-foreground">
+                      {t('calendar.eventDialog.attendeesInviteHint')}
+                    </p>
+                  </div>
                 </PropertyRow>
               </div>
             ) : null)}
@@ -1897,13 +1919,10 @@ export function CalendarEventDialog({
                 )}
               </PropertyRow>
               <PropertyRow icon={MapPin} label={t('calendar.eventDialog.locationRowLabel')}>
-                <input
-                  type="text"
+                <LocationAutocompleteInput
                   value={location}
-                  onChange={(e): void => setLocation(e.target.value)}
+                  onChange={setLocation}
                   disabled={eventFieldsLocked}
-                  placeholder={t('calendar.eventDialog.locationPlaceholder')}
-                  className="mt-0.5 w-full rounded-md border border-border/60 bg-secondary/20 px-2 py-1.5 text-[13px] text-foreground outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-60"
                 />
               </PropertyRow>
               <PropertyRow icon={AlignLeft} label={t('calendar.eventDialog.description')}>

@@ -14,7 +14,8 @@ export function useCalendarFcEventContent(): (arg: EventContentArg) => ReturnTyp
     (): CalendarFcEventContentLabels => ({
       appointment: t('calendar.eventKindIcon.appointment'),
       mail: t('calendar.eventKindIcon.mail'),
-      task: t('calendar.eventKindIcon.task')
+      task: t('calendar.eventKindIcon.task'),
+      note: t('calendar.eventKindIcon.note')
     }),
     [t]
   )

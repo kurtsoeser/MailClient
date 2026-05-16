@@ -24,7 +24,10 @@ import {
   type WorkContentViewMode
 } from '@/app/work/work-view-mode-storage'
 import { WorkItemPreviewPanel } from '@/app/work/WorkItemPreviewPanel'
-import type { CloudTaskSaveDraft } from '@/app/work/CloudTaskWorkItemDetail'
+import type {
+  CloudTaskDisplayPatch,
+  CloudTaskSaveDraft
+} from '@/app/work/CloudTaskWorkItemDetail'
 import { loadMasterWorkItems } from '@/app/work-items/load-master-work-items'
 import { toggleWorkItemCompleted } from '@/app/work-items/work-item-actions'
 import { openWorkItemInCalendar } from '@/app/work-items/work-item-calendar-nav'
@@ -196,6 +199,33 @@ export function WorkShell(): JSX.Element {
         setError(e instanceof Error ? e.message : String(e))
       } finally {
         setSaving(false)
+      }
+    },
+    [selected, reload]
+  )
+
+  const patchCloudTaskDisplay = useCallback(
+    async (patch: CloudTaskDisplayPatch): Promise<void> => {
+      if (!selected || selected.kind !== 'cloud_task') return
+      try {
+        const next = await window.mailClient.tasks.patchTaskDisplay({
+          accountId: selected.accountId,
+          listId: selected.listId,
+          taskId: selected.taskId,
+          ...patch
+        })
+        setSelected((prev) =>
+          prev?.kind === 'cloud_task'
+            ? {
+                ...prev,
+                task: next,
+                title: next.title?.trim() || prev.title
+              }
+            : prev
+        )
+        await reload()
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
       }
     },
     [selected, reload]
@@ -446,6 +476,7 @@ export function WorkShell(): JSX.Element {
               onOpenInMail={handleOpenInMail}
               onCloudSave={saveCloudTask}
               onCloudDelete={deleteCloudTask}
+              onCloudDisplayChange={patchCloudTaskDisplay}
             />
           </div>
         </div>

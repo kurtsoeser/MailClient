@@ -139,6 +139,8 @@ export interface OpenMeteoGeocodeHit {
   label: string
 }
 
+export type { LocationSearchLanguage, LocationSuggestion } from './location-search'
+
 export interface OpenMeteoForecastCurrent {
   temperatureC: number
   apparentTemperatureC: number
@@ -223,6 +225,23 @@ export interface SettingsBackupComposeScheduledSnapshot {
  * Notiz exportiert mit stabilen Schluesseln (Mail: Konto + Remote-Message-Id),
  * damit sie nach Import wieder an lokale message_id angebunden werden kann.
  */
+export interface SettingsBackupNoteSectionSnapshot {
+  name: string
+  icon?: string | null
+  iconColor?: string | null
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+  /** Index in noteSections-Array der Elternsektion; null = Wurzel. */
+  parentIndex?: number | null
+}
+
+export interface SettingsBackupUserNoteLinkSnapshot {
+  fromNoteIndex: number
+  toNoteIndex: number
+  createdAt: string
+}
+
 export interface SettingsBackupUserNoteSnapshot {
   kind: 'mail' | 'calendar' | 'standalone'
   mailAccountId?: string | null
@@ -237,6 +256,15 @@ export interface SettingsBackupUserNoteSnapshot {
   updatedAt: string
   eventTitleSnapshot?: string | null
   eventStartIsoSnapshot?: string | null
+  scheduledStartIso?: string | null
+  scheduledEndIso?: string | null
+  scheduledAllDay?: boolean
+  sectionIndex?: number | null
+  sortOrder?: number
+  iconId?: string | null
+  iconColor?: string | null
+  /** Indizes in userNotes-Array fuer Verknuepfungen (nur ausgehend). */
+  linkedToNoteIndices?: number[]
 }
 
 export interface SettingsBackupDatabaseExtras {
@@ -254,12 +282,14 @@ export interface SettingsBackupDatabaseExtras {
   metaFolders?: SettingsBackupMetaFolderSnapshot[]
   composeScheduledPending?: SettingsBackupComposeScheduledSnapshot[]
   userNotes?: SettingsBackupUserNoteSnapshot[]
+  noteSections?: SettingsBackupNoteSectionSnapshot[]
+  userNoteLinks?: SettingsBackupUserNoteLinkSnapshot[]
 }
 
 /**
  * Lokale Einstellungs-Sicherung (ohne Mails, ohne Konten-Token).
  * Enthaelt App-Config, Renderer-localStorage, Mail-Regeln, Workflow (Boards + QuickSteps),
- * Vorlagen, Meta-Ordner, VIP, Triage-Ordner, geplanten Versand (pending) und Kernnotizen.
+ * Vorlagen, Meta-Ordner, VIP, Triage-Ordner, geplanten Versand (pending) und Notizen.
  */
 export interface SettingsBackupPayload {
   formatVersion: typeof SETTINGS_BACKUP_FORMAT_VERSION
@@ -344,6 +374,8 @@ export interface CalendarGraphCalendarRow {
   color?: string | null
   /** In Outlook/365 gewaehlte Farbe; Vorrang vor `color`. */
   hexColor?: string | null
+  /** Nur MailClient: Anzeigefarbe bei schreibgeschuetzten/abonnierten Kalendern. */
+  displayColorOverrideHex?: string | null
   /** Graph `canEdit`; `false` z. B. bei rein freigegebenen Kalendern (Farbe nicht aenderbar). */
   canEdit?: boolean
   /** Standard: Microsoft Graph; `google` fuer Google Calendar API. */
@@ -424,9 +456,9 @@ export interface CalendarSaveEventInput {
   bodyHtml?: string | null
   /** Outlook-Kategorien (max. 25 Namen). */
   categories?: string[] | null
-  /** Microsoft 365: Einladungen (Graph `attendees`, Typ `required`). Beim PATCH: gesamte Liste ersetzen. */
+  /** Teilnehmer-Einladungen (Graph `attendees` / Google `attendees` + `sendUpdates`). Beim PATCH: gesamte Liste ersetzen. */
   attendeeEmails?: string[] | null
-  /** Microsoft 365: Teams-Besprechung (`isOnlineMeeting` / `onlineMeetingProvider`) — nicht fuer Ganztage. */
+  /** Microsoft 365: Teams-Besprechung (`isOnlineMeeting` / `onlineMeetingProvider`) — nicht fuer Ganztage. Einladungen unabhaengig davon. */
   teamsMeeting?: boolean | null
   /** Serientermin (nur Anlegen; Bearbeiten der Serie ist nicht implementiert). */
   recurrence?: CalendarSaveEventRecurrence | null
@@ -457,6 +489,8 @@ export interface CalendarGetEventResult {
   isOnlineMeeting: boolean
   /** Roh-HTML aus Graph (`body.contentType=html`) bzw. Google `description` (oft HTML). */
   bodyHtml: string | null
+  location?: string | null
+  organizer?: string | null
 }
 
 /** Termin in anderen Kalender / anderes Konto kopieren oder verschieben. */
@@ -537,6 +571,19 @@ export interface TaskItemRow {
   /** Faelligkeit als ISO-Datum (`YYYY-MM-DD`) oder UTC-ISO mit Uhrzeit, sonst null. */
   dueIso: string | null
   notes: string | null
+  /** Lokales Anzeige-Icon (`calendar-event-icons`), nicht mit Graph/Google synchronisiert. */
+  iconId?: string | null
+  /** Hex-Farbe für das Anzeige-Icon. */
+  iconColor?: string | null
+}
+
+/** Lokales Aufgaben-Icon und Farbe setzen/entfernen. */
+export interface TasksPatchTaskDisplayInput {
+  accountId: string
+  listId: string
+  taskId: string
+  iconId?: string | null
+  iconColor?: string | null
 }
 
 export interface TasksListListsInput {
@@ -882,6 +929,39 @@ export interface SearchHit extends MailListItem {
   folderWellKnown: string | null
 }
 
+export interface GlobalSearchNoteHit {
+  id: number
+  kind: UserNoteKind
+  title: string
+  updatedAt: string
+}
+
+export interface GlobalSearchTaskHit {
+  accountId: string
+  listId: string
+  taskId: string
+  title: string
+  notes: string | null
+  dueIso: string | null
+}
+
+export interface GlobalSearchContactHit {
+  id: number
+  accountId: string
+  displayName: string | null
+  primaryEmail: string | null
+  company: string | null
+}
+
+export interface GlobalSearchResult {
+  query: string
+  mails: SearchHit[]
+  notes: GlobalSearchNoteHit[]
+  calendarEvents: CalendarEventView[]
+  tasks: GlobalSearchTaskHit[]
+  contacts: GlobalSearchContactHit[]
+}
+
 /**
  * Einzelne Ausnahme-Regel (wird mit anderen Ausnahmen per ODER in NOT (...) kombiniert).
  * Innerhalb einer Regel gelten gesetzte Felder per UND.
@@ -1079,6 +1159,145 @@ export interface UserNote {
   updatedAt: string
   eventTitleSnapshot: string | null
   eventStartIsoSnapshot: string | null
+  scheduledStartIso: string | null
+  scheduledEndIso: string | null
+  scheduledAllDay: boolean
+  sectionId: number | null
+  sortOrder: number
+  /** Lokales Anzeige-Icon (`calendar-event-icons`), nicht mit Mail/Kalender synchronisiert. */
+  iconId?: string | null
+  iconColor?: string | null
+}
+
+/** Lokales Notiz-Icon und Farbe setzen/entfernen. */
+export interface UserNotePatchDisplayInput {
+  noteId: number
+  iconId?: string | null
+  iconColor?: string | null
+}
+
+export type UserNoteAttachmentKind = 'local' | 'cloud'
+
+export interface UserNoteAttachment {
+  id: number
+  noteId: number
+  kind: UserNoteAttachmentKind
+  name: string
+  contentType: string | null
+  size: number | null
+  /** Absoluter Pfad unter userData (nur `local`). */
+  localPath: string | null
+  /** OneDrive/SharePoint-`webUrl` (nur `cloud`). */
+  sourceUrl: string | null
+  providerType?: ComposeReferenceAttachment['providerType'] | null
+  createdAt: string
+}
+
+export interface UserNoteAttachmentAddLocalInput {
+  noteId: number
+  name: string
+  contentType: string
+  size: number
+  dataBase64: string
+}
+
+export interface UserNoteAttachmentAddCloudInput {
+  noteId: number
+  name: string
+  sourceUrl: string
+  providerType?: ComposeReferenceAttachment['providerType']
+}
+
+export interface NoteSection {
+  id: number
+  name: string
+  icon: string | null
+  iconColor: string | null
+  parentId: number | null
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface UserNoteLinkedItem {
+  id: number
+  kind: UserNoteKind
+  title: string | null
+  body: string
+  scheduledStartIso: string | null
+  updatedAt: string
+}
+
+export interface UserNoteScheduleInput {
+  id: number
+  scheduledStartIso: string
+  scheduledEndIso?: string | null
+  scheduledAllDay?: boolean
+}
+
+export interface UserNoteScheduleFields {
+  scheduledStartIso?: string | null
+  scheduledEndIso?: string | null
+  scheduledAllDay?: boolean
+}
+
+export interface NoteSectionCreateInput {
+  name: string
+  icon?: string | null
+  iconColor?: string | null
+  parentId?: number | null
+}
+
+export interface NoteSectionUpdateInput {
+  id: number
+  name?: string
+  icon?: string | null
+  iconColor?: string | null
+  parentId?: number | null
+}
+
+export interface NoteSectionReorderInput {
+  /** Geschwister-Gruppe (null = Wurzelebene). */
+  parentId?: number | null
+  orderedIds: number[]
+}
+
+export interface UserNoteMoveToSectionInput {
+  noteId: number
+  sectionId: number | null
+  sortOrder?: number
+}
+
+export interface UserNoteLinkInput {
+  fromNoteId: number
+  toNoteId: number
+}
+
+export type {
+  NoteEntityLinkTarget,
+  NoteEntityLinkTargetKind,
+  NoteEntityLinkedItem,
+  NoteLinkTargetCandidate,
+  NoteLinksBundle
+} from '@shared/note-entity-links'
+
+export interface UserNoteLinkAddInput {
+  fromNoteId: number
+  target: import('@shared/note-entity-links').NoteEntityLinkTarget
+}
+
+export interface UserNoteLinkRemoveInput {
+  fromNoteId: number
+  linkId: number
+  /** Ausgehend von dieser Notiz (Standard) oder eingehende Backlink-Verknuepfung. */
+  direction?: 'outgoing' | 'incoming'
+}
+
+export interface UserNoteListInRangeFilters {
+  startIso: string
+  endIso: string
+  kinds?: UserNoteKind[]
+  limit?: number
 }
 
 export interface UserNoteListItem extends UserNote {
@@ -1091,12 +1310,21 @@ export interface UserNoteListItem extends UserNote {
   mailReceivedAt: string | null
   mailIsRead: boolean | null
   mailHasAttachments: boolean | null
+  /** Erste ausgehende Verknuepfung (fuer Standard-Icon bei freien Notizen). */
+  primaryLinkKind?:
+    | 'note'
+    | 'mail'
+    | 'calendar_event'
+    | 'cloud_task'
+    | null
 }
 
-export interface UserNoteMailUpsertInput {
+export interface UserNoteMailUpsertInput extends UserNoteScheduleFields {
   messageId: number
   title?: string | null
   body: string
+  sectionId?: number | null
+  sortOrder?: number
 }
 
 export interface UserNoteCalendarKey {
@@ -1106,22 +1334,29 @@ export interface UserNoteCalendarKey {
   eventRemoteId: string
 }
 
-export interface UserNoteCalendarUpsertInput extends UserNoteCalendarKey {
+export interface UserNoteCalendarUpsertInput extends UserNoteCalendarKey, UserNoteScheduleFields {
   title?: string | null
   body: string
   eventTitleSnapshot?: string | null
   eventStartIsoSnapshot?: string | null
+  sectionId?: number | null
+  sortOrder?: number
 }
 
-export interface UserNoteStandaloneCreateInput {
+export interface UserNoteStandaloneCreateInput extends UserNoteScheduleFields {
   title?: string | null
   body?: string
+  sectionId?: number | null
+  sortOrder?: number
 }
 
-export interface UserNoteStandaloneUpdateInput {
+export interface UserNoteStandaloneUpdateInput extends UserNoteScheduleFields {
   id: number
   title?: string | null
   body?: string
+  sectionId?: number | null
+  sortOrder?: number
+  clearSchedule?: boolean
 }
 
 export interface UserNoteListFilters {
@@ -1130,6 +1365,14 @@ export interface UserNoteListFilters {
   dateFrom?: string | null
   dateTo?: string | null
   search?: string | null
+  scheduledOnly?: boolean
+  sectionId?: number | null
+  limit?: number
+}
+
+export interface UserNoteSearchFilters {
+  query: string
+  kinds?: UserNoteKind[]
   limit?: number
 }
 
@@ -1230,7 +1473,8 @@ export const IPC = {
     getConnectivity: 'app:get-connectivity',
     setLaunchOnLogin: 'app:set-launch-on-login',
     showTestNotification: 'app:show-test-notification',
-    openExternal: 'app:open-external'
+    openExternal: 'app:open-external',
+    globalSearch: 'app:global-search'
   },
   config: {
     get: 'config:get',
@@ -1279,7 +1523,29 @@ export const IPC = {
     createStandalone: 'notes:create-standalone',
     updateStandalone: 'notes:update-standalone',
     delete: 'notes:delete',
-    list: 'notes:list'
+    list: 'notes:list',
+    search: 'notes:search',
+    getById: 'notes:get-by-id',
+    listInRange: 'notes:list-in-range',
+    setSchedule: 'notes:set-schedule',
+    clearSchedule: 'notes:clear-schedule',
+    moveToSection: 'notes:move-to-section',
+    sectionsList: 'notes:sections:list',
+    sectionsCreate: 'notes:sections:create',
+    sectionsUpdate: 'notes:sections:update',
+    sectionsDelete: 'notes:sections:delete',
+    sectionsReorder: 'notes:sections:reorder',
+    linksList: 'notes:links:list',
+    linksAdd: 'notes:links:add',
+    linksRemove: 'notes:links:remove',
+    linksSearchTargets: 'notes:links:search-targets',
+    patchDisplay: 'notes:patch-display',
+    attachmentsList: 'notes:attachments:list',
+    attachmentsAddLocal: 'notes:attachments:add-local',
+    attachmentsAddCloud: 'notes:attachments:add-cloud',
+    attachmentsRemove: 'notes:attachments:remove',
+    attachmentsOpen: 'notes:attachments:open',
+    attachmentsSaveAs: 'notes:attachments:save-as'
   },
   mail: {
     listFolders: 'mail:list-folders',
@@ -1392,6 +1658,7 @@ export const IPC = {
     createTask: 'tasks:create-task',
     updateTask: 'tasks:update-task',
     patchTask: 'tasks:patch-task',
+    patchTaskDisplay: 'tasks:patch-task-display',
     deleteTask: 'tasks:delete-task',
     bulkDeleteCompletedFlaggedEmailTasks: 'tasks:bulk-delete-completed-flagged-email-tasks',
     listPlannedSchedules: 'tasks:list-planned-schedules',
@@ -1402,6 +1669,7 @@ export const IPC = {
   },
   people: {
     list: 'people:list',
+    getById: 'people:get-by-id',
     getNavCounts: 'people:get-nav-counts',
     syncAccount: 'people:sync-account',
     syncAll: 'people:sync-all',
@@ -1440,6 +1708,10 @@ export const IPC = {
   weather: {
     geocode: 'weather:geocode',
     forecast: 'weather:forecast'
+  },
+  location: {
+    search: 'location:search',
+    reverse: 'location:reverse'
   },
   notion: {
     getStatus: 'notion:get-status',

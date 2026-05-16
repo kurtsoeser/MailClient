@@ -6,6 +6,10 @@ import { useTranslation } from 'react-i18next'
 import { CheckSquare, Square } from 'lucide-react'
 import type { WorkItemPlannedSchedule } from '@shared/work-item'
 import type { TaskItemWithContext } from '@/app/tasks/tasks-types'
+import type { CloudTaskDisplayPatch } from '@/app/work/CloudTaskWorkItemDetail'
+import { CalendarEventIconPicker } from '@/components/CalendarEventIconPicker'
+import { IconColorPickerFooter } from '@/components/IconColorPickerFooter'
+import { resolveEntityIconColor } from '@shared/entity-icon-color'
 import { RichTextNotesPreview } from '@/components/RichTextNotesPreview'
 import { useThemeStore } from '@/stores/theme'
 import { cn } from '@/lib/utils'
@@ -35,8 +39,9 @@ export function CloudTaskItemPreview(props: {
   planned?: WorkItemPlannedSchedule | null
   accountDisplayName?: string
   className?: string
+  onDisplayChange?: (patch: CloudTaskDisplayPatch) => void | Promise<void>
 }): JSX.Element {
-  const { task, planned, accountDisplayName, className } = props
+  const { task, planned, accountDisplayName, className, onDisplayChange } = props
   const { t, i18n } = useTranslation()
   const viewerTheme = useThemeStore((s) => s.effective)
   const dfLocale: Locale = i18n.language.startsWith('de') ? deFns : enUSFns
@@ -55,7 +60,29 @@ export function CloudTaskItemPreview(props: {
         <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
           {t('calendar.cloudTaskPreview.sourceLabel')}
         </p>
-        <h2 className="text-[17px] font-semibold leading-snug text-foreground">{title}</h2>
+        <div className="flex items-start gap-2">
+          {onDisplayChange ? (
+            <CalendarEventIconPicker
+              layout="compact"
+              openOn="doubleClick"
+              iconId={task.iconId}
+              iconColorHex={resolveEntityIconColor(task.iconColor)}
+              title={title}
+              onIconChange={(iconId): void =>
+                void onDisplayChange({ iconId: iconId ?? null })
+              }
+              footer={
+                <IconColorPickerFooter
+                  iconColor={task.iconColor}
+                  onIconColorChange={(iconColor): void => void onDisplayChange({ iconColor })}
+                />
+              }
+            />
+          ) : null}
+          <h2 className="min-w-0 flex-1 text-[17px] font-semibold leading-snug text-foreground">
+            {title}
+          </h2>
+        </div>
         {accountDisplayName ? (
           <p className="text-[12px] text-muted-foreground">
             {accountDisplayName}

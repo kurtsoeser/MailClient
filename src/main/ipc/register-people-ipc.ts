@@ -75,6 +75,13 @@ export function registerPeopleIpc(): void {
     return listPeopleForUi(normalizeListInput(input))
   })
 
+  ipcMain.removeHandler(IPC.people.getById)
+  ipcMain.handle(IPC.people.getById, (_event, contactId: unknown): PeopleContactView | null => {
+    const id = typeof contactId === 'number' ? contactId : Number(contactId)
+    if (!Number.isFinite(id) || id <= 0) return null
+    return getPeopleContactById(id)
+  })
+
   ipcMain.removeHandler(IPC.people.getNavCounts)
   ipcMain.handle(IPC.people.getNavCounts, async (): Promise<PeopleNavCounts> => {
     return getPeopleNavCounts()

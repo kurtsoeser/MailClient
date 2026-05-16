@@ -227,6 +227,14 @@
       border-color 0.2s ease;
   }
 
+  /**
+   * Erste Modul-Navigations-Spalte (Mail-Ordner, Kalender, Kontakte, Aufgaben, Notizen).
+   * Einheitlich `bg-sidebar` — Mini-Monat nutzt `bg-card` in MiniMonthGrid.
+   */
+  .module-nav-column {
+    @apply flex h-full min-h-0 shrink-0 flex-col border-r border-border bg-sidebar text-sidebar-foreground;
+  }
+
   /** Linke Spalte: nur rechte Kante, kein „Rahmen“ rundherum. */
   .glass-sidebar {
     background: hsl(var(--glass-surface));
@@ -408,5 +416,20 @@
 
   .ProseMirror table.mail-tbl-shadow {
     box-shadow: 0 2px 14px hsl(0 0% 0% / 0.2);
+  }
+
+  /**
+   * Mail-/Kalender-HTML-Vorschau (Shadow-Host): Hintergrund und color-scheme
+   * muessen im Light-DOM gesetzt werden — Tailwind/bg-transparent und die App-
+   * .dark-Klasse duerfen den :host-Hintergrund im Shadow sonst uebersteuern.
+   */
+  .mail-reading-shadow-host[data-mail-viewer-theme='light'] {
+    background-color: #ffffff;
+    color-scheme: light;
+  }
+
+  .mail-reading-shadow-host[data-mail-viewer-theme='dark'] {
+    background-color: #2a2a2a;
+    color-scheme: light;
   }
 }

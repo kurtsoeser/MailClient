@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  removeCloudTaskCalendarEventsByTaskKey,
   removeDuplicateFullCalendarEventsById,
   scheduleRemoveDuplicateFullCalendarEventsById
 } from '@/app/calendar/calendar-fc-event-source'

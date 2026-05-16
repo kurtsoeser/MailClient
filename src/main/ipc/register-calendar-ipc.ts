@@ -50,6 +50,11 @@ import {
 } from '../calendar-service'
 import { transferCalendarEvent } from '../calendar-event-transfer'
 import { assertAppOnline } from '../network-status'
+import {
+  listStandardCalendarFoldersFromCache,
+  setCalendarFolderDisplayColorOverride
+} from '../db/calendar-folders-repo'
+import { graphCalendarColorToDisplayHex } from '@shared/graph-calendar-colors'
 
 export function registerCalendarIpc(): void {
   ipcMain.removeHandler(IPC.calendar.listEvents)
@@ -68,7 +73,7 @@ export function registerCalendarIpc(): void {
   ipcMain.handle(
     IPC.calendar.listCalendars,
     async (_event, args: CalendarListCalendarsInput): Promise<CalendarGraphCalendarRow[]> => {
-      assertAppOnline()
+      if (args.forceRefresh === true) assertAppOnline()
       return listCalendarsCached(args.accountId, { forceRefresh: args.forceRefresh === true })
     }
   )
@@ -90,19 +95,35 @@ export function registerCalendarIpc(): void {
   ipcMain.handle(
     IPC.calendar.patchCalendarColor,
     async (_event, args: CalendarPatchCalendarColorInput): Promise<void> => {
-      assertAppOnline()
       if (!args?.accountId?.trim() || !args.graphCalendarId?.trim() || !args.color?.trim()) {
         throw new Error('Ungueltige Parameter fuer Kalenderfarbe.')
       }
+      const accountId = args.accountId.trim()
+      const graphCalendarId = args.graphCalendarId.trim()
+      const colorPreset = args.color.trim()
       const accounts = await listAccounts()
-      const acc = accounts.find((a) => a.id === args.accountId.trim())
-      if (acc?.provider === 'google') {
-        throw new Error('Kalenderfarben aendern wird fuer Google-Konten noch nicht unterstuetzt.')
+      const acc = accounts.find((a) => a.id === accountId)
+      const cached = listStandardCalendarFoldersFromCache(accountId).find((c) => c.id === graphCalendarId)
+      const canPatchRemote =
+        acc?.provider === 'microsoft' &&
+        cached?.canEdit !== false &&
+        cached?.calendarKind !== 'm365Group'
+
+      if (!canPatchRemote) {
+        const hex =
+          colorPreset === 'auto' ? null : graphCalendarColorToDisplayHex(null, colorPreset)
+        if (colorPreset !== 'auto' && !hex) {
+          throw new Error('Ungueltige Kalenderfarbe.')
+        }
+        setCalendarFolderDisplayColorOverride(accountId, graphCalendarId, hex)
+        return
       }
+
+      assertAppOnline()
       await patchMicrosoftCalendarColor({
-        accountId: args.accountId.trim(),
-        graphCalendarId: args.graphCalendarId.trim(),
-        color: args.color.trim()
+        accountId,
+        graphCalendarId,
+        color: colorPreset
       })
     }
   )

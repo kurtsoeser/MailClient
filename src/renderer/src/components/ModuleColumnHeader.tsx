@@ -27,11 +27,21 @@ export const moduleColumnHeaderShellBarClass =
   'flex h-10 min-h-0 shrink-0 items-center justify-between gap-2 border-b border-border bg-card px-2 text-xs'
 
 /**
+ * Kopfzeile innerhalb der dunklen Nav-Spalte (`bg-sidebar`) — ohne `bg-card`.
+ */
+export const moduleColumnHeaderNavShellBarClass =
+  'flex h-10 min-h-0 shrink-0 items-center justify-between gap-2 border-b border-border px-2 text-xs'
+
+/**
  * Zweite Zeile unter der Shell-Leiste (Suche, Filterchips, Datumsfelder …).
  * Einheitliche Ränder; Höhe folgt dem Inhalt.
  */
 export const moduleColumnHeaderSubToolbarClass =
   'shrink-0 space-y-2 border-b border-border bg-card px-2 py-2 text-xs'
+
+/** Wie {@link moduleColumnHeaderSubToolbarClass}, für dunkle Nav-Spalte ohne `bg-card`. */
+export const moduleColumnHeaderNavSubToolbarClass =
+  'shrink-0 space-y-2 border-b border-border px-2 py-2 text-xs'
 
 export const moduleColumnHeaderTitleClass = 'min-w-0 shrink-0 font-semibold text-foreground'
 

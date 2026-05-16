@@ -1,4 +1,4 @@
-import { touchTaskListSyncState } from './db/cloud-tasks-repo'
+import { patchCloudTaskDisplay, touchTaskListSyncState } from './db/cloud-tasks-repo'
 import {
   deleteCloudTask,
   invalidateTaskListSyncState,
@@ -7,7 +7,7 @@ import {
   upsertCloudTasks
 } from './tasks-cache-service'
 import { broadcastTasksChanged } from './ipc/ipc-broadcasts'
-import type { TaskItemRow } from '@shared/types'
+import type { TaskItemRow, TasksPatchTaskDisplayInput } from '@shared/types'
 
 export function afterTaskCreated(accountId: string, task: TaskItemRow): void {
   upsertCloudTasks(accountId, [task])
@@ -19,6 +19,15 @@ export function afterTaskUpdated(accountId: string, task: TaskItemRow): void {
   upsertCloudTasks(accountId, [task])
   touchList(accountId, task.listId)
   broadcastTasksChanged(accountId)
+}
+
+export function afterTaskDisplayPatched(input: TasksPatchTaskDisplayInput): void {
+  patchCloudTaskDisplay(input.accountId, input.listId, input.taskId, {
+    iconId: input.iconId,
+    iconColor: input.iconColor
+  })
+  touchList(input.accountId, input.listId)
+  broadcastTasksChanged(input.accountId)
 }
 
 export function afterTaskDeleted(accountId: string, listId: string, taskId: string): void {

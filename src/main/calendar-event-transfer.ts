@@ -95,7 +95,9 @@ export async function transferCalendarEvent(
       (tgtAcc.provider === 'microsoft' ? src.categories ?? null : null),
     attendeeEmails:
       input.payloadOverride?.attendeeEmails ??
-      (tgtAcc.provider === 'microsoft' ? detail.attendeeEmails : null),
+      (tgtAcc.provider === 'microsoft' || tgtAcc.provider === 'google'
+        ? detail.attendeeEmails
+        : null),
     teamsMeeting:
       input.payloadOverride?.teamsMeeting ??
       (tgtAcc.provider === 'microsoft' && !isAllDay ? detail.isOnlineMeeting : null)

@@ -9,6 +9,7 @@ import {
   format,
   isSameDay,
   isSameMonth,
+  startOfDay,
   startOfMonth,
   startOfWeek
 } from 'date-fns'
@@ -38,12 +39,19 @@ export interface MiniMonthInboxDropHandlers {
   onDayDrop: (e: React.DragEvent, dateStr: string) => void
 }
 
+export interface MiniMonthSelectedRange {
+  startInclusive: Date
+  endInclusive: Date
+}
+
 export interface MiniMonthGridProps {
   monthAnchor: Date
   /** Vergleich fuer «Heute»-Markierung; Standard: jetzt. */
   today?: Date
   onPrevMonth: () => void
   onNextMonth: () => void
+  /** Persistente Markierung (z. B. Notizen-Filter). */
+  selectedRange?: MiniMonthSelectedRange | null
   /** Kalender-Modul: Zeiger-Zug waehlt einen Tag- oder Mehr-Tage-Zeitraum. */
   onSelectDayRange?: (startInclusive: Date, endInclusive: Date) => void
   /** Inbox-Spalte: Mail per Drag auf Tag terminieren. */
@@ -56,11 +64,25 @@ export interface MiniMonthGridProps {
  * Monatsuebersicht wie in der Kalender-Shell: abgerundeter Kartenrahmen, Wochentage,
  * «Heute» mit destructive-Kreis, ausserhalb des Monats abgeschwaecht.
  */
+function dayInInclusiveRange(d: Date, range: MiniMonthSelectedRange): boolean {
+  const lo =
+    compareAsc(range.startInclusive, range.endInclusive) <= 0
+      ? startOfDay(range.startInclusive)
+      : startOfDay(range.endInclusive)
+  const hi =
+    compareAsc(range.startInclusive, range.endInclusive) <= 0
+      ? startOfDay(range.endInclusive)
+      : startOfDay(range.startInclusive)
+  const day = startOfDay(d)
+  return compareAsc(day, lo) >= 0 && compareAsc(day, hi) <= 0
+}
+
 export function MiniMonthGrid({
   monthAnchor,
   today = new Date(),
   onPrevMonth,
   onNextMonth,
+  selectedRange = null,
   onSelectDayRange,
   inboxDrop,
   onDayClick
@@ -134,9 +156,10 @@ export function MiniMonthGrid({
           const inMonth = isSameMonth(d, monthAnchor)
           const isTodayCell = isSameDay(d, today)
           const inDraft = Boolean(onSelectDayRange) && dayInDraftRange(d)
+          const inSelected = Boolean(selectedRange) && dayInInclusiveRange(d, selectedRange!)
           const dateStr = format(d, 'yyyy-MM-dd')
           const dropHover = Boolean(inboxDrop && inboxDrop.dropHoverDate === dateStr)
-          const rangeOrDrop = inDraft || dropHover
+          const rangeOrDrop = inDraft || dropHover || inSelected
 
           return (
             <button

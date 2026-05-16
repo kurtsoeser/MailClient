@@ -44,6 +44,17 @@ export function graphCalendarColorToDisplayHex(
   return CALENDAR_COLOR_ENUM_TO_HEX[key] ?? null
 }
 
+/** Einheitliche Anzeigefarbe fuer Sidebar, Termine und Farbmenue. */
+export function resolveCalendarDisplayHex(cal: {
+  hexColor?: string | null
+  color?: string | null
+  displayColorOverrideHex?: string | null
+}): string | null {
+  const override = normalizeGraphHexColor(cal.displayColorOverrideHex)
+  if (override) return override
+  return graphCalendarColorToDisplayHex(cal.hexColor, cal.color)
+}
+
 /** Graph `calendar.color` (PATCH): nur von Microsoft dokumentierte `calendarColor`-Werte (kein `lightMagenta` o. a.). */
 export const GRAPH_CALENDAR_COLOR_PRESET_IDS = [
   'auto',

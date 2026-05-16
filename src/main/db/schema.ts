@@ -390,7 +390,7 @@ export const MIGRATIONS: Migration[] = [
   },
   {
     version: 13,
-    description: 'Kernnotizen fuer Mails, Kalendertermine und freie Notizen',
+    description: 'Notizen fuer Mails, Kalendertermine und freie Notizen',
     sql: `
       CREATE TABLE IF NOT EXISTS user_notes (
         id                       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -690,6 +690,232 @@ export const MIGRATIONS: Migration[] = [
     description: 'Kalender-Termine: lokales Anzeige-Icon (icon_id)',
     sql: `
       ALTER TABLE calendar_events ADD COLUMN icon_id TEXT;
+    `
+  },
+  {
+    version: 25,
+    description: 'Kalender-Ordner: lokale Anzeigefarbe (z. B. abonnierte Kalender)',
+    sql: `
+      ALTER TABLE calendar_folders ADD COLUMN display_color_override_hex TEXT;
+    `
+  },
+  {
+    version: 26,
+    description: 'Notizen: Kalenderplanung, Sektionen und Verknuepfungen',
+    sql: `
+      CREATE TABLE IF NOT EXISTS note_sections (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        name       TEXT NOT NULL,
+        icon       TEXT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      ALTER TABLE user_notes ADD COLUMN scheduled_start_iso TEXT;
+      ALTER TABLE user_notes ADD COLUMN scheduled_end_iso TEXT;
+      ALTER TABLE user_notes ADD COLUMN scheduled_all_day INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE user_notes ADD COLUMN section_id INTEGER NULL REFERENCES note_sections(id) ON DELETE SET NULL;
+      ALTER TABLE user_notes ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
+
+      CREATE TABLE IF NOT EXISTS user_note_links (
+        from_note_id INTEGER NOT NULL REFERENCES user_notes(id) ON DELETE CASCADE,
+        to_note_id   INTEGER NOT NULL REFERENCES user_notes(id) ON DELETE CASCADE,
+        created_at   TEXT NOT NULL,
+        PRIMARY KEY (from_note_id, to_note_id),
+        CHECK (from_note_id != to_note_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_user_notes_scheduled_start
+        ON user_notes(scheduled_start_iso)
+        WHERE scheduled_start_iso IS NOT NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_user_notes_section_sort
+        ON user_notes(section_id, sort_order, id);
+    `
+  },
+  {
+    version: 27,
+    description: 'Notizen-Sektionen: Untersektionen (parent_id)',
+    sql: `
+      ALTER TABLE note_sections ADD COLUMN parent_id INTEGER NULL
+        REFERENCES note_sections(id) ON DELETE SET NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_note_sections_parent_sort
+        ON note_sections(parent_id, sort_order, id);
+    `
+  },
+  {
+    version: 28,
+    description: 'Notizen-Sektionen: Icon-Farbe (icon_color)',
+    sql: `
+      ALTER TABLE note_sections ADD COLUMN icon_color TEXT NULL;
+    `
+  },
+  {
+    version: 29,
+    description: 'Cloud-Aufgaben: lokales Anzeige-Icon und Farbe',
+    sql: `
+      ALTER TABLE cloud_tasks ADD COLUMN icon_id TEXT NULL;
+      ALTER TABLE cloud_tasks ADD COLUMN icon_color TEXT NULL;
+    `
+  },
+  {
+    version: 30,
+    description: 'Notizen: polymorphe Objekt-Verknuepfungen',
+    sql: `
+      CREATE TABLE IF NOT EXISTS user_note_entity_links (
+        id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+        from_note_id            INTEGER NOT NULL REFERENCES user_notes(id) ON DELETE CASCADE,
+        target_kind             TEXT NOT NULL,
+        to_note_id              INTEGER NULL REFERENCES user_notes(id) ON DELETE CASCADE,
+        mail_message_id         INTEGER NULL,
+        calendar_account_id     TEXT NULL,
+        calendar_graph_event_id TEXT NULL,
+        task_account_id         TEXT NULL,
+        task_list_id            TEXT NULL,
+        task_id                 TEXT NULL,
+        created_at              TEXT NOT NULL,
+        CHECK (
+          (target_kind = 'note' AND to_note_id IS NOT NULL
+            AND mail_message_id IS NULL AND calendar_account_id IS NULL
+            AND calendar_graph_event_id IS NULL AND task_account_id IS NULL
+            AND task_list_id IS NULL AND task_id IS NULL)
+          OR (target_kind = 'mail' AND mail_message_id IS NOT NULL
+            AND to_note_id IS NULL AND calendar_account_id IS NULL
+            AND calendar_graph_event_id IS NULL AND task_account_id IS NULL
+            AND task_list_id IS NULL AND task_id IS NULL)
+          OR (target_kind = 'calendar_event'
+            AND calendar_account_id IS NOT NULL AND calendar_graph_event_id IS NOT NULL
+            AND to_note_id IS NULL AND mail_message_id IS NULL
+            AND task_account_id IS NULL AND task_list_id IS NULL AND task_id IS NULL)
+          OR (target_kind = 'cloud_task'
+            AND task_account_id IS NOT NULL AND task_list_id IS NOT NULL AND task_id IS NOT NULL
+            AND to_note_id IS NULL AND mail_message_id IS NULL
+            AND calendar_account_id IS NULL AND calendar_graph_event_id IS NULL)
+        ),
+        CHECK (target_kind != 'note' OR from_note_id != to_note_id)
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_unq_note_entity_link_note
+        ON user_note_entity_links(from_note_id, to_note_id)
+        WHERE target_kind = 'note';
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_unq_note_entity_link_mail
+        ON user_note_entity_links(from_note_id, mail_message_id)
+        WHERE target_kind = 'mail';
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_unq_note_entity_link_calendar
+        ON user_note_entity_links(from_note_id, calendar_account_id, calendar_graph_event_id)
+        WHERE target_kind = 'calendar_event';
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_unq_note_entity_link_task
+        ON user_note_entity_links(from_note_id, task_account_id, task_list_id, task_id)
+        WHERE target_kind = 'cloud_task';
+
+      CREATE INDEX IF NOT EXISTS idx_note_entity_links_from
+        ON user_note_entity_links(from_note_id);
+      CREATE INDEX IF NOT EXISTS idx_note_entity_links_to_note
+        ON user_note_entity_links(to_note_id)
+        WHERE target_kind = 'note';
+
+      INSERT INTO user_note_entity_links (from_note_id, target_kind, to_note_id, created_at)
+      SELECT from_note_id, 'note', to_note_id, created_at FROM user_note_links;
+    `
+  },
+  {
+    version: 31,
+    description: 'Notizen: lokales Anzeige-Icon und Farbe pro Seite',
+    sql: `
+      ALTER TABLE user_notes ADD COLUMN icon_id TEXT NULL;
+      ALTER TABLE user_notes ADD COLUMN icon_color TEXT NULL;
+    `
+  },
+  {
+    version: 32,
+    description: 'Notizen: lokale Dateien und OneDrive/SharePoint-Anhaenge',
+    sql: `
+      CREATE TABLE IF NOT EXISTS user_note_attachments (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        note_id         INTEGER NOT NULL REFERENCES user_notes(id) ON DELETE CASCADE,
+        kind            TEXT NOT NULL CHECK (kind IN ('local', 'cloud')),
+        name            TEXT NOT NULL,
+        content_type    TEXT,
+        size            INTEGER,
+        local_path      TEXT,
+        source_url      TEXT,
+        provider_type   TEXT,
+        created_at      TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_user_note_attachments_note
+        ON user_note_attachments(note_id, created_at, id);
+    `
+  },
+  {
+    version: 33,
+    description: 'Notizen: FTS5-Volltextsuche',
+    sql: `
+      CREATE VIRTUAL TABLE IF NOT EXISTS user_notes_fts USING fts5(
+        title,
+        body,
+        event_title,
+        mail_subject,
+        tokenize='unicode61'
+      );
+
+      CREATE TRIGGER IF NOT EXISTS user_notes_fts_ai AFTER INSERT ON user_notes BEGIN
+        INSERT INTO user_notes_fts(rowid, title, body, event_title, mail_subject)
+        VALUES (
+          new.id,
+          COALESCE(new.title, ''),
+          COALESCE(new.body, ''),
+          COALESCE(new.event_title_snapshot, ''),
+          COALESCE((SELECT subject FROM messages WHERE id = new.message_id), '')
+        );
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS user_notes_fts_ad AFTER DELETE ON user_notes BEGIN
+        INSERT INTO user_notes_fts(user_notes_fts, rowid, title, body, event_title, mail_subject)
+        VALUES ('delete', old.id, '', '', '', '');
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS user_notes_fts_au AFTER UPDATE ON user_notes BEGIN
+        INSERT INTO user_notes_fts(user_notes_fts, rowid, title, body, event_title, mail_subject)
+        VALUES ('delete', old.id, '', '', '', '');
+        INSERT INTO user_notes_fts(rowid, title, body, event_title, mail_subject)
+        VALUES (
+          new.id,
+          COALESCE(new.title, ''),
+          COALESCE(new.body, ''),
+          COALESCE(new.event_title_snapshot, ''),
+          COALESCE((SELECT subject FROM messages WHERE id = new.message_id), '')
+        );
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS messages_au_user_notes_fts
+      AFTER UPDATE OF subject ON messages
+      WHEN old.subject IS NOT new.subject BEGIN
+        INSERT INTO user_notes_fts(user_notes_fts, rowid, title, body, event_title, mail_subject)
+        SELECT 'delete', n.id, '', '', '', ''
+        FROM user_notes n
+        WHERE n.message_id = new.id;
+        INSERT INTO user_notes_fts(rowid, title, body, event_title, mail_subject)
+        SELECT
+          n.id,
+          COALESCE(n.title, ''),
+          COALESCE(n.body, ''),
+          COALESCE(n.event_title_snapshot, ''),
+          COALESCE(new.subject, '')
+        FROM user_notes n
+        WHERE n.message_id = new.id;
+      END;
+
+      INSERT INTO user_notes_fts(rowid, title, body, event_title, mail_subject)
+      SELECT
+        n.id,
+        COALESCE(n.title, ''),
+        COALESCE(n.body, ''),
+        COALESCE(n.event_title_snapshot, ''),
+        COALESCE(m.subject, '')
+      FROM user_notes n
+      LEFT JOIN messages m ON m.id = n.message_id;
     `
   }
 ]

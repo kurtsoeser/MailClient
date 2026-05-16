@@ -8,7 +8,8 @@ import {
 /** SVG-Markup für FullCalendar-Event-Inhalt (DOM, kein React-Root). */
 export function calendarEventIconSvgMarkup(
   iconId: string | undefined | null,
-  className: string
+  className: string,
+  colorHex?: string | null
 ): string | null {
   if (!calendarEventIconIsExplicit(iconId)) return null
   const Icon = resolveCalendarEventIcon(iconId)
@@ -17,6 +18,7 @@ export function calendarEventIconSvgMarkup(
       className,
       size: 14,
       strokeWidth: 2,
+      color: colorHex ?? undefined,
       'aria-hidden': true
     })
   )
@@ -25,9 +27,10 @@ export function calendarEventIconSvgMarkup(
 export function appendCalendarEventIconSvg(
   parent: HTMLElement,
   iconId: string | undefined | null,
-  className: string
+  className: string,
+  colorHex?: string | null
 ): void {
-  const markup = calendarEventIconSvgMarkup(iconId, className)
+  const markup = calendarEventIconSvgMarkup(iconId, className, colorHex)
   if (!markup) return
   const tpl = document.createElement('template')
   tpl.innerHTML = markup.trim()

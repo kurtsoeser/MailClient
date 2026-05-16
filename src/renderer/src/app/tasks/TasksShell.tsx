@@ -9,6 +9,7 @@ import {
   type MouseEvent
 } from 'react'
 import type FullCalendar from '@fullcalendar/react'
+import { addMonths, startOfMonth } from 'date-fns'
 import { Loader2, ListTodo, RefreshCw, Trash2, ChevronDown, Eraser } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { ConnectedAccount, TaskItemRow, TaskListRow } from '@shared/types'
@@ -64,7 +65,10 @@ import {
 } from '@/app/tasks/tasks-view-storage'
 import { loadPlannedScheduleMapForTasks } from '@/app/work-items/load-planned-schedules'
 import { taskItemToWorkItem } from '@/app/work-items/work-item-mapper'
-import type { CloudTaskSaveDraft } from '@/app/work/CloudTaskWorkItemDetail'
+import type {
+  CloudTaskDisplayPatch,
+  CloudTaskSaveDraft
+} from '@/app/work/CloudTaskWorkItemDetail'
 import { CalendarDockPanelSlide } from '@/app/calendar/CalendarDockPanelSlide'
 import { CalendarFloatingPanel } from '@/app/calendar/CalendarFloatingPanel'
 import { TasksDetailDockHeader, TasksDetailPanelBody } from '@/app/tasks/TasksDetailPanel'
@@ -77,6 +81,7 @@ import { useTasksDetailPanelLayoutStore } from '@/stores/tasks-detail-panel-layo
 import { CreateCloudTaskDialog } from '@/components/CreateCloudTaskDialog'
 import type { CalendarCreateRange } from '@/app/tasks/tasks-calendar-create-range'
 import { GLOBAL_CREATE_EVENT, useGlobalCreateNavigateStore } from '@/lib/global-create'
+import { useTasksPendingFocusStore } from '@/stores/tasks-pending-focus'
 
 function pickDefaultListId(rows: TaskListRow[]): string | null {
   if (rows.length === 0) return null
@@ -168,6 +173,13 @@ export function TasksShell(): JSX.Element {
   const [detailDockStripInDom, setDetailDockStripInDom] = useState(detailDockShow)
   const [calendarTitle, setCalendarTitle] = useState('')
   const tasksCalendarRef = useRef<FullCalendar | null>(null)
+  const [miniMonth, setMiniMonth] = useState(() => startOfMonth(new Date()))
+
+  const applyTasksMiniCalendarDayRange = useCallback((startInclusive: Date, endInclusive: Date): void => {
+    const lo = startInclusive <= endInclusive ? startInclusive : endInclusive
+    tasksCalendarRef.current?.getApi()?.gotoDate(lo)
+    setMiniMonth(startOfMonth(lo))
+  }, [])
   const [createTaskDialogOpen, setCreateTaskDialogOpen] = useState(false)
   const [createTaskInitialRange, setCreateTaskInitialRange] = useState<CalendarCreateRange | null>(
     null
@@ -506,6 +518,21 @@ export function TasksShell(): JSX.Element {
     selectionAnchorRef.current = null
   }, [])
 
+  const applyTaskRowUpdate = useCallback(
+    (next: TaskItemRow, ctx: Pick<TaskItemWithContext, 'accountId' | 'listName'>): void => {
+      const merged: TaskItemWithContext = { ...next, accountId: ctx.accountId, listName: ctx.listName }
+      if (isUnified) {
+        setUnifiedTasks((prev) =>
+          prev.map((x) => (taskItemKey(x) === taskItemKey(merged) ? merged : x))
+        )
+      } else {
+        setListTasks((prev) => prev.map((x) => (x.id === next.id ? next : x)))
+      }
+      setSelected((s) => (s && taskItemKey(s) === taskItemKey(merged) ? merged : s))
+    },
+    [isUnified]
+  )
+
   async function patchTask(item: TaskItemWithContext, patch: { completed?: boolean }): Promise<void> {
     const next = await window.mailClient.tasks.patchTask({
       accountId: item.accountId,
@@ -513,16 +540,21 @@ export function TasksShell(): JSX.Element {
       taskId: item.id,
       ...patch
     })
-    const ctx: TaskItemWithContext = { ...next, accountId: item.accountId, listName: item.listName }
-    if (isUnified) {
-      setUnifiedTasks((prev) =>
-        prev.map((x) => (taskItemKey(x) === taskItemKey(item) ? ctx : x))
-      )
-    } else {
-      setListTasks((prev) => prev.map((x) => (x.id === next.id ? next : x)))
-    }
-    setSelected((s) => (s && taskItemKey(s) === taskItemKey(item) ? ctx : s))
+    applyTaskRowUpdate(next, item)
   }
+
+  const patchTaskDisplay = useCallback(
+    async (item: TaskItemWithContext, patch: CloudTaskDisplayPatch): Promise<void> => {
+      const next = await window.mailClient.tasks.patchTaskDisplay({
+        accountId: item.accountId,
+        listId: item.listId,
+        taskId: item.id,
+        ...patch
+      })
+      applyTaskRowUpdate(next, item)
+    },
+    [applyTaskRowUpdate]
+  )
 
   async function toggleCompleted(task: TaskItemWithContext): Promise<void> {
     try {
@@ -777,6 +809,40 @@ export function TasksShell(): JSX.Element {
   }, [taskAccounts.length, openCreateTaskDialog])
 
   useEffect(() => {
+    const pendingTask = useTasksPendingFocusStore.getState().takePendingTask()
+    if (!pendingTask) return
+    const targetKey = `${pendingTask.accountId}:${pendingTask.listId}:${pendingTask.taskId}`
+    persistTasksViewSelection({
+      kind: 'list',
+      accountId: pendingTask.accountId,
+      listId: pendingTask.listId
+    })
+    setSelection({ kind: 'list', accountId: pendingTask.accountId, listId: pendingTask.listId })
+    const fromUnified = unifiedTasksRef.current.find(
+      (r) => `${r.accountId}:${r.listId}:${r.id}` === targetKey
+    )
+    if (fromUnified) {
+      setSelected(fromUnified)
+      return
+    }
+    void window.mailClient.tasks
+      .listTasks({
+        accountId: pendingTask.accountId,
+        listId: pendingTask.listId,
+        showCompleted: true
+      })
+      .then((rows) => {
+        const listName =
+          listsByAccount[pendingTask.accountId]?.find((l) => l.id === pendingTask.listId)?.name ??
+          ''
+        const hit = rows.find((t) => t.id === pendingTask.taskId)
+        if (!hit) return
+        setSelected({ ...hit, accountId: pendingTask.accountId, listName })
+      })
+      .catch(() => undefined)
+  }, [listsByAccount])
+
+  useEffect(() => {
     function onGlobalCreate(e: Event): void {
       const ce = e as CustomEvent<{ kind?: string }>
       if (ce.detail?.kind !== 'task') return
@@ -845,6 +911,11 @@ export function TasksShell(): JSX.Element {
       saving={saving}
       onCloudSave={saveCloudTask}
       onCloudDelete={deleteSelectedCloudTask}
+      onCloudDisplayChange={
+        selected
+          ? (patch): Promise<void> => patchTaskDisplay(selected, patch)
+          : undefined
+      }
     />
   )
 
@@ -867,6 +938,15 @@ export function TasksShell(): JSX.Element {
           onRefreshAccountLists={handleRefreshAccountLists}
           onAccountExpanded={handleAccountExpanded}
           onAccountHeaderContextMenu={openTasksAccountContextMenu}
+          miniMonth={miniMonth}
+          onMiniMonthPrev={(): void => setMiniMonth((m) => addMonths(m, -1))}
+          onMiniMonthNext={(): void => setMiniMonth((m) => addMonths(m, 1))}
+          onMiniMonthSelectRange={applyTasksMiniCalendarDayRange}
+          miniMonthFooter={
+            <p className="mt-2 text-[10px] leading-snug text-muted-foreground">
+              {t('tasks.shell.miniCalendarHint')}
+            </p>
+          }
         />
       </div>
       <VerticalSplitter onDrag={onDragSidebar} ariaLabel={t('tasks.shell.splitterSidebar')} />

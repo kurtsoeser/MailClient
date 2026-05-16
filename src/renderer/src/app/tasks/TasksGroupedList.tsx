@@ -7,6 +7,7 @@ import type { ConnectedAccount } from '@shared/types'
 import { cn } from '@/lib/utils'
 import { resolvedAccountColorCss } from '@/lib/avatar-color'
 import { AccountColorStripe } from '@/components/AccountColorStripe'
+import { TaskDisplayIcon } from '@/components/TaskDisplayIcon'
 import { TodoDueBucketBadge } from '@/components/TodoDueBucketBadge'
 import {
   computeTaskListLayout,
@@ -203,7 +204,10 @@ export function TasksGroupedList({
                             task.completed && 'text-muted-foreground line-through'
                           )}
                         >
-                          <span className="line-clamp-2">{task.title}</span>
+                          <span className="flex items-start gap-1.5 line-clamp-2">
+                            <TaskDisplayIcon iconId={task.iconId} iconColor={task.iconColor} />
+                            <span className="min-w-0 flex-1">{task.title}</span>
+                          </span>
                           <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground">
                             {task.dueIso ? <span>{dueDateLabel(task.dueIso)}</span> : null}
                             {showAccountHint ? (

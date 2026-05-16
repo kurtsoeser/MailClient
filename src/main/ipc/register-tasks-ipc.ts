@@ -13,6 +13,7 @@ import {
   type TasksBulkDeleteCompletedFlaggedEmailResult,
   type TasksListListsInput,
   type TasksListTasksInput,
+  type TasksPatchTaskDisplayInput,
   type TasksPatchTaskInput,
   type TasksClearPlannedScheduleInput,
   type TasksListPlannedSchedulesInput,
@@ -36,9 +37,11 @@ import {
 import {
   afterTaskCreated,
   afterTaskDeleted,
+  afterTaskDisplayPatched,
   afterTaskUpdated
 } from '../tasks-cache-mutations'
 import { clearLocalTasksCacheForAccount } from '../tasks-cache-reset'
+import { getCloudTaskFromCache } from '../db/cloud-tasks-repo'
 import { listTaskListsCached, listTasksCached } from '../tasks-cache-service'
 import {
   createTaskForAccount,
@@ -153,8 +156,22 @@ export function registerTasksIpc(): void {
       completed: input.completed
     })
     afterTaskUpdated(accountId, task)
-    return task
+    return getCloudTaskFromCache(accountId, requireListId(input?.listId), requireTaskId(input?.taskId)) ?? task
   })
+
+  ipcMain.removeHandler(IPC.tasks.patchTaskDisplay)
+  ipcMain.handle(
+    IPC.tasks.patchTaskDisplay,
+    async (_event, input: TasksPatchTaskDisplayInput): Promise<TaskItemRow> => {
+      const accountId = requireAccountId(input?.accountId)
+      const listId = requireListId(input?.listId)
+      const taskId = requireTaskId(input?.taskId)
+      afterTaskDisplayPatched(input)
+      const task = getCloudTaskFromCache(accountId, listId, taskId)
+      if (!task) throw new Error('Aufgabe nicht im Cache.')
+      return task
+    }
+  )
 
   ipcMain.removeHandler(IPC.tasks.updateTask)
   ipcMain.handle(IPC.tasks.updateTask, async (_event, input: TasksUpdateTaskInput): Promise<TaskItemRow> => {
@@ -170,7 +187,7 @@ export function registerTasksIpc(): void {
       completed: input.completed === true
     })
     afterTaskUpdated(accountId, task)
-    return task
+    return getCloudTaskFromCache(accountId, listId, taskId) ?? task
   })
 
   ipcMain.removeHandler(IPC.tasks.deleteTask)

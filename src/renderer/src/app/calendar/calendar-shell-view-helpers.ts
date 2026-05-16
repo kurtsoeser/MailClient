@@ -8,6 +8,8 @@ export function viewIdToLabel(viewId: string, tr: TFunction): string {
   if (viewId === 'timeGridDay') return tr('calendar.views.day')
   if (viewId === 'timeGridWeek') return tr('calendar.views.week')
   if (viewId === 'dayGridMonth') return tr('calendar.views.month')
+  if (viewId === 'multiMonthYear') return tr('calendar.views.year')
+  if (viewId === 'multiMonthQuarter') return tr('calendar.views.quarterYear')
   if (viewId === 'listWeek') return tr('calendar.views.list')
   const m = /^timeGrid(\d+)Day$/.exec(viewId)
   if (m) return tr('calendar.views.nDays', { count: Number(m[1]) })

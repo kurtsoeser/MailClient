@@ -42,7 +42,7 @@ export function RichTextNotesPreview({
     [isEmpty, safeHtml, viewerTheme]
   )
 
-  useSanitizedHtmlShadowRoot(shadowHostRef, shadowInnerHtml, 'task')
+  useSanitizedHtmlShadowRoot(shadowHostRef, shadowInnerHtml, 'task', viewerTheme)
 
   useLayoutEffect(() => {
     if (isEmpty) return
@@ -72,7 +72,8 @@ export function RichTextNotesPreview({
     >
       <div
         ref={shadowHostRef}
-        className="block w-full border-0 bg-transparent"
+        className="mail-reading-shadow-host block w-full border-0"
+        data-mail-viewer-theme={viewerTheme}
         style={{ height: frameHeight, minHeight: 48 }}
         role="document"
       />

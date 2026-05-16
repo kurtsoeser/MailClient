@@ -19,7 +19,6 @@ import {
   type DragEndEvent
 } from '@dnd-kit/core'
 import {
-  Calendar as CalendarIcon,
   ChevronDown,
   ChevronRight,
   Eye,
@@ -30,7 +29,8 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { CalendarGraphCalendarRow, ConnectedAccount } from '@shared/types'
-import { graphCalendarColorToDisplayHex } from '@shared/graph-calendar-colors'
+import { resolveCalendarDisplayHex } from '@shared/graph-calendar-colors'
+import { CalendarFolderColorSwatch } from '@/components/CalendarFolderColorSwatch'
 import { cn } from '@/lib/utils'
 import { resolvedAccountColorCss } from '@/lib/avatar-color'
 import { Avatar } from '@/components/Avatar'
@@ -333,10 +333,9 @@ export function CalendarShellSidebarCalendars({
     const calKey = calSidebarKey(accountId, c.id)
     const isPrimaryPlaceholder = c.id === SIDEBAR_DEFAULT_CAL_ID
     const isDefaultCal = Boolean(c.isDefaultCalendar || isPrimaryPlaceholder)
-    const displayHex = graphCalendarColorToDisplayHex(c.hexColor, c.color)
+    const displayHex = resolveCalendarDisplayHex(c)
     const iconHex =
       displayHex ?? (isPrimaryPlaceholder && acc ? resolvedAccountColorCss(acc.color) : null)
-    const iconHasExplicitColor = iconHex != null
     return (
       <li key={`${accountId}:${c.id}`} className="list-none">
         <div
@@ -369,12 +368,7 @@ export function CalendarShellSidebarCalendars({
           >
             {isHidden ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
           </button>
-          <CalendarIcon
-            className={cn('h-3.5 w-3.5 shrink-0', !iconHasExplicitColor && 'text-muted-foreground/90')}
-            style={iconHasExplicitColor ? { color: iconHex } : undefined}
-            strokeWidth={isDefaultCal ? 2.85 : 2}
-            aria-hidden
-          />
+          <CalendarFolderColorSwatch hex={iconHex} />
           <span className="min-w-0 flex-1 truncate text-foreground">{c.name}</span>
           {opts?.showAccountHint && acc ? (
             <span className="max-w-[72px] shrink-0 truncate text-[9px] text-muted-foreground/70" title={acc.email}>

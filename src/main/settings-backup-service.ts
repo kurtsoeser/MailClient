@@ -3,6 +3,8 @@ import type {
   AppConfig,
   SettingsBackupDatabaseExtras,
   SettingsBackupPayload,
+  SettingsBackupNoteSectionSnapshot,
+  SettingsBackupUserNoteLinkSnapshot,
   SettingsBackupUserNoteSnapshot,
   WorkflowColumn
 } from '@shared/types'
@@ -32,7 +34,20 @@ import {
   listPendingScheduledComposeForBackup,
   replacePendingScheduledComposeFromBackup
 } from './db/compose-scheduled-repo'
-import { listUserNotesForSettingsBackup, replaceAllUserNotesFromBackup } from './db/user-notes-repo'
+import {
+  listNoteSectionsForSettingsBackup,
+  replaceAllNoteSectionsFromBackup
+} from './db/note-sections-repo'
+import {
+  listUserNoteLinksForSettingsBackup,
+  replaceAllNoteLinksFromBackup
+} from './db/user-note-entity-links-repo'
+import {
+  listUserNoteIdsInBackupOrder,
+  listUserNotesForSettingsBackup,
+  replaceAllUserNotesFromBackup,
+  restoreUserNoteLinksFromSnapshots
+} from './db/user-notes-repo'
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return v != null && typeof v === 'object' && !Array.isArray(v)
@@ -165,6 +180,67 @@ function parseComposeScheduledBackup(
   return out
 }
 
+function parseNoteSectionsBackup(raw: unknown[]): SettingsBackupNoteSectionSnapshot[] {
+  const out: SettingsBackupNoteSectionSnapshot[] = []
+  for (const s of raw) {
+    if (!isRecord(s)) continue
+    if (typeof s.name !== 'string' || !s.name.trim()) continue
+    if (typeof s.createdAt !== 'string' || typeof s.updatedAt !== 'string') continue
+    const parentIndex =
+      s.parentIndex == null
+        ? null
+        : typeof s.parentIndex === 'number'
+          ? Math.floor(s.parentIndex)
+          : null
+    out.push({
+      name: s.name.trim(),
+      icon: s.icon == null ? null : typeof s.icon === 'string' ? s.icon : null,
+      sortOrder: typeof s.sortOrder === 'number' ? s.sortOrder : 0,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+      parentIndex
+    })
+  }
+  return out
+}
+
+function parseUserNoteLinksBackup(raw: unknown[]): SettingsBackupUserNoteLinkSnapshot[] {
+  const out: SettingsBackupUserNoteLinkSnapshot[] = []
+  for (const l of raw) {
+    if (!isRecord(l)) continue
+    if (typeof l.fromNoteIndex !== 'number' || typeof l.toNoteIndex !== 'number') continue
+    if (typeof l.createdAt !== 'string') continue
+    out.push({
+      fromNoteIndex: Math.floor(l.fromNoteIndex),
+      toNoteIndex: Math.floor(l.toNoteIndex),
+      createdAt: l.createdAt
+    })
+  }
+  return out
+}
+
+function parseScheduleExtras(n: Record<string, unknown>): {
+  scheduledStartIso?: string | null
+  scheduledEndIso?: string | null
+  scheduledAllDay?: boolean
+  sectionIndex?: number | null
+  sortOrder?: number
+  linkedToNoteIndices?: number[]
+} {
+  const scheduledStartIso =
+    n.scheduledStartIso == null ? null : typeof n.scheduledStartIso === 'string' ? n.scheduledStartIso : null
+  const scheduledEndIso =
+    n.scheduledEndIso == null ? null : typeof n.scheduledEndIso === 'string' ? n.scheduledEndIso : null
+  const scheduledAllDay = n.scheduledAllDay === true
+  const sectionIndex =
+    n.sectionIndex == null ? null : typeof n.sectionIndex === 'number' ? Math.floor(n.sectionIndex) : null
+  const sortOrder = typeof n.sortOrder === 'number' ? Math.floor(n.sortOrder) : 0
+  const linkedToNoteIndices = Array.isArray(n.linkedToNoteIndices)
+    ? n.linkedToNoteIndices.filter((x): x is number => typeof x === 'number').map((x) => Math.floor(x))
+    : []
+  return { scheduledStartIso, scheduledEndIso, scheduledAllDay, sectionIndex, sortOrder, linkedToNoteIndices }
+}
+
 function parseUserNotesBackup(raw: unknown[]): SettingsBackupUserNoteSnapshot[] {
   const out: SettingsBackupUserNoteSnapshot[] = []
   for (const n of raw) {
@@ -174,6 +250,7 @@ function parseUserNotesBackup(raw: unknown[]): SettingsBackupUserNoteSnapshot[] 
     if (typeof n.body !== 'string') continue
     if (typeof n.createdAt !== 'string' || typeof n.updatedAt !== 'string') continue
     const title = n.title == null ? null : typeof n.title === 'string' ? n.title : null
+    const scheduleExtras = parseScheduleExtras(n)
     if (kind === 'mail') {
       const mailAccountId =
         n.mailAccountId == null ? null : typeof n.mailAccountId === 'string' ? n.mailAccountId : null
@@ -186,7 +263,8 @@ function parseUserNotesBackup(raw: unknown[]): SettingsBackupUserNoteSnapshot[] 
         title,
         body: n.body,
         createdAt: n.createdAt,
-        updatedAt: n.updatedAt
+        updatedAt: n.updatedAt,
+        ...scheduleExtras
       })
     } else if (kind === 'calendar') {
       const accountId =
@@ -223,7 +301,8 @@ function parseUserNotesBackup(raw: unknown[]): SettingsBackupUserNoteSnapshot[] 
         createdAt: n.createdAt,
         updatedAt: n.updatedAt,
         eventTitleSnapshot,
-        eventStartIsoSnapshot
+        eventStartIsoSnapshot,
+        ...scheduleExtras
       })
     } else {
       out.push({
@@ -231,7 +310,8 @@ function parseUserNotesBackup(raw: unknown[]): SettingsBackupUserNoteSnapshot[] 
         title,
         body: n.body,
         createdAt: n.createdAt,
-        updatedAt: n.updatedAt
+        updatedAt: n.updatedAt,
+        ...scheduleExtras
       })
     }
   }
@@ -288,6 +368,8 @@ export function collectDatabaseExtrasForBackup(): SettingsBackupDatabaseExtras {
   }))
   const composeScheduledPending = listPendingScheduledComposeForBackup()
   const userNotes = listUserNotesForSettingsBackup()
+  const noteSections = listNoteSectionsForSettingsBackup()
+  const userNoteLinks = listUserNoteLinksForSettingsBackup(listUserNoteIdsInBackupOrder())
   return {
     mailRules: rules,
     workflowBoards: boards.map((b) => ({
@@ -302,7 +384,9 @@ export function collectDatabaseExtrasForBackup(): SettingsBackupDatabaseExtras {
     mailTemplates,
     metaFolders,
     composeScheduledPending,
-    userNotes
+    userNotes,
+    noteSections,
+    userNoteLinks
   }
 }
 
@@ -437,6 +521,12 @@ export function parseSettingsBackupJson(raw: string): SettingsBackupPayload {
     if ('userNotes' in de && Array.isArray(de.userNotes)) {
       databaseExtras.userNotes = parseUserNotesBackup(de.userNotes)
     }
+    if ('noteSections' in de && Array.isArray(de.noteSections)) {
+      databaseExtras.noteSections = parseNoteSectionsBackup(de.noteSections)
+    }
+    if ('userNoteLinks' in de && Array.isArray(de.userNoteLinks)) {
+      databaseExtras.userNoteLinks = parseUserNoteLinksBackup(de.userNoteLinks)
+    }
   }
 
   return {
@@ -475,7 +565,16 @@ export async function applySettingsBackupPayload(backup: SettingsBackupPayload):
       replacePendingScheduledComposeFromBackup(de.composeScheduledPending)
     }
     if (de.userNotes != null) {
-      replaceAllUserNotesFromBackup(de.userNotes)
+      const sectionIds =
+        de.noteSections != null ? replaceAllNoteSectionsFromBackup(de.noteSections) : []
+      const noteIds = replaceAllUserNotesFromBackup(de.userNotes, sectionIds)
+      if (de.userNoteLinks != null && de.userNoteLinks.length > 0) {
+        replaceAllNoteLinksFromBackup(de.userNoteLinks, noteIds)
+      } else {
+        restoreUserNoteLinksFromSnapshots(de.userNotes, noteIds)
+      }
+    } else if (de.noteSections != null) {
+      replaceAllNoteSectionsFromBackup(de.noteSections)
     }
   }
 }

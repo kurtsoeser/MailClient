@@ -5,6 +5,7 @@ import type { UserNote, UserNoteCalendarSource } from '@shared/types'
 import { cn } from '@/lib/utils'
 import { useUndoStore } from '@/stores/undo'
 import { MarkdownNoteEditor, type MarkdownNoteEditorLayout } from './MarkdownNoteEditor'
+import { NotesAttachmentsPanel } from '@/app/notes/NotesAttachmentsPanel'
 
 export type ObjectNoteTarget =
   | {
@@ -227,6 +228,11 @@ export function ObjectNoteEditor({
             </button>
           ) : null}
         </div>
+      ) : null}
+      {note?.id ? (
+        <NotesAttachmentsPanel noteId={note.id} className="mb-2" />
+      ) : !loading ? (
+        <p className="mb-2 text-[11px] text-muted-foreground">{t('notes.attachments.requiresSavedNote')}</p>
       ) : null}
       <MarkdownNoteEditor
         value={body}

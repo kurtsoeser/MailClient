@@ -61,5 +61,12 @@ describe('buildMailShadowRootInnerHtml', () => {
     expect(inner).toContain(':host')
     expect(inner).not.toContain('100vh')
     expect(inner).toContain('min-height: 0')
+    expect(inner).toContain('filter: invert(1)')
+  })
+
+  it('heller Shadow nutzt mail-html-root--light ohne Invert', () => {
+    const inner = buildMailShadowRootInnerHtml('<p>x</p>', 'light')
+    expect(inner).toContain('mail-html-root--light')
+    expect(inner).not.toContain('filter: invert(1)')
   })
 })

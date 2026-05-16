@@ -1,5 +1,6 @@
-import { type RefObject, useEffect } from 'react'
+import { type RefObject, useLayoutEffect } from 'react'
 import { hrefForExternalOpen, openExternalUrl } from '@/lib/open-external'
+import type { MailViewerTheme } from '@/lib/sanitize'
 
 function linkFromComposedPath(e: Event): Element | null {
   for (const n of e.composedPath()) {
@@ -17,16 +18,23 @@ function linkFromComposedPath(e: Event): Element | null {
 export function useSanitizedHtmlShadowRoot(
   hostRef: RefObject<HTMLElement | null>,
   shadowInnerHtml: string,
-  logPrefix: 'mail' | 'calendar' | 'task'
+  logPrefix: 'mail' | 'calendar' | 'task',
+  viewerTheme?: MailViewerTheme
 ): void {
-  useEffect(() => {
+  useLayoutEffect(() => {
     const host = hostRef.current
     if (!host) return
 
-    if (!host.shadowRoot) {
-      host.attachShadow({ mode: 'open' })
+    if (viewerTheme) {
+      host.dataset.mailViewerTheme = viewerTheme
+    } else {
+      delete host.dataset.mailViewerTheme
     }
-    const shadow = host.shadowRoot!
+
+    let shadow = host.shadowRoot
+    if (!shadow) {
+      shadow = host.attachShadow({ mode: 'open' })
+    }
     shadow.innerHTML = shadowInnerHtml
 
     const openFromEvent = (e: MouseEvent): void => {
@@ -82,5 +90,5 @@ export function useSanitizedHtmlShadowRoot(
       host.removeEventListener('auxclick', openFromEvent, false)
       host.removeEventListener('keydown', keyOpen, false)
     }
-  }, [shadowInnerHtml, logPrefix])
+  }, [hostRef, shadowInnerHtml, logPrefix, viewerTheme])
 }

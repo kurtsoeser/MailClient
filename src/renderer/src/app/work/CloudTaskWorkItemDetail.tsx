@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react'
 import { Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { CloudTaskWorkItem } from '@shared/work-item'
+import { CalendarEventIconPicker } from '@/components/CalendarEventIconPicker'
+import { IconColorPickerFooter } from '@/components/IconColorPickerFooter'
+import { resolveEntityIconColor } from '@shared/entity-icon-color'
 import {
   datetimeLocalValueToIso,
   dueDateInputToStorageIso,
@@ -17,12 +20,18 @@ export interface CloudTaskSaveDraft {
   plannedEndIso: string | null
 }
 
+export interface CloudTaskDisplayPatch {
+  iconId?: string | null
+  iconColor?: string | null
+}
+
 export interface CloudTaskWorkItemDetailProps {
   item: CloudTaskWorkItem
   accountLine?: string
   saving?: boolean
   onSave: (draft: CloudTaskSaveDraft) => void | Promise<void>
   onDelete: () => void | Promise<void>
+  onDisplayChange?: (patch: CloudTaskDisplayPatch) => void | Promise<void>
 }
 
 export function CloudTaskWorkItemDetail({
@@ -30,7 +39,8 @@ export function CloudTaskWorkItemDetail({
   accountLine,
   saving,
   onSave,
-  onDelete
+  onDelete,
+  onDisplayChange
 }: CloudTaskWorkItemDetailProps): JSX.Element {
   const { t } = useTranslation()
   const [title, setTitle] = useState(item.title)
@@ -68,11 +78,32 @@ export function CloudTaskWorkItemDetail({
         <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
           {t('tasks.shell.fieldTitle')}
         </label>
-        <input
-          value={title}
-          onChange={(e): void => setTitle(e.target.value)}
-          className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs outline-none focus:ring-1 focus:ring-primary"
-        />
+        <div className="flex items-start gap-2">
+          {onDisplayChange ? (
+            <CalendarEventIconPicker
+              layout="compact"
+              openOn="doubleClick"
+              iconId={item.task.iconId}
+              iconColorHex={resolveEntityIconColor(item.task.iconColor)}
+              title={title.trim() || t('tasks.shell.untitled')}
+              disabled={saving}
+              onIconChange={(iconId): void =>
+                void onDisplayChange({ iconId: iconId ?? null })
+              }
+              footer={
+                <IconColorPickerFooter
+                  iconColor={item.task.iconColor}
+                  onIconColorChange={(iconColor): void => void onDisplayChange({ iconColor })}
+                />
+              }
+            />
+          ) : null}
+          <input
+            value={title}
+            onChange={(e): void => setTitle(e.target.value)}
+            className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-xs outline-none focus:ring-1 focus:ring-primary"
+          />
+        </div>
       </div>
       <div>
         <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">

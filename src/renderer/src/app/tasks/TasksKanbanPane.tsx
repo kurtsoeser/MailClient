@@ -2,6 +2,7 @@ import { useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ConnectedAccount, TodoDueKindList } from '@shared/types'
 import { AccountColorStripe } from '@/components/AccountColorStripe'
+import { TaskDisplayIcon } from '@/components/TaskDisplayIcon'
 import {
   DueBucketKanbanBoard,
   type DueBucketKanbanCardModel
@@ -114,11 +115,14 @@ export function TasksKanbanPane({
           <div className="space-y-0.5">
             <p
               className={cn(
-                'line-clamp-2 text-xs font-medium',
+                'flex items-start gap-1 line-clamp-2 text-xs font-medium',
                 item.completed && 'text-muted-foreground line-through'
               )}
             >
-              {item.title.trim() || t('tasks.shell.untitled')}
+              <TaskDisplayIcon iconId={item.iconId} iconColor={item.iconColor} />
+              <span className="min-w-0 flex-1">
+                {item.title.trim() || t('tasks.shell.untitled')}
+              </span>
             </p>
             {showAccountHint && acc ? (
               <div className="flex items-center gap-1 text-[10px] text-muted-foreground">

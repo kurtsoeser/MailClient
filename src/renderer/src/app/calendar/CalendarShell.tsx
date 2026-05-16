@@ -4,6 +4,7 @@ import FullCalendar from '@fullcalendar/react'
 import dayGridPlugin from '@fullcalendar/daygrid'
 import timeGridPlugin from '@fullcalendar/timegrid'
 import listPlugin from '@fullcalendar/list'
+import multiMonthPlugin from '@fullcalendar/multimonth'
 import interactionPlugin from '@fullcalendar/interaction'
 import luxonPlugin from '@fullcalendar/luxon'
 import deLocale from '@fullcalendar/core/locales/de'
@@ -26,6 +27,7 @@ import {
   Eye,
   EyeOff,
   Mails,
+  StickyNote,
   PanelLeftClose,
   PanelRightClose,
   Search,
@@ -44,10 +46,12 @@ import type {
   CalendarGraphCalendarRow,
   ConnectedAccount,
   MailListItem,
-  TodoDueKindOpen
+  TodoDueKindOpen,
+  UserNoteListItem
 } from '@shared/types'
 import {
   graphCalendarColorToDisplayHex,
+  resolveCalendarDisplayHex,
   GRAPH_CALENDAR_COLOR_PRESET_IDS,
   type GraphCalendarColorPresetId
 } from '@shared/graph-calendar-colors'
@@ -62,10 +66,39 @@ import {
   cloudTasksToFullCalendarEvents,
   computePersistTargetForCloudTask
 } from '@/app/calendar/cloud-task-calendar'
-import { scheduleRemoveDuplicateFullCalendarEventsById } from '@/app/calendar/calendar-fc-event-source'
+import {
+  CALENDAR_KIND_USER_NOTE,
+  computePersistTargetForUserNote,
+  notesToFullCalendarEvents,
+  userNoteEventId
+} from '@/app/calendar/notes-calendar'
+import {
+  scheduleRemoveCloudTaskCalendarEventsByTaskKey,
+  scheduleRemoveDuplicateFullCalendarEventsById
+} from '@/app/calendar/calendar-fc-event-source'
 import { applyCloudTaskPersistTarget } from '@/app/calendar/apply-cloud-task-persist'
+import {
+  applyOptimisticCloudTaskPersistToLayer,
+  syncFullCalendarCloudTaskEventFromLayer
+} from '@/app/calendar/optimistic-cloud-task-calendar'
 import { useCalendarFcEventContent } from '@/app/calendar/use-calendar-fc-event-content'
+import {
+  applyMultiMonthEventDotMount,
+  capEventInputsForMultiMonthView,
+  isMultiMonthFcView,
+  multiMonthDatesSetKey,
+  MULTI_MONTH_QUARTER_VIEW_ID,
+  MULTI_MONTH_YEAR_VIEW_ID,
+  shouldSkipHeavyCalendarLayersForMultiMonth
+} from '@/app/calendar/calendar-fc-multimonth'
+import {
+  QUICK_CREATE_PLACEHOLDER_EVENT_ID,
+  quickCreateRangeToFcPlaceholder
+} from '@/app/calendar/calendar-quick-create-placeholder'
+import type { CalendarCreateRange } from '@/app/tasks/tasks-calendar-create-range'
 import { useCalendarSyncStore } from '@/stores/calendar-sync'
+import { useAppModeStore } from '@/stores/app-mode'
+import { useNotesPendingFocusStore } from '@/stores/notes-pending-focus'
 import { CloudTaskItemPreview } from '@/app/calendar/CloudTaskItemPreview'
 import { loadPlannedScheduleMapForTasks } from '@/app/work-items/load-planned-schedules'
 import {
@@ -139,7 +172,7 @@ import {
   persistM365GroupCalVisibilitySeededKeys,
   SIDEBAR_HIDDEN_CALENDARS_STORAGE_KEY
 } from '@/lib/calendar-visibility-storage'
-import { MiniMonthGrid } from '@/app/calendar/MiniMonthGrid'
+import { ModuleNavMiniMonth } from '@/components/ModuleNavMiniMonth'
 import {
   CalendarShellHeader,
   type CalendarSidebarHiddenRestoreEntry
@@ -157,12 +190,14 @@ import {
   persistGroupCalSidebarOpen,
   persistMailTodoOverlay,
   persistCloudTaskOverlay,
+  persistUserNoteOverlay,
   persistRightInboxOpen,
   persistRightPreviewOpen,
   persistTimeGridSlotMinutes,
   readLeftSidebarCollapsedFromStorage,
   readMailTodoOverlayFromStorage,
   readCloudTaskOverlayFromStorage,
+  readUserNoteOverlayFromStorage,
   readRightInboxOpenFromStorage,
   readRightPreviewOpenFromStorage,
   readTimeGridSlotMinutesFromStorage,
@@ -245,6 +280,10 @@ export function CalendarShell(): JSX.Element {
   const [timelineLoading, setTimelineLoading] = useState(false)
 
   const [activeViewId, setActiveViewId] = useState<string>('timeGridWeek')
+  const activeViewIdRef = useRef(activeViewId)
+  activeViewIdRef.current = activeViewId
+  const lastDatesSetKeyRef = useRef('')
+  const datesSetLoadTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>()
   const [rangeTitle, setRangeTitle] = useState('')
   const [visibleStart, setVisibleStart] = useState(() => new Date())
   const [miniMonth, setMiniMonth] = useState(() => startOfMonth(new Date()))
@@ -275,8 +314,17 @@ export function CalendarShell(): JSX.Element {
   const [eventDialog, setEventDialog] = useState<EventDialogState>(null)
   const [quickCreate, setQuickCreate] = useState<{
     anchor: { x: number; y: number }
-    range: { start: Date; end: Date; allDay: boolean }
+    range: CalendarCreateRange
   } | null>(null)
+
+  const dismissQuickCreate = useCallback((): void => {
+    calendarRef.current?.getApi().unselect()
+    setQuickCreate(null)
+  }, [])
+
+  const handleQuickCreateRangeChange = useCallback((range: CalendarCreateRange): void => {
+    setQuickCreate((prev) => (prev ? { ...prev, range } : null))
+  }, [])
   const [eventContextMenu, setEventContextMenu] = useState<{
     x: number
     y: number
@@ -301,6 +349,11 @@ export function CalendarShell(): JSX.Element {
   const [cloudTaskOverlay, setCloudTaskOverlay] = useState<boolean>(readCloudTaskOverlayFromStorage)
   const cloudTaskOverlayRef = useRef(cloudTaskOverlay)
   cloudTaskOverlayRef.current = cloudTaskOverlay
+
+  const [userNoteOverlay, setUserNoteOverlay] = useState<boolean>(readUserNoteOverlayFromStorage)
+  const userNoteOverlayRef = useRef(userNoteOverlay)
+  userNoteOverlayRef.current = userNoteOverlay
+  const [userNoteRangeItems, setUserNoteRangeItems] = useState<UserNoteListItem[]>([])
   const [cloudTaskAllItems, setCloudTaskAllItems] = useState<TaskItemWithContext[]>([])
   const [cloudTaskRangeItems, setCloudTaskRangeItems] = useState<TaskItemWithContext[]>([])
   const [cloudTaskPlannedByKey, setCloudTaskPlannedByKey] = useState(
@@ -315,6 +368,7 @@ export function CalendarShell(): JSX.Element {
   const cloudTaskByKeyRef = useRef(new Map<string, TaskItemWithContext>())
   const lastCloudFilterRangeKeyRef = useRef('')
   const cloudTaskElByKeyRef = useRef(new Map<string, HTMLElement>())
+  const cloudTaskPersistInFlightRef = useRef(0)
 
   /** Ausgeblendete Kalender (Key `accountId|graphCalendarId`); leer = alle sichtbar. */
   const [hiddenCalendarKeys, setHiddenCalendarKeys] = useState<Set<string>>(
@@ -360,6 +414,8 @@ export function CalendarShell(): JSX.Element {
   )
 
   const canCreateCalendarEntry = calendarLinkedAccounts.length > 0 || taskAccounts.length > 0
+  const isMultiMonthActive = isMultiMonthFcView(activeViewId)
+  const canInteractInTimeGrid = canCreateCalendarEntry && !isMultiMonthActive
 
   const loadTaskListsForAccount = useCallback(async (accountId: string) => {
     return window.mailClient.tasks.listLists({ accountId })
@@ -421,9 +477,13 @@ export function CalendarShell(): JSX.Element {
     }
   }, [])
 
-  const reloadCalendarsForAccount = useCallback(async (accountId: string): Promise<void> => {
+  const reloadCalendarsForAccount = useCallback(
+    async (accountId: string, opts?: { forceRefresh?: boolean }): Promise<void> => {
     try {
-      const rows = await window.mailClient.calendar.listCalendars({ accountId, forceRefresh: true })
+      const rows = await window.mailClient.calendar.listCalendars({
+        accountId,
+        forceRefresh: opts?.forceRefresh === true
+      })
       setCalendarsByAccount((prev) => {
         const keepGroups = (prev[accountId] ?? []).filter((c) => c.calendarKind === 'm365Group')
         return { ...prev, [accountId]: [...rows, ...keepGroups] }
@@ -690,17 +750,39 @@ export function CalendarShell(): JSX.Element {
     return o
   }, [t])
 
-  /** Kurzer Hinweis zur Termin-Erstellung per Maus/Touch (FullCalendar dateSelecting). */
-  const dragCreateHint = useMemo(() => {
-    if (calendarLinkedAccounts.length === 0) return null
-    if (activeViewId === 'listWeek') {
-      return t('calendar.shell.dragHintList')
-    }
-    if (activeViewId === 'dayGridMonth') {
-      return t('calendar.shell.dragHintMonth')
-    }
-    return null
-  }, [activeViewId, calendarLinkedAccounts.length, t])
+  const multiMonthViews = useMemo(
+    () => ({
+      [MULTI_MONTH_YEAR_VIEW_ID]: {
+        type: 'multiMonthYear' as const,
+        /** 4×3-Raster: alle 12 Monate auf einen Blick */
+        multiMonthMaxColumns: 4,
+        multiMonthMinWidth: 108,
+        /** Etwas hoeher als 2.15 — Platz fuer groessere Monats-/Tages-Typo */
+        aspectRatio: 1.82,
+        fixedWeekCount: true,
+        showNonCurrentDates: true,
+        dayHeaderFormat: { weekday: 'narrow' } as const,
+        multiMonthTitleFormat: { month: 'long' } as const,
+        dayMaxEvents: 3,
+        dayMaxEventRows: 1,
+        moreLinkClick: 'day' as const
+      },
+      [MULTI_MONTH_QUARTER_VIEW_ID]: {
+        type: 'multiMonth' as const,
+        duration: { months: 3 },
+        multiMonthMaxColumns: 3,
+        multiMonthMinWidth: 180,
+        aspectRatio: 1.75,
+        fixedWeekCount: true,
+        showNonCurrentDates: true,
+        dayHeaderFormat: { weekday: 'narrow' } as const,
+        dayMaxEvents: 5,
+        dayMaxEventRows: 2,
+        moreLinkClick: 'day' as const
+      }
+    }),
+    []
+  )
 
   const fcTimeZone = useMemo(
     () => (calendarTimeZoneConfig?.trim() ? calendarTimeZoneConfig.trim() : 'local'),
@@ -886,6 +968,41 @@ export function CalendarShell(): JSX.Element {
     return t('calendar.shell.previewBadgeDefault')
   }, [previewCloudTask, previewCalendarEvent, selectedMessageId, t])
 
+  const previewCalendarName = useMemo((): string | null => {
+    if (!previewCalendarEvent) return null
+    const calId = previewCalendarEvent.graphCalendarId?.trim()
+    if (!calId) return null
+    const rows = calendarsByAccount[previewCalendarEvent.accountId] ?? []
+    return rows.find((c) => c.id === calId)?.name?.trim() || null
+  }, [previewCalendarEvent, calendarsByAccount])
+
+  const patchPreviewCloudTaskDisplay = useCallback(
+    async (patch: import('@/app/work/CloudTaskWorkItemDetail').CloudTaskDisplayPatch): Promise<void> => {
+      if (!previewCloudTask) return
+      const next = await window.mailClient.tasks.patchTaskDisplay({
+        accountId: previewCloudTask.accountId,
+        listId: previewCloudTask.listId,
+        taskId: previewCloudTask.id,
+        ...patch
+      })
+      const merged: TaskItemWithContext = {
+        ...next,
+        accountId: previewCloudTask.accountId,
+        listName: previewCloudTask.listName
+      }
+      const key = cloudTaskStableKey(merged.accountId, merged.listId, merged.id)
+      cloudTaskByKeyRef.current.set(key, merged)
+      const replace = (rows: TaskItemWithContext[]): TaskItemWithContext[] =>
+        rows.map((row) =>
+          cloudTaskStableKey(row.accountId, row.listId, row.id) === key ? merged : row
+        )
+      setCloudTaskAllItems(replace)
+      setCloudTaskRangeItems(replace)
+      setPreviewCloudTask(merged)
+    },
+    [previewCloudTask]
+  )
+
   const calendarPreviewBody = useMemo(
     () => (
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -894,10 +1011,12 @@ export function CalendarShell(): JSX.Element {
             task={previewCloudTask}
             planned={previewCloudTaskPlanned}
             accountDisplayName={previewCloudTaskAccountName}
+            onDisplayChange={patchPreviewCloudTaskDisplay}
           />
         ) : previewCalendarEvent ? (
           <CalendarEventPreview
             event={previewCalendarEvent}
+            calendarName={previewCalendarName}
             onEdit={(): void => setEventDialog({ mode: 'edit', event: previewCalendarEvent })}
             onEventChange={(updated): void => {
               setPreviewCalendarEvent(updated)
@@ -924,7 +1043,9 @@ export function CalendarShell(): JSX.Element {
       previewCloudTask,
       previewCloudTaskPlanned,
       previewCloudTaskAccountName,
+      patchPreviewCloudTaskDisplay,
       previewCalendarEvent,
+      previewCalendarName,
       t
     ]
   )
@@ -946,6 +1067,20 @@ export function CalendarShell(): JSX.Element {
       setMailTodoItems(list)
     } catch {
       setMailTodoItems([])
+    }
+  }, [])
+
+  const loadUserNotesForRange = useCallback(async (start: Date, end: Date): Promise<void> => {
+    if (!userNoteOverlayRef.current) return
+    try {
+      const list = await window.mailClient.notes.listInRange({
+        startIso: start.toISOString(),
+        endIso: end.toISOString(),
+        limit: 500
+      })
+      setUserNoteRangeItems(list)
+    } catch {
+      setUserNoteRangeItems([])
     }
   }, [])
 
@@ -987,7 +1122,8 @@ export function CalendarShell(): JSX.Element {
       merged: TaskItemWithContext[],
       planned: Map<string, WorkItemPlannedSchedule>,
       rangeStart: Date,
-      rangeEnd: Date
+      rangeEnd: Date,
+      opts?: { force?: boolean }
     ): void => {
       const map = new Map<string, TaskItemWithContext>()
       for (const t of merged) {
@@ -1004,9 +1140,10 @@ export function CalendarShell(): JSX.Element {
         fcTimeZone
       )
       const sig = cloudTaskCalendarDisplaySignature(filtered, planned)
-      if (sig === cloudTaskLayerSigRef.current) return
+      if (!opts?.force && sig === cloudTaskLayerSigRef.current) return
 
       cloudTaskLayerSigRef.current = sig
+      cloudTaskFcEventsSigRef.current = ''
       setCloudTaskAllItems(merged)
       setCloudTaskPlannedByKey(planned)
       setCloudTaskRangeItems(filtered)
@@ -1119,14 +1256,16 @@ export function CalendarShell(): JSX.Element {
         void loadRange(activeStart, activeEnd, { silent, forceRefresh: opts?.forceRefresh })
         if (mailTodoOverlayRef.current) void loadMailTodosForRange(activeStart, activeEnd)
         if (cloudTaskOverlayRef.current) void loadCloudTasksForRange(activeStart, activeEnd)
+        if (userNoteOverlayRef.current) void loadUserNotesForRange(activeStart, activeEnd)
         return
       }
       const { start, end } = lastRangeRef.current
       void loadRange(start, end, { silent, forceRefresh: opts?.forceRefresh })
       if (mailTodoOverlayRef.current) void loadMailTodosForRange(start, end)
       if (cloudTaskOverlayRef.current) void loadCloudTasksForRange(start, end)
+      if (userNoteOverlayRef.current) void loadUserNotesForRange(start, end)
     },
-    [loadRange, loadMailTodosForRange, loadCloudTasksForRange]
+    [loadRange, loadMailTodosForRange, loadCloudTasksForRange, loadUserNotesForRange]
   )
 
   /** Nur Graph-Termine + Mail-ToDos (Aufgaben-Layer nicht bei jedem Termin-Cache-Tick). */
@@ -1483,20 +1622,17 @@ export function CalendarShell(): JSX.Element {
           }
         }
       ]
-      const canEdit = cal.canEdit !== false
-      if (!canEdit) {
-        return [
-          {
-            id: 'cal-readonly',
-            label: t('calendar.shell.colorReadonlyExplanation'),
-            disabled: true
-          },
-          ...tail
-        ]
-      }
+      const canEditRemote = cal.canEdit !== false && cal.calendarKind !== 'm365Group'
       const curPreset: GraphCalendarColorPresetId | null = (() => {
+        const overrideHex = resolveCalendarDisplayHex(cal)
+        if (overrideHex && cal.displayColorOverrideHex) {
+          const match = GRAPH_CALENDAR_COLOR_PRESET_IDS.find(
+            (id) => id !== 'auto' && graphCalendarColorToDisplayHex(null, id) === overrideHex
+          )
+          if (match) return match
+        }
         const raw = (cal.color ?? 'auto').trim().toLowerCase()
-        if (!raw || raw === 'auto') return 'auto'
+        if (!raw || raw === 'auto') return cal.displayColorOverrideHex ? null : 'auto'
         const found = GRAPH_CALENDAR_COLOR_PRESET_IDS.find((id) => id.toLowerCase() === raw)
         return found ?? null
       })()
@@ -1504,7 +1640,9 @@ export function CalendarShell(): JSX.Element {
       return [
         {
           id: 'cal-color-submenu',
-          label: t('calendar.shell.colorMicrosoftLabel'),
+          label: canEditRemote
+            ? t('calendar.shell.colorMicrosoftLabel')
+            : t('calendar.shell.colorLocalLabel'),
           submenu: [...GRAPH_CALENDAR_COLOR_PRESET_IDS].map((presetId) => {
             const solidHex =
               presetId === 'auto'
@@ -1525,7 +1663,7 @@ export function CalendarShell(): JSX.Element {
                       graphCalendarId: cal.id,
                       color: presetId
                     })
-                    await reloadCalendarsForAccount(accountId)
+                    await reloadCalendarsForAccount(accountId, { forceRefresh: canEditRemote })
                     void reloadVisibleRange()
                   } catch (err) {
                     setError(err instanceof Error ? err.message : String(err))
@@ -1548,7 +1686,11 @@ export function CalendarShell(): JSX.Element {
         const taskKey =
           (typeof info.event.extendedProps.taskKey === 'string' && info.event.extendedProps.taskKey) ||
           null
-        const task = taskKey ? cloudTaskByKeyRef.current.get(taskKey) : undefined
+        if (!taskKey) {
+          info.revert()
+          return
+        }
+        const task = cloudTaskByKeyRef.current.get(taskKey)
         if (!task) {
           info.revert()
           return
@@ -1559,21 +1701,56 @@ export function CalendarShell(): JSX.Element {
           return
         }
         try {
+          cloudTaskPersistInFlightRef.current += 1
           await applyCloudTaskPersistTarget(target, task, fcTimeZone)
           setError(null)
-          const items = await loadUnifiedCloudTasks(taskAccounts, { cacheOnly: true })
-          const planned = await loadPlannedScheduleMapForTasks(items)
+
+          const optimistic = applyOptimisticCloudTaskPersistToLayer(
+            target,
+            task,
+            cloudTaskAllItemsRef.current,
+            cloudTaskPlannedByKeyRef.current,
+            fcTimeZone
+          )
           const api = calendarRef.current?.getApi()
           const { start, end } = api
             ? { start: api.view.activeStart, end: api.view.activeEnd }
             : lastRangeRef.current
-          cloudTaskLayerSigRef.current = ''
-          cloudTaskFcEventsSigRef.current = ''
-          commitCloudTaskLayer(items, planned, start, end)
+          const optimisticTask =
+            optimistic.items.find(
+              (row) => cloudTaskStableKey(row.accountId, row.listId, row.id) === taskKey
+            ) ?? task
+          const optimisticPlanned = optimistic.plannedByKey.get(taskKey)
+
+          flushSync(() => {
+            commitCloudTaskLayer(optimistic.items, optimistic.plannedByKey, start, end, {
+              force: true
+            })
+          })
+
+          syncFullCalendarCloudTaskEventFromLayer(
+            api,
+            optimisticTask,
+            optimisticPlanned,
+            fcTimeZone
+          )
           if (taskKey) {
-            scheduleRemoveDuplicateFullCalendarEventsById(calendarRef.current?.getApi(), [
+            scheduleRemoveCloudTaskCalendarEventsByTaskKey(
+              api,
+              taskKey,
               cloudTaskEventId(taskKey)
-            ])
+            )
+          }
+
+          const items = await loadUnifiedCloudTasks(taskAccounts, { cacheOnly: true })
+          const planned = await loadPlannedScheduleMapForTasks(items)
+          commitCloudTaskLayer(items, planned, start, end, { force: true })
+          if (taskKey) {
+            scheduleRemoveCloudTaskCalendarEventsByTaskKey(
+              calendarRef.current?.getApi(),
+              taskKey,
+              cloudTaskEventId(taskKey)
+            )
           }
           if (taskKey) {
             const updated = cloudTaskByKeyRef.current.get(taskKey)
@@ -1585,6 +1762,36 @@ export function CalendarShell(): JSX.Element {
         } catch (e) {
           setError(e instanceof Error ? e.message : String(e))
           info.revert()
+        }
+        return
+      }
+      if (kind === CALENDAR_KIND_USER_NOTE) {
+        const target = computePersistTargetForUserNote(info.event, fcTimeZone)
+        if (!target) {
+          info.revert()
+          return
+        }
+        try {
+          await window.mailClient.notes.setSchedule({
+            id: target.noteId,
+            scheduledStartIso: target.scheduledStartIso,
+            scheduledEndIso: target.scheduledEndIso,
+            scheduledAllDay: target.scheduledAllDay
+          })
+          setError(null)
+          const api = calendarRef.current?.getApi()
+          if (api) {
+            scheduleRemoveDuplicateFullCalendarEventsById(api, [userNoteEventId(target.noteId)])
+            void loadUserNotesForRange(api.view.activeStart, api.view.activeEnd)
+          } else {
+            const { start, end } = lastRangeRef.current
+            void loadUserNotesForRange(start, end)
+          }
+        } catch (e) {
+          setError(e instanceof Error ? e.message : String(e))
+          info.revert()
+        } finally {
+          cloudTaskPersistInFlightRef.current = Math.max(0, cloudTaskPersistInFlightRef.current - 1)
         }
         return
       }
@@ -1712,7 +1919,7 @@ export function CalendarShell(): JSX.Element {
     for (const acc of calendarLinkedAccounts) {
       const inner: Record<string, string | null> = {}
       for (const row of calendarsByAccount[acc.id] ?? []) {
-        inner[row.id] = graphCalendarColorToDisplayHex(row.hexColor, row.color)
+        inner[row.id] = resolveCalendarDisplayHex(row)
       }
       m[acc.id] = inner
     }
@@ -1789,7 +1996,7 @@ export function CalendarShell(): JSX.Element {
           lookupId && ev.source === 'microsoft'
             ? (calendarDisplayHexByKey[ev.accountId]?.[lookupId] ?? null)
             : null
-        const resolvedDisplayHex = ev.displayColorHex ?? fromCalList ?? null
+        const resolvedDisplayHex = fromCalList ?? ev.displayColorHex ?? null
         return {
           id: ev.id,
           title: ev.title,
@@ -1820,6 +2027,11 @@ export function CalendarShell(): JSX.Element {
   const mailTodoFcEvents = useMemo(
     () => mailTodoItemsToFullCalendarEvents(mailTodoItems, accountColorById),
     [mailTodoItems, accountColorById]
+  )
+
+  const userNoteFcEvents = useMemo(
+    () => notesToFullCalendarEvents(userNoteRangeItems, { defaultTitle: t('notes.shell.untitled') }),
+    [userNoteRangeItems, t]
   )
 
   const cloudTaskFcEventsRef = useRef<EventInput[]>([])
@@ -1853,7 +2065,9 @@ export function CalendarShell(): JSX.Element {
         const loc = (cal?.location ?? '').trim().toLowerCase()
         if (loc.includes(q)) return true
         const task = (ev.extendedProps as { cloudTask?: TaskItemWithContext } | undefined)?.cloudTask
-        return (task?.title ?? '').trim().toLowerCase().includes(q)
+        if ((task?.title ?? '').trim().toLowerCase().includes(q)) return true
+        const note = (ev.extendedProps as { userNote?: UserNoteListItem } | undefined)?.userNote
+        return (note?.title ?? note?.body ?? '').trim().toLowerCase().includes(q)
       })
     },
     [calendarEventSearchQuery]
@@ -1863,6 +2077,10 @@ export function CalendarShell(): JSX.Element {
     () => filterCalendarSearchEvents(graphFcEvents),
     [graphFcEvents, filterCalendarSearchEvents]
   )
+  const graphFcEventsForFc = useMemo(() => {
+    if (!isMultiMonthFcView(activeViewId)) return graphFcEventsDisplayed
+    return capEventInputsForMultiMonthView(graphFcEventsDisplayed, activeViewId)
+  }, [graphFcEventsDisplayed, activeViewId])
   const mailTodoFcEventsDisplayed = useMemo(
     () => filterCalendarSearchEvents(mailTodoFcEvents),
     [mailTodoFcEvents, filterCalendarSearchEvents]
@@ -1871,24 +2089,43 @@ export function CalendarShell(): JSX.Element {
     () => filterCalendarSearchEvents(cloudTaskFcEvents),
     [cloudTaskFcEvents, filterCalendarSearchEvents]
   )
+  const userNoteFcEventsDisplayed = useMemo(
+    () => filterCalendarSearchEvents(userNoteFcEvents),
+    [userNoteFcEvents, filterCalendarSearchEvents]
+  )
+
+  const quickCreatePlaceholderEvents = useMemo((): EventInput[] => {
+    if (!quickCreate) return []
+    return [quickCreateRangeToFcPlaceholder(quickCreate.range)]
+  }, [quickCreate])
 
   const fcEventSources = useMemo((): EventSourceInput[] => {
-    const sources: EventSourceInput[] = [
-      { id: 'graph-calendar', events: graphFcEventsDisplayed }
-    ]
-    if (mailTodoOverlay) {
+    const skipHeavyLayers = shouldSkipHeavyCalendarLayersForMultiMonth(activeViewId)
+    const sources: EventSourceInput[] = [{ id: 'graph-calendar', events: graphFcEventsForFc }]
+    if (mailTodoOverlay && !skipHeavyLayers) {
       sources.push({ id: 'mail-todo', events: mailTodoFcEventsDisplayed })
     }
-    if (cloudTaskOverlay) {
+    if (cloudTaskOverlay && !skipHeavyLayers) {
       sources.push({ id: 'cloud-task', events: cloudTaskFcEventsDisplayed })
+    }
+    if (userNoteOverlay && !skipHeavyLayers) {
+      sources.push({ id: 'user-note', events: userNoteFcEventsDisplayed })
+    }
+    if (quickCreate) {
+      sources.push({ id: 'quick-create-placeholder', events: quickCreatePlaceholderEvents })
     }
     return sources
   }, [
-    graphFcEventsDisplayed,
+    graphFcEventsForFc,
     mailTodoFcEventsDisplayed,
     cloudTaskFcEventsDisplayed,
+    userNoteFcEventsDisplayed,
     mailTodoOverlay,
-    cloudTaskOverlay
+    cloudTaskOverlay,
+    userNoteOverlay,
+    activeViewId,
+    quickCreate,
+    quickCreatePlaceholderEvents
   ])
 
   useEffect(() => {
@@ -1910,6 +2147,24 @@ export function CalendarShell(): JSX.Element {
   }, [mailTodoOverlay, loadMailTodosForRange])
 
   useEffect(() => {
+    if (!userNoteOverlay) {
+      setUserNoteRangeItems([])
+      return
+    }
+    const { start, end } = lastRangeRef.current
+    void loadUserNotesForRange(start, end)
+  }, [userNoteOverlay, loadUserNotesForRange])
+
+  useEffect(() => {
+    if (!userNoteOverlay) return
+    const off = window.mailClient.events.onNotesChanged(() => {
+      const { start, end } = lastRangeRef.current
+      void loadUserNotesForRange(start, end)
+    })
+    return off
+  }, [userNoteOverlay, loadUserNotesForRange])
+
+  useEffect(() => {
     const off = window.mailClient.events.onCalendarChanged(() => {
       reloadCalendarEventsOnly({ silent: true })
     })
@@ -1917,13 +2172,21 @@ export function CalendarShell(): JSX.Element {
   }, [reloadCalendarEventsOnly])
 
   useEffect(() => {
+    return (): void => {
+      if (datesSetLoadTimerRef.current) clearTimeout(datesSetLoadTimerRef.current)
+    }
+  }, [])
+
+  useEffect(() => {
     if (!cloudTaskOverlay) return
     let debounceTimer: ReturnType<typeof setTimeout> | undefined
     const pendingAccountIds = new Set<string>()
     const off = window.mailClient.events.onTasksChanged(({ accountId }) => {
+      if (cloudTaskPersistInFlightRef.current > 0) return
       pendingAccountIds.add(accountId)
       if (debounceTimer) clearTimeout(debounceTimer)
       debounceTimer = setTimeout(() => {
+        if (cloudTaskPersistInFlightRef.current > 0) return
         const ids = [...pendingAccountIds]
         pendingAccountIds.clear()
         void reloadCloudTasksForAccounts(ids)
@@ -2133,6 +2396,10 @@ export function CalendarShell(): JSX.Element {
         if (!noMods) return
         changeView('dayGridMonth')
         e.preventDefault()
+      } else if (e.key === 'y' || e.key === 'Y') {
+        if (!noMods) return
+        changeView(MULTI_MONTH_YEAR_VIEW_ID)
+        e.preventDefault()
       } else if (e.key === 'l' || e.key === 'L') {
         if (!noMods) return
         changeView('listWeek')
@@ -2153,7 +2420,7 @@ export function CalendarShell(): JSX.Element {
         <div className="calendar-shell-workspace flex min-h-0 flex-1 flex-col">
           <div className="calendar-shell-dock-header-row flex shrink-0 flex-row items-stretch border-b border-border">
             {!leftSidebarCollapsed ? (
-              <div className="flex w-[272px] shrink-0 flex-col border-r border-border bg-sidebar text-sidebar-foreground">
+              <div className="module-nav-column w-[272px]">
                 <div className="calendar-shell-column-header flex h-10 min-h-0 shrink-0 items-center px-2 text-xs">
                   <ModuleColumnHeaderStackedTitle
                     className="min-w-0 flex-1"
@@ -2170,7 +2437,6 @@ export function CalendarShell(): JSX.Element {
                 <CalendarShellHeader
                   rangeTitle={rangeTitle}
                   visibleStart={visibleStart}
-                  dragCreateHint={dragCreateHint}
                   rightInboxOpen={rightInboxOpen}
                   onRightInboxOpenChange={(next): void => {
                     persistRightInboxOpen(next)
@@ -2269,13 +2535,16 @@ export function CalendarShell(): JSX.Element {
             <div
               className={cn(
                 'calendar-notion-shell flex h-full min-h-0 min-w-0 flex-1 bg-background text-foreground',
-                `cal-slot-${timeGridSlotMinutes}`
+                `cal-slot-${timeGridSlotMinutes}`,
+                activeViewId === MULTI_MONTH_YEAR_VIEW_ID &&
+                  'calendar-notion-shell--multimonth-year',
+                quickCreate != null && 'calendar-notion-shell--quick-create-open'
               )}
             >
               {!leftSidebarCollapsed ? (
-                <aside className="flex w-[272px] shrink-0 flex-col border-r border-border bg-sidebar text-sidebar-foreground">
+                <aside className="module-nav-column w-[272px]">
                   <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-3 py-4">
-                <MiniMonthGrid
+                <ModuleNavMiniMonth
                   monthAnchor={miniMonth}
                   today={new Date()}
                   onSelectDayRange={applyMiniCalendarDayRange}
@@ -2372,6 +2641,49 @@ export function CalendarShell(): JSX.Element {
                         </span>
                       </div>
                     </li>
+                    <li>
+                      <div
+                        className={cn(
+                          'flex w-full items-center gap-1 rounded-md px-1 py-1.5 text-left text-[12px] text-muted-foreground'
+                        )}
+                      >
+                        <button
+                          type="button"
+                          onClick={(): void => {
+                            setUserNoteOverlay((prev) => {
+                              const next = !prev
+                              persistUserNoteOverlay(next)
+                              return next
+                            })
+                          }}
+                          className={cn(
+                            'flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors',
+                            'text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
+                            !userNoteOverlay && 'opacity-60'
+                          )}
+                          title={
+                            userNoteOverlay
+                              ? t('calendar.shell.notesHideTooltip')
+                              : t('calendar.shell.notesShowTooltip')
+                          }
+                          aria-label={
+                            userNoteOverlay
+                              ? t('calendar.shell.notesHideTooltip')
+                              : t('calendar.shell.notesShowTooltip')
+                          }
+                        >
+                          {!userNoteOverlay ? (
+                            <EyeOff className="h-3.5 w-3.5" />
+                          ) : (
+                            <Eye className="h-3.5 w-3.5" />
+                          )}
+                        </button>
+                        <StickyNote className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                        <span className="min-w-0 flex-1 truncate text-foreground">
+                          {t('calendar.shell.notesLabel')}
+                        </span>
+                      </div>
+                    </li>
                 </ul>
 
                 <CalendarShellSidebarCalendars
@@ -2430,6 +2742,7 @@ export function CalendarShell(): JSX.Element {
                   dayGridPlugin,
                   timeGridPlugin,
                   listPlugin,
+                  multiMonthPlugin,
                   interactionPlugin,
                   luxonPlugin
                 ]}
@@ -2439,7 +2752,8 @@ export function CalendarShell(): JSX.Element {
                 headerToolbar={false}
                 firstDay={1}
                 views={{
-                  ...multiDayViews
+                  ...multiDayViews,
+                  ...multiMonthViews
                 }}
                 initialView="timeGridWeek"
                 slotMinTime="00:00:00"
@@ -2449,12 +2763,23 @@ export function CalendarShell(): JSX.Element {
                 slotLabelInterval="01:00:00"
                 nowIndicator
                 editable={
-                  calendarLinkedAccounts.length > 0 || mailTodoOverlay || cloudTaskOverlay
+                  !isMultiMonthActive &&
+                  (calendarLinkedAccounts.length > 0 ||
+                    mailTodoOverlay ||
+                    cloudTaskOverlay ||
+                    userNoteOverlay)
                 }
                 eventResizableFromStart={
-                  calendarLinkedAccounts.length > 0 || mailTodoOverlay || cloudTaskOverlay
+                  !isMultiMonthActive &&
+                  (calendarLinkedAccounts.length > 0 ||
+                    mailTodoOverlay ||
+                    cloudTaskOverlay ||
+                    userNoteOverlay)
                 }
-                eventChange={(info): void => {
+                eventDrop={(info): void => {
+                  void handleGraphEventChange(info)
+                }}
+                eventResize={(info): void => {
                   void handleGraphEventChange(info)
                 }}
                 eventAllow={(_span, movingEvent): boolean => {
@@ -2462,6 +2787,7 @@ export function CalendarShell(): JSX.Element {
                   const kind = movingEvent.extendedProps?.calendarKind as string | undefined
                   if (kind === CALENDAR_KIND_MAIL_TODO) return true
                   if (kind === CALENDAR_KIND_CLOUD_TASK) return true
+                  if (kind === CALENDAR_KIND_USER_NOTE) return true
                   const calEv = movingEvent.extendedProps?.calendarEvent as
                     | CalendarEventView
                     | undefined
@@ -2472,12 +2798,20 @@ export function CalendarShell(): JSX.Element {
                     (calEv.source === 'microsoft' || calEv.source === 'google')
                   )
                 }}
-                selectable={canCreateCalendarEntry}
-                selectMirror
+                selectable={canInteractInTimeGrid}
+                selectMirror={false}
                 selectLongPressDelay={380}
-                selectAllow={(): boolean => canCreateCalendarEntry}
+                selectAllow={(): boolean => canInteractInTimeGrid}
+                dateClick={(info): void => {
+                  if (!isMultiMonthFcView(info.view.type)) return
+                  const api = calendarRef.current?.getApi()
+                  if (!api) return
+                  api.gotoDate(info.date)
+                  api.changeView('dayGridMonth')
+                  setActiveViewId('dayGridMonth')
+                }}
                 select={(sel): void => {
-                  if (!canCreateCalendarEntry) return
+                  if (!canInteractInTimeGrid) return
                   setError(null)
                   setPreviewCloudTask(null)
                   setPreviewCloudTaskPlannedFromTimeline(null)
@@ -2490,12 +2824,22 @@ export function CalendarShell(): JSX.Element {
                     },
                     range: { start: sel.start, end: sel.end, allDay: sel.allDay }
                   })
-                  calendarRef.current?.getApi().unselect()
+                  queueMicrotask(() => calendarRef.current?.getApi().unselect())
                 }}
                 dayMaxEvents
                 eventSources={fcEventSources}
                 eventContent={calendarFcEventContentRender}
                 eventDidMount={(info): void => {
+                  if (
+                    info.event.id === QUICK_CREATE_PLACEHOLDER_EVENT_ID ||
+                    info.el.classList.contains('fc-event-mirror')
+                  ) {
+                    return
+                  }
+                  if (isMultiMonthFcView(info.view.type)) {
+                    applyMultiMonthEventDotMount(info)
+                    return
+                  }
                   const kind = info.event.extendedProps.calendarKind as string | undefined
                   if (kind === CALENDAR_KIND_CLOUD_TASK) {
                     const el = info.el as HTMLElement & {
@@ -2565,6 +2909,11 @@ export function CalendarShell(): JSX.Element {
                       const mailEl = info.el as HTMLElement & { _calCtxMenu?: (ev: MouseEvent) => void }
                       mailEl._calCtxMenu = onMailCtx
                     }
+                    return
+                  }
+                  if (kind === CALENDAR_KIND_USER_NOTE) {
+                    info.el.classList.add('fc-user-note-event')
+                    info.el.style.borderLeft = '4px solid #a855f7'
                     return
                   }
                   const calEv = info.event.extendedProps.calendarEvent as
@@ -2792,17 +3141,57 @@ export function CalendarShell(): JSX.Element {
                   }
                 }}
                 datesSet={(arg): void => {
+                  const datesKey = multiMonthDatesSetKey(arg.view.type, arg.start, arg.end)
+                  const rangeUnchanged = datesKey === lastDatesSetKeyRef.current
+                  lastDatesSetKeyRef.current = datesKey
                   lastRangeRef.current = { start: arg.start, end: arg.end }
+
+                  if (arg.view.type !== activeViewIdRef.current) {
+                    setActiveViewId(arg.view.type)
+                  }
                   setVisibleStart(arg.view.currentStart)
                   setMiniMonth(startOfMonth(arg.view.currentStart))
                   setRangeTitle(arg.view.title)
-                  setActiveViewId(arg.view.type)
-                  void loadRange(arg.start, arg.end, { silent: eventsRef.current.length > 0 })
-                  if (mailTodoOverlayRef.current) void loadMailTodosForRange(arg.start, arg.end)
-                  if (cloudTaskOverlayRef.current) void loadCloudTasksForRange(arg.start, arg.end)
+
+                  if (rangeUnchanged) return
+
+                  if (datesSetLoadTimerRef.current) clearTimeout(datesSetLoadTimerRef.current)
+                  const isOverview = isMultiMonthFcView(arg.view.type)
+                  const runLoads = (): void => {
+                    void loadRange(arg.start, arg.end, { silent: true })
+                    if (
+                      mailTodoOverlayRef.current &&
+                      !shouldSkipHeavyCalendarLayersForMultiMonth(arg.view.type)
+                    ) {
+                      void loadMailTodosForRange(arg.start, arg.end)
+                    }
+                    if (
+                      cloudTaskOverlayRef.current &&
+                      !shouldSkipHeavyCalendarLayersForMultiMonth(arg.view.type)
+                    ) {
+                      void loadCloudTasksForRange(arg.start, arg.end)
+                    }
+                    if (
+                      userNoteOverlayRef.current &&
+                      !shouldSkipHeavyCalendarLayersForMultiMonth(arg.view.type)
+                    ) {
+                      void loadUserNotesForRange(arg.start, arg.end)
+                    }
+                  }
+                  if (isOverview) {
+                    datesSetLoadTimerRef.current = setTimeout(runLoads, 100)
+                  } else {
+                    void loadRange(arg.start, arg.end, {
+                      silent: eventsRef.current.length > 0
+                    })
+                    if (mailTodoOverlayRef.current) void loadMailTodosForRange(arg.start, arg.end)
+                    if (cloudTaskOverlayRef.current) void loadCloudTasksForRange(arg.start, arg.end)
+                    if (userNoteOverlayRef.current) void loadUserNotesForRange(arg.start, arg.end)
+                  }
                 }}
                 eventClick={(info): boolean => {
                   info.jsEvent.preventDefault()
+                  if (info.event.id === QUICK_CREATE_PLACEHOLDER_EVENT_ID) return false
                   const kind = info.event.extendedProps.calendarKind as string | undefined
                   if (kind === CALENDAR_KIND_CLOUD_TASK) {
                     const task = info.event.extendedProps.cloudTask as TaskItemWithContext | undefined
@@ -2827,6 +3216,14 @@ export function CalendarShell(): JSX.Element {
                       void selectMessageWithThreadPreview(m.id)
                       persistRightPreviewOpen(true)
                       setRightPreviewOpen(true)
+                    }
+                    return false
+                  }
+                  if (kind === CALENDAR_KIND_USER_NOTE) {
+                    const note = info.event.extendedProps.userNote as UserNoteListItem | undefined
+                    if (note) {
+                      useNotesPendingFocusStore.getState().setPendingNoteId(note.id)
+                      useAppModeStore.getState().setMode('notes')
                     }
                     return false
                   }
@@ -2992,10 +3389,11 @@ export function CalendarShell(): JSX.Element {
             taskAccounts={taskAccounts}
             defaultAccountId={calendarLinkedAccounts[0]?.id ?? taskAccounts[0]?.id}
             loadListsForAccount={loadTaskListsForAccount}
-            onClose={(): void => setQuickCreate(null)}
+            onRangeChange={handleQuickCreateRangeChange}
+            onClose={dismissQuickCreate}
             onSaved={(): void => reloadVisibleRange({ silent: true })}
             onOpenDetails={(draft): void => {
-              setQuickCreate(null)
+              dismissQuickCreate()
               setEventDialog({
                 mode: 'create',
                 range: draft.range,

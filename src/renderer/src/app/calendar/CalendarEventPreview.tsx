@@ -1,9 +1,20 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { addDays, format, parseISO, startOfDay } from 'date-fns'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { addDays, differenceInMinutes, format, parseISO, startOfDay } from 'date-fns'
 import { de as deFns, enUS as enUSFns } from 'date-fns/locale'
 import type { Locale } from 'date-fns'
 import { useTranslation } from 'react-i18next'
-import { ExternalLink, Loader2, MapPin, Pencil, User, Video } from 'lucide-react'
+import type { TFunction } from 'i18next'
+import {
+  CalendarDays,
+  ExternalLink,
+  Loader2,
+  MapPin,
+  Pencil,
+  Tag,
+  User,
+  Users,
+  Video
+} from 'lucide-react'
 import type { CalendarEventView } from '@shared/types'
 import { fullCalendarEventToPatchSchedule } from '@/app/calendar/calendar-shell-view-helpers'
 import { openExternalUrl } from '@/lib/open-external'
@@ -61,14 +72,48 @@ function eventToScheduleDraft(ev: CalendarEventView): {
 
 type PreviewEditField = 'title' | 'schedule'
 
+function formatEventDurationMinutes(totalMin: number, t: TFunction): string {
+  if (totalMin < 1) return t('calendar.eventPreview.durationUnderMinute')
+  const hours = Math.floor(totalMin / 60)
+  const minutes = totalMin % 60
+  if (hours === 0) return t('calendar.eventPreview.durationMinutesOnly', { minutes })
+  if (minutes === 0) return t('calendar.eventPreview.durationHoursOnly', { hours })
+  return t('calendar.eventPreview.durationHoursMinutes', { hours, minutes })
+}
+
+function locationMapsUrl(location: string): string {
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(location)}`
+}
+
+function PreviewDetailRow(props: {
+  icon: typeof MapPin
+  label: string
+  children: ReactNode
+}): JSX.Element {
+  const Icon = props.icon
+  return (
+    <div className="flex gap-2.5 py-2.5 first:pt-0 last:pb-0">
+      <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+      <div className="min-w-0 flex-1 space-y-0.5">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {props.label}
+        </p>
+        <div className="text-[12px] leading-snug text-foreground">{props.children}</div>
+      </div>
+    </div>
+  )
+}
+
 export function CalendarEventPreview(props: {
   event: CalendarEventView
+  /** Anzeigename des Kalenderordners (Sidebar), falls bekannt. */
+  calendarName?: string | null
   onEdit: () => void
   onSaved?: () => void
   onEventChange?: (event: CalendarEventView) => void
   className?: string
 }): JSX.Element {
-  const { event: ev, onEdit, onSaved, onEventChange, className } = props
+  const { event: ev, calendarName, onEdit, onSaved, onEventChange, className } = props
   const { t, i18n } = useTranslation()
   const viewerTheme = useThemeStore((s) => s.effective)
   const [err, setErr] = useState<string | null>(null)
@@ -77,6 +122,8 @@ export function CalendarEventPreview(props: {
   const [descErr, setDescErr] = useState<string | null>(null)
   const [attendeeEmails, setAttendeeEmails] = useState<string[]>([])
   const [teamsMeeting, setTeamsMeeting] = useState(false)
+  const [detailLocation, setDetailLocation] = useState<string | null>(null)
+  const [detailOrganizer, setDetailOrganizer] = useState<string | null>(null)
 
   const [editingField, setEditingField] = useState<PreviewEditField | null>(null)
   const [titleDraft, setTitleDraft] = useState('')
@@ -96,6 +143,18 @@ export function CalendarEventPreview(props: {
     () => formatEventRange(ev, dfLocale, allDaySuffix, sameDayFmt),
     [ev, dfLocale, allDaySuffix, sameDayFmt]
   )
+  const durationLabel = useMemo(() => {
+    if (ev.isAllDay) return null
+    const start = parseISO(ev.startIso)
+    const end = parseISO(ev.endIso)
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null
+    const mins = differenceInMinutes(end, start)
+    if (mins <= 0) return null
+    return formatEventDurationMinutes(mins, t)
+  }, [ev.endIso, ev.isAllDay, ev.startIso, t])
+  const locationLabel = (ev.location?.trim() || detailLocation?.trim() || '').trim() || null
+  const organizerLabel = (ev.organizer?.trim() || detailOrganizer?.trim() || '').trim() || null
+  const calendarLabel = calendarName?.trim() || null
   const noteTarget = useMemo(() => {
     const eventRemoteId = ev.graphEventId?.trim()
     if (!eventRemoteId) return null
@@ -140,6 +199,8 @@ export function CalendarEventPreview(props: {
       setDescErr(null)
       setAttendeeEmails([])
       setTeamsMeeting(false)
+      setDetailLocation(null)
+      setDetailOrganizer(null)
       return
     }
     if (ev.source === 'google' && !ev.graphCalendarId?.trim()) {
@@ -148,6 +209,8 @@ export function CalendarEventPreview(props: {
       setDescErr(null)
       setAttendeeEmails([])
       setTeamsMeeting(false)
+      setDetailLocation(null)
+      setDetailOrganizer(null)
       return
     }
     let cancelled = false
@@ -166,6 +229,8 @@ export function CalendarEventPreview(props: {
         setDescHtml(raw ? sanitizeComposeHtmlFragment(raw) : '')
         setAttendeeEmails(d.attendeeEmails)
         setTeamsMeeting(!!d.isOnlineMeeting && !ev.isAllDay)
+        setDetailLocation(d.location?.trim() || null)
+        setDetailOrganizer(d.organizer?.trim() || null)
         setDescErr(null)
       })
       .catch((e) => {
@@ -173,6 +238,8 @@ export function CalendarEventPreview(props: {
         setDescHtml('')
         setAttendeeEmails([])
         setTeamsMeeting(false)
+        setDetailLocation(null)
+        setDetailOrganizer(null)
         setDescErr(e instanceof Error ? e.message : String(e))
       })
       .finally(() => {
@@ -253,13 +320,7 @@ export function CalendarEventPreview(props: {
         isAllDay: ev.isAllDay,
         location: ev.location ?? null,
         bodyHtml: descHtml || null,
-        categories: ev.categories ?? null,
-        ...(ev.source === 'microsoft'
-          ? {
-              attendeeEmails,
-              teamsMeeting: !ev.isAllDay && teamsMeeting
-            }
-          : {})
+        categories: ev.categories ?? null
       })
       applyLocalEventPatch({ title: subject })
       cancelInlineEdit()
@@ -271,13 +332,11 @@ export function CalendarEventPreview(props: {
     }
   }, [
     applyLocalEventPatch,
-    attendeeEmails,
     cancelInlineEdit,
     descHtml,
     ev,
     onSaved,
     t,
-    teamsMeeting,
     titleDraft
   ])
 
@@ -593,6 +652,9 @@ export function CalendarEventPreview(props: {
                 {rangeLabel}
               </p>
             )}
+            {durationLabel ? (
+              <p className="text-[11px] text-muted-foreground">{durationLabel}</p>
+            ) : null}
             <p className="text-[11px] text-muted-foreground">{ev.accountEmail}</p>
             {inlineError ? <p className="text-[11px] text-destructive">{inlineError}</p> : null}
             {inlineSaving ? (
@@ -656,35 +718,78 @@ export function CalendarEventPreview(props: {
         {err ? <p className="text-[11px] text-destructive">{err}</p> : null}
       </div>
 
-      <div className="space-y-3 px-4 py-3 text-[12px]">
-        {ev.location?.trim() ? (
-          <div className="flex gap-2 text-muted-foreground">
-            <MapPin className="mt-0.5 h-4 w-4 shrink-0" />
-            <span className="min-w-0 text-foreground">{ev.location.trim()}</span>
-          </div>
-        ) : null}
-        {ev.organizer?.trim() ? (
-          <div className="flex gap-2 text-muted-foreground">
-            <User className="mt-0.5 h-4 w-4 shrink-0" />
-            <span className="min-w-0 text-foreground">{ev.organizer.trim()}</span>
-          </div>
-        ) : null}
-        {ev.categories && ev.categories.length > 0 ? (
-          <div>
-            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              {t('calendar.eventPreview.categories')}
-            </p>
-            <div className="flex flex-wrap gap-1">
-              {ev.categories.map((c) => (
-                <span
-                  key={c}
-                  className="rounded-md border border-border bg-muted/40 px-2 py-0.5 text-[11px] text-foreground"
+      <div className="px-4 py-3 text-[12px]">
+        {calendarLabel ||
+        locationLabel ||
+        organizerLabel ||
+        attendeeEmails.length > 0 ||
+        (ev.categories && ev.categories.length > 0) ||
+        teamsMeeting ? (
+          <div className="mb-3 divide-y divide-border/60 rounded-lg border border-border/60 bg-muted/15 px-3">
+            {calendarLabel ? (
+              <PreviewDetailRow icon={CalendarDays} label={t('calendar.eventPreview.calendarLabel')}>
+                {calendarLabel}
+              </PreviewDetailRow>
+            ) : null}
+            {locationLabel ? (
+              <PreviewDetailRow icon={MapPin} label={t('calendar.eventDialog.location')}>
+                <span className="block min-w-0">{locationLabel}</span>
+                <button
+                  type="button"
+                  className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+                  onClick={(): void => {
+                    setErr(null)
+                    void openExternalUrl(locationMapsUrl(locationLabel)).catch((e) =>
+                      setErr(e instanceof Error ? e.message : String(e))
+                    )
+                  }}
                 >
-                  {c}
-                </span>
-              ))}
-            </div>
+                  <ExternalLink className="h-3 w-3" />
+                  {t('calendar.eventPreview.openInMaps')}
+                </button>
+              </PreviewDetailRow>
+            ) : null}
+            {organizerLabel ? (
+              <PreviewDetailRow icon={User} label={t('calendar.eventPreview.organizerLabel')}>
+                {organizerLabel}
+              </PreviewDetailRow>
+            ) : null}
+            {attendeeEmails.length > 0 ? (
+              <PreviewDetailRow icon={Users} label={t('calendar.eventPreview.attendeesLabel')}>
+                <ul className="space-y-1">
+                  {attendeeEmails.map((email) => (
+                    <li key={email} className="truncate">
+                      {email}
+                    </li>
+                  ))}
+                </ul>
+              </PreviewDetailRow>
+            ) : null}
+            {teamsMeeting && !ev.joinUrl?.trim() ? (
+              <PreviewDetailRow icon={Video} label={t('calendar.eventPreview.meetingLabel')}>
+                {t('calendar.eventPreview.teamsMeetingScheduled')}
+              </PreviewDetailRow>
+            ) : null}
+            {ev.categories && ev.categories.length > 0 ? (
+              <PreviewDetailRow icon={Tag} label={t('calendar.eventPreview.categories')}>
+                <div className="flex flex-wrap gap-1 pt-0.5">
+                  {ev.categories.map((c) => (
+                    <span
+                      key={c}
+                      className="rounded-md border border-border bg-muted/40 px-2 py-0.5 text-[11px] text-foreground"
+                    >
+                      {c}
+                    </span>
+                  ))}
+                </div>
+              </PreviewDetailRow>
+            ) : null}
           </div>
+        ) : descLoading && ev.graphEventId?.trim() ? (
+          <p className="mb-3 inline-flex items-center gap-2 text-[11px] text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            {t('calendar.eventDialog.loadingEventDetails')}
+          </p>
         ) : null}
 
         {ev.graphEventId?.trim() ? (

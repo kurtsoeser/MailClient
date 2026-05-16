@@ -369,7 +369,8 @@ export async function createSimpleCalendarEventForAccount(
       isAllDay: input.isAllDay,
       location: input.location,
       bodyHtml: input.bodyHtml,
-      recurrence: input.recurrence ?? null
+      recurrence: input.recurrence ?? null,
+      attendeeEmails: input.attendeeEmails
     })
     return { id: r.id, webLink: r.webLink }
   }
@@ -403,7 +404,8 @@ export async function updateCalendarEventForAccount(input: CalendarUpdateEventIn
       endIso: input.endIso,
       isAllDay: input.isAllDay,
       location: input.location,
-      bodyHtml: input.bodyHtml
+      bodyHtml: input.bodyHtml,
+      attendeeEmails: input.attendeeEmails
     })
     return
   }

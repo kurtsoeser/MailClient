@@ -65,6 +65,8 @@ export interface CalendarCreateQuickPopoverProps {
   onClose: () => void
   onSaved: () => void
   onOpenDetails: (draft: CalendarCreateQuickDraft) => void
+  /** Hält den Kalender-Platzhalter mit der gewählten Zeit synchron. */
+  onRangeChange?: (range: CalendarCreateRange) => void
 }
 
 export function CalendarCreateQuickPopover({
@@ -76,7 +78,8 @@ export function CalendarCreateQuickPopover({
   loadListsForAccount,
   onClose,
   onSaved,
-  onOpenDetails
+  onOpenDetails,
+  onRangeChange
 }: CalendarCreateQuickPopoverProps): JSX.Element {
   const { t, i18n } = useTranslation()
   const panelRef = useRef<HTMLDivElement>(null)
@@ -125,6 +128,10 @@ export function CalendarCreateQuickPopover({
   )
 
   useEffect(() => {
+    onRangeChange?.(currentRange)
+  }, [currentRange, onRangeChange])
+
+  useEffect(() => {
     setIsAllDay(range.allDay)
     setRangeStart(new Date(range.start))
     setRangeEnd(new Date(range.end))
@@ -137,7 +144,9 @@ export function CalendarCreateQuickPopover({
     setTaskListId('')
     setTaskLists([])
     window.setTimeout(() => titleRef.current?.focus(), 0)
-  }, [range, defaultAccountId, taskAccounts, calendarAccounts.length])
+    // Nur beim Öffnen (Popover wird bei jedem Quick-Create neu gemountet).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     if (createKind !== 'event' || calendarAccounts.length === 0) {

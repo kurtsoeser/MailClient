@@ -3,6 +3,7 @@ import {
   IPC,
   type AppConfig,
   type AppConnectivityState,
+  type GlobalSearchResult,
   type AttachmentMeta,
   type ConnectedAccount,
   type MailFolder,
@@ -55,6 +56,7 @@ import {
   type TasksBulkDeleteCompletedFlaggedEmailResult,
   type TasksListListsInput,
   type TasksListTasksInput,
+  type TasksPatchTaskDisplayInput,
   type TasksPatchTaskInput,
   type TasksClearPlannedScheduleInput,
   type TasksListPlannedSchedulesInput,
@@ -82,15 +84,33 @@ import {
   type AppConfigWeatherLocation,
   type OpenMeteoForecast,
   type OpenMeteoGeocodeHit,
+  type LocationSuggestion,
+  type NoteSection,
+  type NoteSectionCreateInput,
+  type NoteSectionReorderInput,
+  type NoteSectionUpdateInput,
   type UserNote,
   type UserNoteCalendarKey,
   type UserNoteCalendarUpsertInput,
   type UserNoteKind,
+  type NoteLinksBundle,
+  type NoteEntityLinkTarget,
+  type NoteLinkTargetCandidate,
+  type UserNoteLinkAddInput,
+  type UserNoteLinkRemoveInput,
   type UserNoteListFilters,
+  type UserNoteSearchFilters,
+  type UserNoteListInRangeFilters,
   type UserNoteListItem,
   type UserNoteMailUpsertInput,
+  type UserNoteMoveToSectionInput,
+  type UserNoteScheduleInput,
   type UserNoteStandaloneCreateInput,
+  type UserNotePatchDisplayInput,
   type UserNoteStandaloneUpdateInput,
+  type UserNoteAttachment,
+  type UserNoteAttachmentAddLocalInput,
+  type UserNoteAttachmentAddCloudInput,
   type PeopleContactView,
   type PeopleCreateContactInput,
   type PeopleListInput,
@@ -133,7 +153,11 @@ const api = {
       ipcRenderer.invoke(IPC.app.setLaunchOnLogin, enabled),
     showTestNotification: (): Promise<void> =>
       ipcRenderer.invoke(IPC.app.showTestNotification),
-    openExternal: (url: string): Promise<void> => ipcRenderer.invoke(IPC.app.openExternal, url)
+    openExternal: (url: string): Promise<void> => ipcRenderer.invoke(IPC.app.openExternal, url),
+    globalSearch: (args: {
+      query: string
+      limitPerKind?: number
+    }): Promise<GlobalSearchResult> => ipcRenderer.invoke(IPC.app.globalSearch, args)
   },
   config: {
     get: (): Promise<AppConfig> => ipcRenderer.invoke(IPC.config.get),
@@ -173,6 +197,16 @@ const api = {
       timeZone: string | null
     ): Promise<OpenMeteoForecast | null> =>
       ipcRenderer.invoke(IPC.weather.forecast, { latitude, longitude, timeZone })
+  },
+  location: {
+    search: (query: string, language: 'de' | 'en'): Promise<LocationSuggestion[]> =>
+      ipcRenderer.invoke(IPC.location.search, { query, language }),
+    reverse: (
+      latitude: number,
+      longitude: number,
+      language: 'de' | 'en'
+    ): Promise<LocationSuggestion | null> =>
+      ipcRenderer.invoke(IPC.location.reverse, { latitude, longitude, language })
   },
   notion: {
     getStatus: (): Promise<NotionConnectionStatus> => ipcRenderer.invoke(IPC.notion.getStatus),
@@ -266,7 +300,64 @@ const api = {
       ipcRenderer.invoke(IPC.notes.updateStandalone, input),
     delete: (id: number): Promise<void> => ipcRenderer.invoke(IPC.notes.delete, id),
     list: (filters?: UserNoteListFilters): Promise<UserNoteListItem[]> =>
-      ipcRenderer.invoke(IPC.notes.list, filters ?? {})
+      ipcRenderer.invoke(IPC.notes.list, filters ?? {}),
+    search: (filters: UserNoteSearchFilters): Promise<UserNoteListItem[]> =>
+      ipcRenderer.invoke(IPC.notes.search, filters),
+    getById: (id: number): Promise<UserNote | null> => ipcRenderer.invoke(IPC.notes.getById, id),
+    patchDisplay: (input: UserNotePatchDisplayInput): Promise<UserNote> =>
+      ipcRenderer.invoke(IPC.notes.patchDisplay, input),
+    listInRange: (filters: UserNoteListInRangeFilters): Promise<UserNoteListItem[]> =>
+      ipcRenderer.invoke(IPC.notes.listInRange, filters),
+    setSchedule: (input: UserNoteScheduleInput): Promise<UserNote> =>
+      ipcRenderer.invoke(IPC.notes.setSchedule, input),
+    clearSchedule: (id: number): Promise<UserNote> => ipcRenderer.invoke(IPC.notes.clearSchedule, id),
+    moveToSection: (input: UserNoteMoveToSectionInput): Promise<UserNote> =>
+      ipcRenderer.invoke(IPC.notes.moveToSection, input),
+    sections: {
+      list: (): Promise<NoteSection[]> => ipcRenderer.invoke(IPC.notes.sectionsList),
+      create: (input: NoteSectionCreateInput): Promise<NoteSection> =>
+        ipcRenderer.invoke(IPC.notes.sectionsCreate, input),
+      update: (input: NoteSectionUpdateInput): Promise<NoteSection> =>
+        ipcRenderer.invoke(IPC.notes.sectionsUpdate, input),
+      delete: (id: number): Promise<void> => ipcRenderer.invoke(IPC.notes.sectionsDelete, id),
+      reorder: (input: NoteSectionReorderInput): Promise<void> =>
+        ipcRenderer.invoke(IPC.notes.sectionsReorder, input)
+    },
+    links: {
+      list: (fromNoteId: number): Promise<NoteLinksBundle> =>
+        ipcRenderer.invoke(IPC.notes.linksList, fromNoteId),
+      add: (input: UserNoteLinkAddInput): Promise<void> =>
+        ipcRenderer.invoke(IPC.notes.linksAdd, input),
+      remove: (input: UserNoteLinkRemoveInput): Promise<void> =>
+        ipcRenderer.invoke(IPC.notes.linksRemove, input),
+      searchTargets: (args: {
+        query?: string
+        excludeNoteId?: number
+        limit?: number
+      }): Promise<NoteLinkTargetCandidate[]> =>
+        ipcRenderer.invoke(IPC.notes.linksSearchTargets, args)
+    },
+    attachments: {
+      list: (noteId: number): Promise<UserNoteAttachment[]> =>
+        ipcRenderer.invoke(IPC.notes.attachmentsList, noteId),
+      addLocal: (input: UserNoteAttachmentAddLocalInput): Promise<UserNoteAttachment> =>
+        ipcRenderer.invoke(IPC.notes.attachmentsAddLocal, input),
+      addCloud: (input: UserNoteAttachmentAddCloudInput): Promise<UserNoteAttachment> =>
+        ipcRenderer.invoke(IPC.notes.attachmentsAddCloud, input),
+      remove: (args: { noteId: number; attachmentId: number }): Promise<void> =>
+        ipcRenderer.invoke(IPC.notes.attachmentsRemove, args),
+      open: (args: {
+        noteId: number
+        attachmentId: number
+      }): Promise<{ ok: boolean; error?: string }> =>
+        ipcRenderer.invoke(IPC.notes.attachmentsOpen, args),
+      saveAs: (args: {
+        noteId: number
+        attachmentId: number
+        suggestedName?: string
+      }): Promise<{ ok: boolean; path?: string; error?: string; cancelled?: boolean }> =>
+        ipcRenderer.invoke(IPC.notes.attachmentsSaveAs, args)
+    }
   },
   mail: {
     listFolders: (accountId: string): Promise<MailFolder[]> =>
@@ -540,6 +631,8 @@ const api = {
       ipcRenderer.invoke(IPC.tasks.updateTask, input),
     patchTask: (input: TasksPatchTaskInput): Promise<TaskItemRow> =>
       ipcRenderer.invoke(IPC.tasks.patchTask, input),
+    patchTaskDisplay: (input: TasksPatchTaskDisplayInput): Promise<TaskItemRow> =>
+      ipcRenderer.invoke(IPC.tasks.patchTaskDisplay, input),
     deleteTask: (input: TasksDeleteTaskInput): Promise<void> =>
       ipcRenderer.invoke(IPC.tasks.deleteTask, input),
     bulkDeleteCompletedFlaggedEmailTasks: (
@@ -561,6 +654,8 @@ const api = {
   people: {
     list: (input: PeopleListInput): Promise<PeopleContactView[]> =>
       ipcRenderer.invoke(IPC.people.list, input),
+    getById: (contactId: number): Promise<PeopleContactView | null> =>
+      ipcRenderer.invoke(IPC.people.getById, contactId),
     getNavCounts: (): Promise<PeopleNavCounts> => ipcRenderer.invoke(IPC.people.getNavCounts),
     syncAccount: (accountId: string): Promise<PeopleSyncAccountResult> =>
       ipcRenderer.invoke(IPC.people.syncAccount, accountId),

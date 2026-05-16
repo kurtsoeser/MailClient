@@ -13,6 +13,23 @@ const SIMPLE_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i
 const MAX_GOOGLE_EVENT_ATTENDEES = 40
 const GOOGLE_CAL_DESCRIPTION_MAX = 8192
 
+/** Google `attendees` (dedupliziert, max. 40). */
+export function buildGoogleAttendees(
+  emails: string[] | null | undefined
+): calendar_v3.Schema$EventAttendee[] {
+  if (!emails?.length) return []
+  const seen = new Set<string>()
+  const out: calendar_v3.Schema$EventAttendee[] = []
+  for (const raw of emails) {
+    const a = raw.trim().toLowerCase()
+    if (!a || !SIMPLE_EMAIL.test(a) || seen.has(a)) continue
+    seen.add(a)
+    out.push({ email: a })
+    if (out.length >= MAX_GOOGLE_EVENT_ATTENDEES) break
+  }
+  return out
+}
+
 function escapeHtmlPlain(s: string): string {
   return s
     .replace(/&/g, '&amp;')
@@ -249,6 +266,7 @@ export async function googleCreateEvent(
     location?: string | null
     bodyHtml?: string | null
     recurrence?: CalendarSaveEventRecurrence | null
+    attendeeEmails?: string[] | null
   }
 ): Promise<{ id: string; webLink: string | null }> {
   const { calendar } = await getGoogleApis(accountId)
@@ -283,8 +301,14 @@ export async function googleCreateEvent(
     body.recurrence = buildGoogleEventRecurrence(input.recurrence, startLocal, tz, input.isAllDay)
   }
 
+  const attendees = buildGoogleAttendees(input.attendeeEmails)
+  if (attendees.length > 0) {
+    body.attendees = attendees
+  }
+
   const res = await calendar.events.insert({
     calendarId: calId,
+    sendUpdates: attendees.length > 0 ? 'all' : undefined,
     requestBody: body
   })
   return { id: res.data.id ?? '', webLink: res.data.htmlLink ?? null }
@@ -301,6 +325,7 @@ export async function googleUpdateEvent(
     isAllDay: boolean
     location?: string | null
     bodyHtml?: string | null
+    attendeeEmails?: string[] | null
   }
 ): Promise<void> {
   const { calendar } = await getGoogleApis(accountId)
@@ -322,9 +347,17 @@ export async function googleUpdateEvent(
     body.end = { dateTime: input.endIso, timeZone: tz }
   }
 
+  let sendUpdates: 'all' | undefined
+  if (input.attendeeEmails !== undefined) {
+    const attendees = buildGoogleAttendees(input.attendeeEmails ?? [])
+    body.attendees = attendees
+    sendUpdates = 'all'
+  }
+
   await calendar.events.patch({
     calendarId,
     eventId,
+    sendUpdates,
     requestBody: body
   })
 }
@@ -373,7 +406,8 @@ export async function googleGetCalendarEventDetail(
     calendar.events.get({
       calendarId,
       eventId,
-      fields: 'summary,description,hangoutLink,conferenceData,attendees(email)'
+      fields:
+        'summary,description,location,hangoutLink,conferenceData,attendees(email),organizer(email,displayName)'
     })
   )
   const ev = res.data
@@ -394,11 +428,15 @@ export async function googleGetCalendarEventDetail(
   const isOnlineMeeting = Boolean(
     joinUrl || (ev.conferenceData?.entryPoints && ev.conferenceData.entryPoints.length > 0)
   )
+  const organizer =
+    ev.organizer?.email?.trim() || ev.organizer?.displayName?.trim() || null
   return {
     subject: ev.summary ?? null,
     attendeeEmails: emails,
     joinUrl,
     isOnlineMeeting,
-    bodyHtml: normalizeGoogleEventDescriptionHtml(ev.description ?? null)
+    bodyHtml: normalizeGoogleEventDescriptionHtml(ev.description ?? null),
+    location: ev.location?.trim() || null,
+    organizer
   }
 }

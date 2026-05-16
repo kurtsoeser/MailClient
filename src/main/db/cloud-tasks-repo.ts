@@ -1,3 +1,4 @@
+import { normalizeEntityIconColor } from '@shared/entity-icon-color'
 import { getDb } from './index'
 import type { TaskItemRow, TaskListRow } from '@shared/types'
 
@@ -17,6 +18,8 @@ interface CloudTaskDbRow {
   completed: number
   due_iso: string | null
   notes: string | null
+  icon_id: string | null
+  icon_color: string | null
 }
 
 function rowToTaskList(r: TaskListDbRow): TaskListRow {
@@ -35,9 +38,13 @@ function rowToTaskItem(r: CloudTaskDbRow): TaskItemRow {
     title: r.title,
     completed: r.completed === 1,
     dueIso: r.due_iso,
-    notes: r.notes
+    notes: r.notes,
+    iconId: r.icon_id?.trim() ? r.icon_id.trim() : null,
+    iconColor: r.icon_color?.trim() ? r.icon_color.trim() : null
   }
 }
+
+const CLOUD_TASK_SELECT = `account_id, list_id, task_id, title, completed, due_iso, notes, icon_id, icon_color`
 
 const UPSERT_LIST = `
   INSERT INTO task_lists (account_id, list_id, name, is_default, provider, synced_at)
@@ -151,7 +158,7 @@ export function listCloudTasksFromCache(
   const completedFilter = showCompleted ? '' : ' AND completed = 0'
   const rows = db
     .prepare(
-      `SELECT account_id, list_id, task_id, title, completed, due_iso, notes
+      `SELECT ${CLOUD_TASK_SELECT}
        FROM cloud_tasks
        WHERE account_id = ? AND list_id = ?${completedFilter}
        ORDER BY completed ASC, due_iso IS NULL, due_iso ASC, title COLLATE NOCASE ASC`
@@ -258,6 +265,47 @@ export function isTaskListsSyncFresh(accountId: string, staleMs: number): boolea
   const t = Date.parse(at)
   if (Number.isNaN(t)) return false
   return Date.now() - t < staleMs
+}
+
+export function patchCloudTaskDisplay(
+  accountId: string,
+  listId: string,
+  taskId: string,
+  patch: { iconId?: string | null; iconColor?: string | null }
+): void {
+  const sets: string[] = []
+  const params: unknown[] = []
+  if ('iconId' in patch) {
+    sets.push('icon_id = ?')
+    const trimmed = patch.iconId?.trim()
+    params.push(trimmed ? trimmed : null)
+  }
+  if ('iconColor' in patch) {
+    sets.push('icon_color = ?')
+    params.push(normalizeEntityIconColor(patch.iconColor))
+  }
+  if (sets.length === 0) return
+  params.push(accountId, listId, taskId.trim())
+  getDb()
+    .prepare(
+      `UPDATE cloud_tasks SET ${sets.join(', ')}, synced_at = datetime('now')
+       WHERE account_id = ? AND list_id = ? AND task_id = ?`
+    )
+    .run(...params)
+}
+
+export function getCloudTaskFromCache(
+  accountId: string,
+  listId: string,
+  taskId: string
+): TaskItemRow | null {
+  const row = getDb()
+    .prepare(
+      `SELECT ${CLOUD_TASK_SELECT}
+       FROM cloud_tasks WHERE account_id = ? AND list_id = ? AND task_id = ?`
+    )
+    .get(accountId, listId, taskId.trim()) as CloudTaskDbRow | undefined
+  return row ? rowToTaskItem(row) : null
 }
 
 export function deleteCloudTasksDataForAccount(accountId: string): void {

@@ -36,7 +36,6 @@ export interface CalendarSidebarHiddenRestoreEntry {
 export interface CalendarShellHeaderProps {
   rangeTitle: string
   visibleStart: Date
-  dragCreateHint: string | null
   rightInboxOpen: boolean
   onRightInboxOpenChange: (open: boolean) => void
   rightPreviewOpen: boolean
@@ -72,7 +71,6 @@ export function CalendarShellHeader(props: CalendarShellHeaderProps): JSX.Elemen
   const {
     rangeTitle,
     visibleStart,
-    dragCreateHint,
     rightInboxOpen,
     onRightInboxOpenChange,
     rightPreviewOpen,
@@ -163,11 +161,6 @@ export function CalendarShellHeader(props: CalendarShellHeaderProps): JSX.Elemen
               {getWeek(weekAnchor, { weekStartsOn: 1, firstWeekContainsDate: 4 })} ·{' '}
               {format(weekAnchor, 'MMMM yyyy', { locale: dateFnsLocale })}
             </p>
-            {dragCreateHint ? (
-              <p className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-muted-foreground sm:text-[11px]">
-                {dragCreateHint}
-              </p>
-            ) : null}
           </div>
           <button
             type="button"
@@ -258,6 +251,17 @@ export function CalendarShellHeader(props: CalendarShellHeaderProps): JSX.Elemen
                 hint="M"
                 active={activeViewId === 'dayGridMonth'}
                 onPick={(): void => changeView('dayGridMonth')}
+              />
+              <ViewMenuRow
+                label={t('calendar.views.year')}
+                hint="Y"
+                active={activeViewId === 'multiMonthYear'}
+                onPick={(): void => changeView('multiMonthYear')}
+              />
+              <ViewMenuRow
+                label={t('calendar.views.quarterYear')}
+                active={activeViewId === 'multiMonthQuarter'}
+                onPick={(): void => changeView('multiMonthQuarter')}
               />
               <ViewMenuRow
                 label={t('calendar.views.list')}
@@ -419,7 +423,7 @@ function ViewMenuRow({
   onPick
 }: {
   label: string
-  hint: string
+  hint?: string
   active: boolean
   onPick: () => void
 }): JSX.Element {
