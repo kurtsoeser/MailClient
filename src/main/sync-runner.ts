@@ -14,6 +14,7 @@ import { findFolderById, findFolderByWellKnown, listFavoriteFolderIdsForAccount 
 import { listMessageIdsByRemoteIds } from './db/messages-repo'
 import { listAccounts } from './accounts'
 import { runInboxRulesForNewMessages } from './rule-runner'
+import { broadcastMailChanged } from './ipc/ipc-broadcasts'
 
 export type SyncState = 'idle' | 'syncing-folders' | 'syncing-messages' | 'error'
 
@@ -26,12 +27,6 @@ export interface SyncStatus {
 function broadcast(status: SyncStatus): void {
   for (const win of BrowserWindow.getAllWindows()) {
     win.webContents.send('sync:status', status)
-  }
-}
-
-function broadcastMailChanged(accountId: string): void {
-  for (const win of BrowserWindow.getAllWindows()) {
-    win.webContents.send('mail:changed', { accountId })
   }
 }
 
@@ -102,7 +97,7 @@ export async function runFolderPoll(folderId: number): Promise<number> {
     const added = typeof result === 'number' ? result : result.added
     const remoteIds = typeof result === 'number' ? [] : result.remoteIds
     if (added > 0) {
-      broadcastMailChanged(folder.accountId)
+      broadcastMailChanged(folder.accountId, { kind: 'poll', folderIds: [folder.id] })
       if (folder.wellKnown === 'inbox' && remoteIds.length > 0) {
         const idMap = listMessageIdsByRemoteIds(folder.accountId, remoteIds)
         const ids = [...idMap.values()]
@@ -126,43 +121,49 @@ export async function runFolderPoll(folderId: number): Promise<number> {
  * Pollt fuer alle Konten: Posteingang, Gesendet, Entwuerfe, alle als Favorit markierten Ordner,
  * plus den aktuell ausgewaehlten Folder (extraFolderIds vom Renderer).
  */
+async function runFolderPollsWithConcurrency(
+  folderIds: number[],
+  concurrency = 3
+): Promise<void> {
+  let index = 0
+  const workers = Array.from({ length: Math.min(concurrency, folderIds.length) }, async () => {
+    while (index < folderIds.length) {
+      const fid = folderIds[index++]!
+      try {
+        await runFolderPoll(fid)
+        await yieldToMainThread()
+      } catch (e) {
+        console.warn('[sync] poll folder failed', fid, e)
+      }
+    }
+  })
+  await Promise.all(workers)
+}
+
 export async function runBackgroundPoll(extraFolderIds: number[] = []): Promise<void> {
   const accounts = await listAccounts()
   const visited = new Set<number>()
+  const toPoll: number[] = []
 
   for (const acc of accounts) {
     for (const alias of ['inbox', 'sentitems', 'drafts'] as const) {
       const folder = findFolderByWellKnown(acc.id, alias)
       if (!folder || visited.has(folder.id)) continue
       visited.add(folder.id)
-      try {
-        await runFolderPoll(folder.id)
-        await yieldToMainThread()
-      } catch (e) {
-        console.warn('[sync] poll error', acc.id, alias, e)
-      }
+      toPoll.push(folder.id)
     }
     for (const fid of listFavoriteFolderIdsForAccount(acc.id)) {
       if (visited.has(fid)) continue
       visited.add(fid)
-      try {
-        await runFolderPoll(fid)
-        await yieldToMainThread()
-      } catch (e) {
-        console.warn('[sync] poll favorite folder failed', acc.id, fid, e)
-      }
+      toPoll.push(fid)
     }
-    await yieldToMainThread()
   }
 
   for (const fid of extraFolderIds) {
     if (visited.has(fid)) continue
     visited.add(fid)
-    try {
-      await runFolderPoll(fid)
-      await yieldToMainThread()
-    } catch (e) {
-      console.warn('[sync] poll extra folder failed', fid, e)
-    }
+    toPoll.push(fid)
   }
+
+  await runFolderPollsWithConcurrency(toPoll, 3)
 }

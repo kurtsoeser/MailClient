@@ -261,7 +261,8 @@ export async function syncGoogleMessagesInFolder(
     const full = await gmail.users.messages.get({
       userId: 'me',
       id,
-      format: 'full'
+      format: 'metadata',
+      metadataHeaders: ['From', 'To', 'Cc', 'Bcc', 'Subject', 'Date', 'List-Unsubscribe', 'List-Unsubscribe-Post', 'List-Id']
     })
     if (full.data) {
       inputs.push(gmailMessageToUpsert(full.data, accountId, folder.id))
@@ -371,7 +372,12 @@ export async function pollGoogleInbox(accountId: string): Promise<{
         for (const m of added) {
           const id = m.message?.id
           if (!id) continue
-          const full = await gmail.users.messages.get({ userId: 'me', id, format: 'full' })
+          const full = await gmail.users.messages.get({
+            userId: 'me',
+            id,
+            format: 'metadata',
+            metadataHeaders: ['From', 'To', 'Cc', 'Bcc', 'Subject', 'Date', 'List-Unsubscribe', 'List-Unsubscribe-Post', 'List-Id']
+          })
           if (!full.data?.id) continue
           const labelIds = full.data.labelIds ?? []
           const primaryFolder =

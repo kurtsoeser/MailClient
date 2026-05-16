@@ -8,6 +8,7 @@ import { registerMailIpc } from './ipc/register-mail-ipc'
 import { registerNotesIpc } from './ipc/register-notes-ipc'
 import { registerWorkflowVipRulesIpc } from './ipc/register-workflow-vip-rules-ipc'
 import { registerSettingsBackupIpc } from './ipc/register-settings-backup-ipc'
+import { registerLocalDataIpc } from './ipc/register-local-data-ipc'
 import { registerWeatherIpc } from './ipc/register-weather-ipc'
 import { registerLocationIpc } from './ipc/register-location-ipc'
 import { registerPeopleIpc } from './ipc/register-people-ipc'
@@ -27,6 +28,7 @@ export function registerIpcHandlers(): void {
   registerNotesIpc()
   registerWorkflowVipRulesIpc()
   registerSettingsBackupIpc()
+  registerLocalDataIpc()
   registerWeatherIpc()
   registerLocationIpc()
   registerPeopleIpc()

@@ -1,15 +1,34 @@
 import { app } from 'electron'
 import type {
   AppConfig,
+  SettingsBackupAccountPreferenceSnapshot,
+  SettingsBackupCalendarColorOverrideSnapshot,
   SettingsBackupDatabaseExtras,
-  SettingsBackupPayload,
+  SettingsBackupEntityLinkSnapshot,
   SettingsBackupNoteSectionSnapshot,
+  SettingsBackupNotionDestinationsSnapshot,
+  SettingsBackupPayload,
+  SettingsBackupSecureExtras,
   SettingsBackupUserNoteLinkSnapshot,
   SettingsBackupUserNoteSnapshot,
   WorkflowColumn
 } from '@shared/types'
-import { SETTINGS_BACKUP_FORMAT_VERSION } from '@shared/types'
+import {
+  SETTINGS_BACKUP_FORMAT_VERSION,
+  SETTINGS_BACKUP_SUPPORTED_FORMAT_VERSIONS
+} from '@shared/types'
+import {
+  accountPreferencesForBackup,
+  listAccounts,
+  mergeAccountPreferencesFromBackup
+} from './accounts'
 import { DEFAULT_APP_CONFIG, loadConfig, saveConfig } from './config'
+import { broadcastAccountsChanged } from './ipc/ipc-broadcasts'
+import {
+  readNotionDestinations,
+  writeNotionDestinations,
+  type NotionDestinationsConfig
+} from './notion/notion-destinations-store'
 import {
   listWorkflowBoards,
   replaceAllWorkflowBoardsFromBackup
@@ -39,9 +58,15 @@ import {
   replaceAllNoteSectionsFromBackup
 } from './db/note-sections-repo'
 import {
+  listEntityLinksForSettingsBackup,
   listUserNoteLinksForSettingsBackup,
+  replaceAllEntityLinksFromBackup,
   replaceAllNoteLinksFromBackup
 } from './db/user-note-entity-links-repo'
+import {
+  applyCalendarColorOverridesFromBackup,
+  listCalendarColorOverridesForSettingsBackup
+} from './db/calendar-folders-repo'
 import {
   listUserNoteIdsInBackupOrder,
   listUserNotesForSettingsBackup,
@@ -195,6 +220,7 @@ function parseNoteSectionsBackup(raw: unknown[]): SettingsBackupNoteSectionSnaps
     out.push({
       name: s.name.trim(),
       icon: s.icon == null ? null : typeof s.icon === 'string' ? s.icon : null,
+      iconColor: s.iconColor == null ? null : typeof s.iconColor === 'string' ? s.iconColor : null,
       sortOrder: typeof s.sortOrder === 'number' ? s.sortOrder : 0,
       createdAt: s.createdAt,
       updatedAt: s.updatedAt,
@@ -225,6 +251,8 @@ function parseScheduleExtras(n: Record<string, unknown>): {
   scheduledAllDay?: boolean
   sectionIndex?: number | null
   sortOrder?: number
+  iconId?: string | null
+  iconColor?: string | null
   linkedToNoteIndices?: number[]
 } {
   const scheduledStartIso =
@@ -235,10 +263,194 @@ function parseScheduleExtras(n: Record<string, unknown>): {
   const sectionIndex =
     n.sectionIndex == null ? null : typeof n.sectionIndex === 'number' ? Math.floor(n.sectionIndex) : null
   const sortOrder = typeof n.sortOrder === 'number' ? Math.floor(n.sortOrder) : 0
+  const iconId = n.iconId == null ? null : typeof n.iconId === 'string' ? n.iconId : null
+  const iconColor = n.iconColor == null ? null : typeof n.iconColor === 'string' ? n.iconColor : null
   const linkedToNoteIndices = Array.isArray(n.linkedToNoteIndices)
     ? n.linkedToNoteIndices.filter((x): x is number => typeof x === 'number').map((x) => Math.floor(x))
     : []
-  return { scheduledStartIso, scheduledEndIso, scheduledAllDay, sectionIndex, sortOrder, linkedToNoteIndices }
+  return {
+    scheduledStartIso,
+    scheduledEndIso,
+    scheduledAllDay,
+    sectionIndex,
+    sortOrder,
+    iconId,
+    iconColor,
+    linkedToNoteIndices
+  }
+}
+
+function parseEntityLinksBackup(raw: unknown[]): SettingsBackupEntityLinkSnapshot[] {
+  const out: SettingsBackupEntityLinkSnapshot[] = []
+  for (const l of raw) {
+    if (!isRecord(l)) continue
+    if (typeof l.fromNoteIndex !== 'number' || typeof l.createdAt !== 'string') continue
+    const targetKind = l.targetKind
+    if (
+      targetKind !== 'note' &&
+      targetKind !== 'mail' &&
+      targetKind !== 'calendar_event' &&
+      targetKind !== 'cloud_task'
+    ) {
+      continue
+    }
+    const base: SettingsBackupEntityLinkSnapshot = {
+      fromNoteIndex: Math.floor(l.fromNoteIndex),
+      targetKind,
+      createdAt: l.createdAt
+    }
+    if (targetKind === 'note') {
+      if (typeof l.toNoteIndex !== 'number') continue
+      out.push({ ...base, toNoteIndex: Math.floor(l.toNoteIndex) })
+    } else if (targetKind === 'mail') {
+      if (typeof l.mailMessageId !== 'number') continue
+      out.push({ ...base, mailMessageId: Math.floor(l.mailMessageId) })
+    } else if (targetKind === 'calendar_event') {
+      if (typeof l.calendarAccountId !== 'string' || typeof l.calendarGraphEventId !== 'string') {
+        continue
+      }
+      out.push({
+        ...base,
+        calendarAccountId: l.calendarAccountId,
+        calendarGraphEventId: l.calendarGraphEventId
+      })
+    } else {
+      if (
+        typeof l.taskAccountId !== 'string' ||
+        typeof l.taskListId !== 'string' ||
+        typeof l.taskId !== 'string'
+      ) {
+        continue
+      }
+      out.push({
+        ...base,
+        taskAccountId: l.taskAccountId,
+        taskListId: l.taskListId,
+        taskId: l.taskId
+      })
+    }
+  }
+  return out
+}
+
+function parseAccountPreferencesBackup(raw: unknown[]): SettingsBackupAccountPreferenceSnapshot[] {
+  const out: SettingsBackupAccountPreferenceSnapshot[] = []
+  for (const row of raw) {
+    if (!isRecord(row)) continue
+    if (typeof row.accountId !== 'string' || !row.accountId.trim()) continue
+    const pref: SettingsBackupAccountPreferenceSnapshot = { accountId: row.accountId.trim() }
+    if (typeof row.color === 'string' && row.color.trim()) {
+      pref.color = row.color.trim()
+    }
+    if ('calendarLoadAheadDays' in row) {
+      pref.calendarLoadAheadDays =
+        row.calendarLoadAheadDays == null
+          ? null
+          : typeof row.calendarLoadAheadDays === 'number'
+            ? Math.floor(row.calendarLoadAheadDays)
+            : null
+    }
+    if (Array.isArray(row.signatureTemplates)) {
+      pref.signatureTemplates = row.signatureTemplates as SettingsBackupAccountPreferenceSnapshot['signatureTemplates']
+    }
+    if ('defaultSignatureTemplateId' in row) {
+      pref.defaultSignatureTemplateId =
+        row.defaultSignatureTemplateId == null
+          ? null
+          : typeof row.defaultSignatureTemplateId === 'string'
+            ? row.defaultSignatureTemplateId
+            : null
+    }
+    out.push(pref)
+  }
+  return out
+}
+
+function parseNotionDestinationsBackup(raw: unknown): SettingsBackupNotionDestinationsSnapshot | undefined {
+  if (!isRecord(raw)) return undefined
+  const favoritesRaw = Array.isArray(raw.favorites) ? raw.favorites : []
+  const favorites: SettingsBackupNotionDestinationsSnapshot['favorites'] = []
+  for (const f of favoritesRaw) {
+    if (!isRecord(f)) continue
+    if (typeof f.id !== 'string' || typeof f.title !== 'string' || typeof f.addedAt !== 'string') {
+      continue
+    }
+    const kind = f.kind === 'database' ? 'database' : f.kind === 'page' ? 'page' : null
+    if (!kind) continue
+    favorites.push({
+      id: f.id,
+      title: f.title,
+      icon: f.icon == null ? null : typeof f.icon === 'string' ? f.icon : null,
+      kind,
+      addedAt: f.addedAt,
+      ...(typeof f.lastUsedAt === 'string' ? { lastUsedAt: f.lastUsedAt } : {})
+    })
+  }
+  return {
+    favorites,
+    defaultMailPageId:
+      raw.defaultMailPageId == null
+        ? null
+        : typeof raw.defaultMailPageId === 'string'
+          ? raw.defaultMailPageId
+          : null,
+    defaultCalendarPageId:
+      raw.defaultCalendarPageId == null
+        ? null
+        : typeof raw.defaultCalendarPageId === 'string'
+          ? raw.defaultCalendarPageId
+          : null,
+    lastUsedPageId:
+      raw.lastUsedPageId == null
+        ? null
+        : typeof raw.lastUsedPageId === 'string'
+          ? raw.lastUsedPageId
+          : null,
+    newPageParentId:
+      raw.newPageParentId == null
+        ? null
+        : typeof raw.newPageParentId === 'string'
+          ? raw.newPageParentId
+          : null
+  }
+}
+
+function notionDestinationsToBackup(
+  cfg: NotionDestinationsConfig
+): SettingsBackupNotionDestinationsSnapshot {
+  return {
+    favorites: cfg.favorites.map((f) => ({
+      id: f.id,
+      title: f.title,
+      icon: f.icon,
+      kind: f.kind,
+      addedAt: f.addedAt,
+      ...(f.lastUsedAt ? { lastUsedAt: f.lastUsedAt } : {})
+    })),
+    defaultMailPageId: cfg.defaultMailPageId,
+    defaultCalendarPageId: cfg.defaultCalendarPageId,
+    lastUsedPageId: cfg.lastUsedPageId,
+    newPageParentId: cfg.newPageParentId
+  }
+}
+
+function notionDestinationsFromBackup(
+  snap: SettingsBackupNotionDestinationsSnapshot
+): NotionDestinationsConfig {
+  return {
+    favorites: snap.favorites.map((f) => ({
+      id: f.id,
+      title: f.title,
+      icon: f.icon,
+      kind: f.kind,
+      addedAt: f.addedAt,
+      ...(f.lastUsedAt ? { lastUsedAt: f.lastUsedAt } : {})
+    })),
+    defaultMailPageId: snap.defaultMailPageId,
+    defaultCalendarPageId: snap.defaultCalendarPageId,
+    lastUsedPageId: snap.lastUsedPageId,
+    newPageParentId: snap.newPageParentId
+  }
 }
 
 function parseUserNotesBackup(raw: unknown[]): SettingsBackupUserNoteSnapshot[] {
@@ -367,9 +579,12 @@ export function collectDatabaseExtrasForBackup(): SettingsBackupDatabaseExtras {
     updatedAt: r.updatedAt
   }))
   const composeScheduledPending = listPendingScheduledComposeForBackup()
+  const noteIdsInOrder = listUserNoteIdsInBackupOrder()
   const userNotes = listUserNotesForSettingsBackup()
   const noteSections = listNoteSectionsForSettingsBackup()
-  const userNoteLinks = listUserNoteLinksForSettingsBackup(listUserNoteIdsInBackupOrder())
+  const userNoteLinks = listUserNoteLinksForSettingsBackup(noteIdsInOrder)
+  const entityLinks = listEntityLinksForSettingsBackup(noteIdsInOrder)
+  const calendarColorOverrides = listCalendarColorOverridesForSettingsBackup()
   return {
     mailRules: rules,
     workflowBoards: boards.map((b) => ({
@@ -386,7 +601,19 @@ export function collectDatabaseExtrasForBackup(): SettingsBackupDatabaseExtras {
     composeScheduledPending,
     userNotes,
     noteSections,
-    userNoteLinks
+    userNoteLinks,
+    entityLinks,
+    calendarColorOverrides
+  }
+}
+
+export async function collectSecureExtrasForBackup(): Promise<SettingsBackupSecureExtras> {
+  const accounts = await listAccounts()
+  const notion = await readNotionDestinations()
+  return {
+    accountPreferences: accountPreferencesForBackup(accounts),
+    accountOrder: accounts.map((a) => a.id),
+    notionDestinations: notionDestinationsToBackup(notion)
   }
 }
 
@@ -399,7 +626,8 @@ export async function buildSettingsBackupPayload(
     appVersion: app.getVersion(),
     config: await loadConfig(),
     localStorage: { ...localStorage },
-    databaseExtras: collectDatabaseExtrasForBackup()
+    databaseExtras: collectDatabaseExtrasForBackup(),
+    secureExtras: await collectSecureExtrasForBackup()
   }
 }
 export function parseSettingsBackupJson(raw: string): SettingsBackupPayload {
@@ -412,9 +640,13 @@ export function parseSettingsBackupJson(raw: string): SettingsBackupPayload {
   if (!isRecord(parsed)) {
     throw new Error('Ungueltiges Sicherungsformat.')
   }
-  if (parsed.formatVersion !== SETTINGS_BACKUP_FORMAT_VERSION) {
+  const formatVersion = parsed.formatVersion
+  if (
+    typeof formatVersion !== 'number' ||
+    !(SETTINGS_BACKUP_SUPPORTED_FORMAT_VERSIONS as readonly number[]).includes(formatVersion)
+  ) {
     throw new Error(
-      `Unbekannte Format-Version (erwartet ${String(SETTINGS_BACKUP_FORMAT_VERSION)}).`
+      `Unbekannte Format-Version (unterstuetzt: ${SETTINGS_BACKUP_SUPPORTED_FORMAT_VERSIONS.join(', ')}).`
     )
   }
   if (typeof parsed.exportedAt !== 'string' || typeof parsed.appVersion !== 'string') {
@@ -504,16 +736,13 @@ export function parseSettingsBackupJson(raw: string): SettingsBackupPayload {
       workflowMailFolders
     }
     if (Array.isArray(de.quickSteps)) {
-      const qs = parseQuickStepsBackup(de.quickSteps)
-      if (qs) databaseExtras.quickSteps = qs
+      databaseExtras.quickSteps = parseQuickStepsBackup(de.quickSteps) ?? []
     }
     if (Array.isArray(de.mailTemplates)) {
-      const mt = parseTemplatesBackup(de.mailTemplates)
-      if (mt) databaseExtras.mailTemplates = mt
+      databaseExtras.mailTemplates = parseTemplatesBackup(de.mailTemplates) ?? []
     }
     if (Array.isArray(de.metaFolders)) {
-      const mf = parseMetaFoldersBackup(de.metaFolders)
-      if (mf) databaseExtras.metaFolders = mf
+      databaseExtras.metaFolders = parseMetaFoldersBackup(de.metaFolders) ?? []
     }
     if ('composeScheduledPending' in de && Array.isArray(de.composeScheduledPending)) {
       databaseExtras.composeScheduledPending = parseComposeScheduledBackup(de.composeScheduledPending)
@@ -527,15 +756,54 @@ export function parseSettingsBackupJson(raw: string): SettingsBackupPayload {
     if ('userNoteLinks' in de && Array.isArray(de.userNoteLinks)) {
       databaseExtras.userNoteLinks = parseUserNoteLinksBackup(de.userNoteLinks)
     }
+    if ('entityLinks' in de && Array.isArray(de.entityLinks)) {
+      databaseExtras.entityLinks = parseEntityLinksBackup(de.entityLinks)
+    }
+    if ('calendarColorOverrides' in de && Array.isArray(de.calendarColorOverrides)) {
+      databaseExtras.calendarColorOverrides = de.calendarColorOverrides
+        .filter((row): row is SettingsBackupCalendarColorOverrideSnapshot => {
+          if (!isRecord(row)) return false
+          return (
+            typeof row.accountId === 'string' &&
+            typeof row.calendarId === 'string' &&
+            (row.displayColorOverrideHex == null || typeof row.displayColorOverrideHex === 'string')
+          )
+        })
+        .map((row) => ({
+          accountId: row.accountId.trim(),
+          calendarId: row.calendarId.trim(),
+          displayColorOverrideHex:
+            row.displayColorOverrideHex == null || row.displayColorOverrideHex === ''
+              ? null
+              : String(row.displayColorOverrideHex)
+        }))
+    }
+  }
+
+  let secureExtras: SettingsBackupSecureExtras | undefined
+  if (parsed.secureExtras != null && isRecord(parsed.secureExtras)) {
+    const se = parsed.secureExtras
+    secureExtras = {}
+    if (Array.isArray(se.accountPreferences)) {
+      secureExtras.accountPreferences = parseAccountPreferencesBackup(se.accountPreferences)
+    }
+    if (Array.isArray(se.accountOrder)) {
+      secureExtras.accountOrder = se.accountOrder.filter((id): id is string => typeof id === 'string')
+    }
+    if (se.notionDestinations != null) {
+      const notion = parseNotionDestinationsBackup(se.notionDestinations)
+      if (notion) secureExtras.notionDestinations = notion
+    }
   }
 
   return {
-    formatVersion: SETTINGS_BACKUP_FORMAT_VERSION,
+    formatVersion: formatVersion as SettingsBackupPayload['formatVersion'],
     exportedAt: parsed.exportedAt,
     appVersion: parsed.appVersion,
     config,
     localStorage: parsed.localStorage,
-    databaseExtras
+    databaseExtras,
+    secureExtras
   }
 }
 
@@ -544,18 +812,32 @@ export async function applySettingsBackupPayload(backup: SettingsBackupPayload):
   await saveConfig(config)
   app.setLoginItemSettings({ openAtLogin: Boolean(config.launchOnLogin), path: process.execPath })
 
+  if (backup.secureExtras) {
+    const se = backup.secureExtras
+    if (se.accountPreferences != null && se.accountPreferences.length > 0) {
+      const next = await mergeAccountPreferencesFromBackup(
+        se.accountPreferences,
+        se.accountOrder
+      )
+      broadcastAccountsChanged(next)
+    }
+    if (se.notionDestinations != null) {
+      await writeNotionDestinations(notionDestinationsFromBackup(se.notionDestinations))
+    }
+  }
+
   if (backup.databaseExtras) {
     const de = backup.databaseExtras
-    if (de.quickSteps != null && de.quickSteps.length > 0) {
+    if (de.quickSteps != null) {
       replaceAllQuickStepsFromBackup(de.quickSteps)
     }
-    if (de.workflowBoards.length > 0) {
+    if (de.workflowBoards != null) {
       replaceAllWorkflowBoardsFromBackup(de.workflowBoards)
     }
-    if (de.mailTemplates != null && de.mailTemplates.length > 0) {
+    if (de.mailTemplates != null) {
       replaceAllTemplatesFromBackup(de.mailTemplates)
     }
-    if (de.metaFolders != null && de.metaFolders.length > 0) {
+    if (de.metaFolders != null) {
       replaceAllMetaFoldersFromBackup(de.metaFolders)
     }
     replaceAllMailRulesFromBackup(de.mailRules)
@@ -564,11 +846,16 @@ export async function applySettingsBackupPayload(backup: SettingsBackupPayload):
     if (de.composeScheduledPending != null) {
       replacePendingScheduledComposeFromBackup(de.composeScheduledPending)
     }
+    if (de.calendarColorOverrides != null) {
+      applyCalendarColorOverridesFromBackup(de.calendarColorOverrides)
+    }
     if (de.userNotes != null) {
       const sectionIds =
         de.noteSections != null ? replaceAllNoteSectionsFromBackup(de.noteSections) : []
       const noteIds = replaceAllUserNotesFromBackup(de.userNotes, sectionIds)
-      if (de.userNoteLinks != null && de.userNoteLinks.length > 0) {
+      if (de.entityLinks != null && de.entityLinks.length > 0) {
+        replaceAllEntityLinksFromBackup(de.entityLinks, noteIds)
+      } else if (de.userNoteLinks != null && de.userNoteLinks.length > 0) {
         replaceAllNoteLinksFromBackup(de.userNoteLinks, noteIds)
       } else {
         restoreUserNoteLinksFromSnapshots(de.userNotes, noteIds)

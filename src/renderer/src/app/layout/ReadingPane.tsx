@@ -28,6 +28,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useMailStore } from '@/stores/mail'
+import { formatBytes } from '@/lib/format-bytes'
 import { useAccountsStore } from '@/stores/accounts'
 import { threadGroupingKey } from '@/lib/thread-group'
 import { useComposeStore } from '@/stores/compose'
@@ -1031,13 +1032,6 @@ function pickAttachmentIcon(a: AttachmentMeta): React.ComponentType<{ className?
     return FileArchive
   }
   return FileText
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
 }
 
 function IconButton({

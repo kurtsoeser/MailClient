@@ -35,6 +35,7 @@ export function addVipSender(accountId: string, email: string): void {
   db.prepare(
     `INSERT OR IGNORE INTO vip_senders (account_id, email_lower) VALUES (?, ?)`
   ).run(accountId, norm)
+  invalidateVipCache()
 }
 
 export function removeVipSender(accountId: string, email: string): void {
@@ -44,6 +45,7 @@ export function removeVipSender(accountId: string, email: string): void {
     accountId,
     norm
   )
+  invalidateVipCache()
 }
 
 /** Ersetzt die VIP-Liste vollstaendig (z. B. Einstellungen-Import). */
@@ -61,11 +63,20 @@ export function replaceAllVipSenders(rows: { accountId: string; emailLower: stri
     }
   })
   tx()
+  invalidateVipCache()
 }
 
+let vipKeySetCache: Set<string> | null = null
+
 function vipKeySet(): Set<string> {
+  if (vipKeySetCache) return vipKeySetCache
   const rows = listAllVipRows()
-  return new Set(rows.map((r) => `${r.accountId}\t${r.emailLower}`))
+  vipKeySetCache = new Set(rows.map((r) => `${r.accountId}\t${r.emailLower}`))
+  return vipKeySetCache
+}
+
+export function invalidateVipCache(): void {
+  vipKeySetCache = null
 }
 
 export function attachVipFlagsToMailItems<T extends MailListItem>(items: T[]): T[] {

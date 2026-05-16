@@ -15,6 +15,7 @@ import {
   Cog
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { formatBytes } from '@/lib/format-bytes'
 import { TipTapBody } from '@/components/TipTapBody'
 import { SignatureTemplateControls } from '@/components/SignatureTemplateControls'
 import { OneDriveExplorerDialog } from '@/components/OneDriveExplorerDialog'
@@ -904,18 +905,6 @@ function pickAttachmentIcon(
   const ext = name.split('.').pop()?.toLowerCase() ?? ''
   if (mime.startsWith('text/') || ['txt', 'md', 'log', 'csv'].includes(ext)) return FileText
   return FileIcon
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes <= 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB']
-  let i = 0
-  let v = bytes
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024
-    i++
-  }
-  return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${units[i]}`
 }
 
 function arrayBufferToBase64(buf: ArrayBuffer): string {

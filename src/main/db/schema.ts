@@ -872,13 +872,11 @@ export const MIGRATIONS: Migration[] = [
       END;
 
       CREATE TRIGGER IF NOT EXISTS user_notes_fts_ad AFTER DELETE ON user_notes BEGIN
-        INSERT INTO user_notes_fts(user_notes_fts, rowid, title, body, event_title, mail_subject)
-        VALUES ('delete', old.id, '', '', '', '');
+        DELETE FROM user_notes_fts WHERE rowid = old.id;
       END;
 
       CREATE TRIGGER IF NOT EXISTS user_notes_fts_au AFTER UPDATE ON user_notes BEGIN
-        INSERT INTO user_notes_fts(user_notes_fts, rowid, title, body, event_title, mail_subject)
-        VALUES ('delete', old.id, '', '', '', '');
+        DELETE FROM user_notes_fts WHERE rowid = old.id;
         INSERT INTO user_notes_fts(rowid, title, body, event_title, mail_subject)
         VALUES (
           new.id,
@@ -892,10 +890,8 @@ export const MIGRATIONS: Migration[] = [
       CREATE TRIGGER IF NOT EXISTS messages_au_user_notes_fts
       AFTER UPDATE OF subject ON messages
       WHEN old.subject IS NOT new.subject BEGIN
-        INSERT INTO user_notes_fts(user_notes_fts, rowid, title, body, event_title, mail_subject)
-        SELECT 'delete', n.id, '', '', '', ''
-        FROM user_notes n
-        WHERE n.message_id = new.id;
+        DELETE FROM user_notes_fts
+        WHERE rowid IN (SELECT id FROM user_notes WHERE message_id = new.id);
         INSERT INTO user_notes_fts(rowid, title, body, event_title, mail_subject)
         SELECT
           n.id,
@@ -916,6 +912,59 @@ export const MIGRATIONS: Migration[] = [
         COALESCE(m.subject, '')
       FROM user_notes n
       LEFT JOIN messages m ON m.id = n.message_id;
+    `
+  },
+  {
+    version: 34,
+    description: 'Notizen-FTS: Update/Delete-Trigger reparieren',
+    sql: `
+      DROP TRIGGER IF EXISTS user_notes_fts_ad;
+      DROP TRIGGER IF EXISTS user_notes_fts_au;
+      DROP TRIGGER IF EXISTS messages_au_user_notes_fts;
+
+      CREATE TRIGGER user_notes_fts_ad AFTER DELETE ON user_notes BEGIN
+        DELETE FROM user_notes_fts WHERE rowid = old.id;
+      END;
+
+      CREATE TRIGGER user_notes_fts_au AFTER UPDATE ON user_notes BEGIN
+        DELETE FROM user_notes_fts WHERE rowid = old.id;
+        INSERT INTO user_notes_fts(rowid, title, body, event_title, mail_subject)
+        VALUES (
+          new.id,
+          COALESCE(new.title, ''),
+          COALESCE(new.body, ''),
+          COALESCE(new.event_title_snapshot, ''),
+          COALESCE((SELECT subject FROM messages WHERE id = new.message_id), '')
+        );
+      END;
+
+      CREATE TRIGGER messages_au_user_notes_fts
+      AFTER UPDATE OF subject ON messages
+      WHEN old.subject IS NOT new.subject BEGIN
+        DELETE FROM user_notes_fts
+        WHERE rowid IN (SELECT id FROM user_notes WHERE message_id = new.id);
+        INSERT INTO user_notes_fts(rowid, title, body, event_title, mail_subject)
+        SELECT
+          n.id,
+          COALESCE(n.title, ''),
+          COALESCE(n.body, ''),
+          COALESCE(n.event_title_snapshot, ''),
+          COALESCE(new.subject, '')
+        FROM user_notes n
+        WHERE n.message_id = new.id;
+      END;
+    `
+  },
+  {
+    version: 35,
+    description: 'Composite-Indizes fuer Mail-Listen und Thread-Lookups',
+    sql: `
+      CREATE INDEX IF NOT EXISTS idx_messages_folder_received
+        ON messages(folder_id, received_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_messages_account_thread
+        ON messages(account_id, remote_thread_id);
+      CREATE INDEX IF NOT EXISTS idx_folders_well_known_account
+        ON folders(well_known, account_id);
     `
   }
 ]

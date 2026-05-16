@@ -15,7 +15,7 @@ import {
   type UpsertMessageInput
 } from '../db/messages-repo'
 import { listAccounts } from '../accounts'
-import { replaceMessageTags } from '../db/message-tags-repo'
+import { replaceMessageTagsBatch } from '../db/message-tags-repo'
 import { upsertMailMessagesReconcilingTodos } from '../mail-upsert-with-todo-reconcile'
 import {
   getFolderSyncState,
@@ -209,12 +209,12 @@ function syncWindowFilter(days: number | null | undefined): string | null {
   return `receivedDateTime ge ${since}`
 }
 
+/** Listen-/Poll-Sync ohne Body (Body on-demand via message-body-fetch). */
 const MESSAGE_SELECT = [
   'id',
   'conversationId',
   'subject',
   'bodyPreview',
-  'body',
   'from',
   'sender',
   'toRecipients',
@@ -268,14 +268,16 @@ function mirrorGraphCategoriesToLocal(accountId: string, graphMessages: GraphMes
   const remoteIds = graphMessages.map((m) => m.id).filter((id): id is string => Boolean(id))
   if (remoteIds.length === 0) return
   const idMap = listMessageIdsByRemoteIds(accountId, remoteIds)
+  const batch: { messageId: number; accountId: string; tags: string[] }[] = []
   for (const m of graphMessages) {
     const localId = idMap.get(m.id)
     if (localId == null) continue
     const cats = Array.isArray(m.categories)
       ? m.categories.filter((c): c is string => typeof c === 'string' && c.trim().length > 0)
       : []
-    replaceMessageTags(localId, accountId, cats)
+    batch.push({ messageId: localId, accountId, tags: cats })
   }
+  replaceMessageTagsBatch(batch)
 }
 
 function normalizeGraphFollowUpFlagStatus(m: GraphMessage): 'notFlagged' | 'flagged' | 'complete' {

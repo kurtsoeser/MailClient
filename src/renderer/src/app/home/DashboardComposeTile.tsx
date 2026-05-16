@@ -5,16 +5,11 @@ import { TipTapBody } from '@/components/TipTapBody'
 import { SignatureTemplateControls } from '@/components/SignatureTemplateControls'
 import { RecipientTokenField } from '@/components/RecipientTokenField'
 import { cn } from '@/lib/utils'
+import { formatBytes } from '@/lib/format-bytes'
 import { useAccountsStore } from '@/stores/accounts'
 import { useComposeStore, type ComposeAttachmentFile } from '@/stores/compose'
 
 const MAX_ATTACHMENTS_TOTAL_BYTES = 24 * 1024 * 1024
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
 
 function arrayBufferToBase64(buf: ArrayBuffer): string {
   let binary = ''

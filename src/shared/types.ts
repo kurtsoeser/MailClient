@@ -2,6 +2,15 @@ import type { MailRuleDefinition, MailRuleTrigger } from './mail-rules'
 
 export type Provider = 'microsoft' | 'google'
 
+/** Payload fuer das Renderer-Event `mail:changed`. */
+export interface MailChangedPayload {
+  accountId: string
+  /** `poll` = Hintergrund-Sync; `action` = Nutzeraktion oder Regel. */
+  kind?: 'poll' | 'action'
+  /** Betroffene lokale Ordner-IDs (optional, fuer gezielte Reloads). */
+  folderIds?: number[]
+}
+
 /** Gespeicherte Signatur-Vorlage pro Mailkonto (lokal). */
 export interface AccountSignatureTemplate {
   id: string
@@ -162,7 +171,10 @@ export interface OpenMeteoForecast {
 }
 
 /** Aktuelle Version der JSON-Datei fuer Einstellungen-Export/-Import. */
-export const SETTINGS_BACKUP_FORMAT_VERSION = 1 as const
+export const SETTINGS_BACKUP_FORMAT_VERSION = 2 as const
+
+/** Unterstuetzte Import-Versionen (aeltere Exporte bleiben lesbar). */
+export const SETTINGS_BACKUP_SUPPORTED_FORMAT_VERSIONS = [1, 2] as const
 
 /** Regel ohne DB-IDs — fuer Sicherungsdatei und Wiederherstellung. */
 export interface SettingsBackupMailRuleSnapshot {
@@ -242,6 +254,53 @@ export interface SettingsBackupUserNoteLinkSnapshot {
   createdAt: string
 }
 
+/** Verknuepfung einer Notiz mit Mail, Kalender, Aufgabe oder anderer Notiz. */
+export interface SettingsBackupEntityLinkSnapshot {
+  fromNoteIndex: number
+  targetKind: 'note' | 'mail' | 'calendar_event' | 'cloud_task'
+  toNoteIndex?: number
+  mailMessageId?: number
+  calendarAccountId?: string
+  calendarGraphEventId?: string
+  taskAccountId?: string
+  taskListId?: string
+  taskId?: string
+  createdAt: string
+}
+
+/** Benutzerdefinierte Kalenderfarbe in der Sidebar (Graph-Kalender-ID). */
+export interface SettingsBackupCalendarColorOverrideSnapshot {
+  accountId: string
+  calendarId: string
+  displayColorOverrideHex: string | null
+}
+
+/** Kontenbezogene Einstellungen ohne OAuth-Token (Merge per Konto-ID beim Import). */
+export interface SettingsBackupAccountPreferenceSnapshot {
+  accountId: string
+  color?: string
+  calendarLoadAheadDays?: number | null
+  signatureTemplates?: AccountSignatureTemplate[]
+  defaultSignatureTemplateId?: string | null
+}
+
+export interface SettingsBackupNotionDestinationSnapshot {
+  id: string
+  title: string
+  icon: string | null
+  kind: 'page' | 'database'
+  addedAt: string
+  lastUsedAt?: string
+}
+
+export interface SettingsBackupNotionDestinationsSnapshot {
+  favorites: SettingsBackupNotionDestinationSnapshot[]
+  defaultMailPageId: string | null
+  defaultCalendarPageId: string | null
+  lastUsedPageId: string | null
+  newPageParentId: string | null
+}
+
 export interface SettingsBackupUserNoteSnapshot {
   kind: 'mail' | 'calendar' | 'standalone'
   mailAccountId?: string | null
@@ -284,12 +343,27 @@ export interface SettingsBackupDatabaseExtras {
   userNotes?: SettingsBackupUserNoteSnapshot[]
   noteSections?: SettingsBackupNoteSectionSnapshot[]
   userNoteLinks?: SettingsBackupUserNoteLinkSnapshot[]
+  /** Ab v2: alle Notiz-Verknuepfungen (Mail/Kalender/Aufgabe/Notiz). */
+  entityLinks?: SettingsBackupEntityLinkSnapshot[]
+  /** Ab v2: benutzerdefinierte Kalenderfarben. */
+  calendarColorOverrides?: SettingsBackupCalendarColorOverrideSnapshot[]
+}
+
+/**
+ * Secure-Store und kontobezogene Praeferenzen (ohne OAuth-Token).
+ * Ab Format v2; fehlt in v1-Exporten.
+ */
+export interface SettingsBackupSecureExtras {
+  accountPreferences?: SettingsBackupAccountPreferenceSnapshot[]
+  accountOrder?: string[]
+  notionDestinations?: SettingsBackupNotionDestinationsSnapshot
 }
 
 /**
  * Lokale Einstellungs-Sicherung (ohne Mails, ohne Konten-Token).
  * Enthaelt App-Config, Renderer-localStorage, Mail-Regeln, Workflow (Boards + QuickSteps),
- * Vorlagen, Meta-Ordner, VIP, Triage-Ordner, geplanten Versand (pending) und Notizen.
+ * Vorlagen, Meta-Ordner, VIP, Triage-Ordner, geplanten Versand (pending), Notizen und ab v2
+ * Konten-Praeferenzen, Notion-Ziele sowie Kalenderfarb-Ueberschreibungen.
  */
 export interface SettingsBackupPayload {
   formatVersion: typeof SETTINGS_BACKUP_FORMAT_VERSION
@@ -299,6 +373,8 @@ export interface SettingsBackupPayload {
   localStorage: Record<string, string>
   /** Fehlt bei aelteren Exporten: Datenbank-Teile werden dann nicht geaendert. */
   databaseExtras?: SettingsBackupDatabaseExtras
+  /** Fehlt bei v1-Exporten: Secure-Store-Praeferenzen ohne Token. */
+  secureExtras?: SettingsBackupSecureExtras
 }
 
 export type SettingsBackupExportResult =
@@ -307,6 +383,64 @@ export type SettingsBackupExportResult =
 
 export type SettingsBackupPickResult =
   | { ok: true; backup: SettingsBackupPayload }
+  | { ok: false; cancelled: true }
+  | { ok: false; error: string }
+
+/** ZIP-Archiv des userData-Ordners (portable = ohne Chromium-Caches). */
+export const LOCAL_DATA_ARCHIVE_FORMAT_VERSION = 1 as const
+
+export type LocalDataArchiveExportMode = 'portable' | 'full'
+
+export interface LocalDataUsageCategory {
+  id: string
+  /** i18n-Key fuer die Anzeige */
+  labelKey: string
+  bytes: number
+  fileCount: number
+  canOptimize: boolean
+}
+
+export interface LocalDataUsageBreakdown {
+  /** Ordner `data/` inkl. mail.db (+ WAL/SHM). */
+  databaseBytes: number
+  /** Chromium-Caches, blob_storage, attachment-cache. */
+  cacheBytes: number
+  /** Konten-Token, Bilder, Notiz-Anhaenge, config, Local Storage, … */
+  essentialBytes: number
+  /** Dateien in attachment-cache aelter als die Aufbewahrungsfrist. */
+  attachmentCacheStaleBytes: number
+}
+
+export interface LocalDataUsageReport {
+  userDataPath: string
+  totalBytes: number
+  totalFileCount: number
+  reclaimableBytes: number
+  breakdown: LocalDataUsageBreakdown
+  categories: LocalDataUsageCategory[]
+}
+
+export interface LocalDataOptimizeResult {
+  freedBytes: number
+  beforeTotalBytes: number
+  afterTotalBytes: number
+  /** Chromium-Ordner waren gesperrt; Rest wird beim naechsten App-Start entfernt. */
+  chromiumCacheNeedsRestart?: boolean
+  details: {
+    cacheAndTempBytes: number
+    attachmentCacheStaleBytes: number
+    databaseBytes: number
+    orphanAvatarsBytes: number
+    orphanContactPhotosBytes: number
+  }
+}
+
+export type LocalDataArchiveExportResult =
+  | { ok: true; path: string; mode: LocalDataArchiveExportMode }
+  | { ok: false; cancelled: true }
+
+export type LocalDataArchiveImportResult =
+  | { ok: true }
   | { ok: false; cancelled: true }
   | { ok: false; error: string }
 
@@ -1466,270 +1600,8 @@ export interface NotionAppendEventInput {
   localeCode?: 'de' | 'en'
 }
 
-export const IPC = {
-  app: {
-    getVersion: 'app:get-version',
-    getPlatform: 'app:get-platform',
-    getConnectivity: 'app:get-connectivity',
-    setLaunchOnLogin: 'app:set-launch-on-login',
-    showTestNotification: 'app:show-test-notification',
-    openExternal: 'app:open-external',
-    globalSearch: 'app:global-search'
-  },
-  config: {
-    get: 'config:get',
-    setMicrosoftClientId: 'config:set-microsoft-client-id',
-    setGoogleClientId: 'config:set-google-client-id',
-    setSyncWindowDays: 'config:set-sync-window-days',
-    setAutoLoadImages: 'config:set-auto-load-images',
-    setCalendarTimeZone: 'config:set-calendar-time-zone',
-    setWeatherLocation: 'config:set-weather-location',
-    setWorkflowMailFoldersIntroDismissed: 'config:set-workflow-mail-folders-intro-dismissed',
-    setFirstRunSetupCompleted: 'config:set-first-run-setup-completed',
-    setNotionCredentials: 'config:set-notion-credentials'
-  },
-  auth: {
-    addMicrosoft: 'auth:add-microsoft',
-    addGoogle: 'auth:add-google',
-    refreshMicrosoft: 'auth:refresh-microsoft',
-    refreshGoogle: 'auth:refresh-google',
-    listAccounts: 'auth:list-accounts',
-    remove: 'auth:remove',
-    getProfilePhotoDataUrl: 'auth:get-profile-photo-data-url',
-    reorderAccounts: 'auth:reorder-accounts',
-    patchAccount: 'auth:patch-account'
-  },
-  graph: {
-    getMe: 'graph:get-me',
-    listTeamsChats: 'graph:list-teams-chats',
-    listTeamsChatMessages: 'graph:list-teams-chat-messages',
-    sendTeamsChatMessage: 'graph:send-teams-chat-message'
-  },
-  teamsChatPopout: {
-    open: 'teams-chat-popout:open',
-    close: 'teams-chat-popout:close',
-    closeAll: 'teams-chat-popout:close-all',
-    focus: 'teams-chat-popout:focus',
-    isOpen: 'teams-chat-popout:is-open',
-    listOpen: 'teams-chat-popout:list-open',
-    getAlwaysOnTop: 'teams-chat-popout:get-always-on-top',
-    setAlwaysOnTop: 'teams-chat-popout:set-always-on-top'
-  },
-  notes: {
-    getMail: 'notes:get-mail',
-    upsertMail: 'notes:upsert-mail',
-    getCalendar: 'notes:get-calendar',
-    upsertCalendar: 'notes:upsert-calendar',
-    createStandalone: 'notes:create-standalone',
-    updateStandalone: 'notes:update-standalone',
-    delete: 'notes:delete',
-    list: 'notes:list',
-    search: 'notes:search',
-    getById: 'notes:get-by-id',
-    listInRange: 'notes:list-in-range',
-    setSchedule: 'notes:set-schedule',
-    clearSchedule: 'notes:clear-schedule',
-    moveToSection: 'notes:move-to-section',
-    sectionsList: 'notes:sections:list',
-    sectionsCreate: 'notes:sections:create',
-    sectionsUpdate: 'notes:sections:update',
-    sectionsDelete: 'notes:sections:delete',
-    sectionsReorder: 'notes:sections:reorder',
-    linksList: 'notes:links:list',
-    linksAdd: 'notes:links:add',
-    linksRemove: 'notes:links:remove',
-    linksSearchTargets: 'notes:links:search-targets',
-    patchDisplay: 'notes:patch-display',
-    attachmentsList: 'notes:attachments:list',
-    attachmentsAddLocal: 'notes:attachments:add-local',
-    attachmentsAddCloud: 'notes:attachments:add-cloud',
-    attachmentsRemove: 'notes:attachments:remove',
-    attachmentsOpen: 'notes:attachments:open',
-    attachmentsSaveAs: 'notes:attachments:save-as'
-  },
-  mail: {
-    listFolders: 'mail:list-folders',
-    listMessages: 'mail:list-messages',
-    listInboxTriage: 'mail:list-inbox-triage',
-    /** Alle lokalen Mails aus allen Posteingaengen (well_known = inbox), ohne LIMIT. */
-    listUnifiedInbox: 'mail:list-unified-inbox',
-    listThreadMessages: 'mail:list-thread-messages',
-    listMessagesByThreads: 'mail:list-messages-by-threads',
-    fetchInlineImages: 'mail:fetch-inline-images',
-    listAttachments: 'mail:list-attachments',
-    openAttachment: 'mail:open-attachment',
-    saveAttachmentAs: 'mail:save-attachment-as',
-    syncAttachmentsFlag: 'mail:sync-attachments-flag',
-    refreshNow: 'mail:refresh-now',
-    setActiveFolder: 'mail:set-active-folder',
-    search: 'mail:search',
-    getMessage: 'mail:get-message',
-    syncAccount: 'mail:sync-account',
-    clearLocalMailCache: 'mail:clear-local-mail-cache',
-    syncFolder: 'mail:sync-folder',
-    bulkUnflagFlaggedMessages: 'mail:bulk-unflag-flagged-messages',
-    setRead: 'mail:set-read',
-    setFlagged: 'mail:set-flagged',
-    archive: 'mail:archive',
-    moveToTrash: 'mail:move-to-trash',
-    /** Mail in einen anderen Ordner desselben Kontos verschieben (Graph/Gmail). */
-    moveToFolder: 'mail:move-to-folder',
-    permanentDeleteMessage: 'mail:permanent-delete-message',
-    emptyTrashFolder: 'mail:empty-trash-folder',
-    snooze: 'mail:snooze',
-    unsnooze: 'mail:unsnooze',
-    listSnoozed: 'mail:list-snoozed',
-    listTodoMessages: 'mail:list-todo-messages',
-    listTodoMessagesInRange: 'mail:list-todo-messages-in-range',
-    listTodoCounts: 'mail:list-todo-counts',
-    setTodoForMessage: 'mail:set-todo-for-message',
-    setTodoScheduleForMessage: 'mail:set-todo-schedule-for-message',
-    completeTodoForMessage: 'mail:complete-todo-for-message',
-    removeMailTodoRecordsForMessage: 'mail:remove-mail-todo-records-for-message',
-    listTemplates: 'mail:list-templates',
-    listQuickSteps: 'mail:list-quick-steps',
-    runQuickStep: 'mail:run-quick-step',
-    listWaitingMessages: 'mail:list-waiting-messages',
-    setWaitingForMessage: 'mail:set-waiting-for-message',
-    clearWaitingForMessage: 'mail:clear-waiting-for-message',
-    undoLast: 'mail:undo-last',
-    peekUndo: 'mail:peek-undo',
-    unsubscribeOneClick: 'mail:unsubscribe-one-click',
-    setMessageCategories: 'mail:set-message-categories',
-    listMasterCategories: 'mail:list-master-categories',
-    createMasterCategory: 'mail:create-master-category',
-    updateMasterCategory: 'mail:update-master-category',
-    deleteMasterCategory: 'mail:delete-master-category',
-    listDistinctMessageTags: 'mail:list-distinct-message-tags',
-    getWorkflowMailFolderState: 'mail:get-workflow-mail-folder-state',
-    ensureWorkflowMailFolders: 'mail:ensure-workflow-mail-folders',
-    setWorkflowMailFolderMapping: 'mail:set-workflow-mail-folder-mapping',
-    listMetaFolders: 'mail:list-meta-folders',
-    getMetaFolder: 'mail:get-meta-folder',
-    createMetaFolder: 'mail:create-meta-folder',
-    updateMetaFolder: 'mail:update-meta-folder',
-    deleteMetaFolder: 'mail:delete-meta-folder',
-    reorderMetaFolders: 'mail:reorder-meta-folders',
-    listMetaFolderMessages: 'mail:list-meta-folder-messages'
-  },
-  folder: {
-    create: 'folder:create',
-    rename: 'folder:rename',
-    delete: 'folder:delete',
-    move: 'folder:move',
-    toggleFavorite: 'folder:toggle-favorite'
-  },
-  compose: {
-    send: 'compose:send',
-    saveDraft: 'compose:save-draft',
-    recipientSuggestions: 'compose:recipient-suggestions',
-    listDriveExplorer: 'compose:list-drive-explorer',
-    listDriveExplorerFavorites: 'compose:list-drive-explorer-favorites',
-    addDriveExplorerFavorite: 'compose:add-drive-explorer-favorite',
-    removeDriveExplorerFavorite: 'compose:remove-drive-explorer-favorite',
-    updateDriveExplorerFavoriteCache: 'compose:update-drive-explorer-favorite-cache',
-    renameDriveExplorerFavorite: 'compose:rename-drive-explorer-favorite',
-    reorderDriveExplorerFavorites: 'compose:reorder-drive-explorer-favorites'
-  },
-  calendar: {
-    listEvents: 'calendar:list-events',
-    listCalendars: 'calendar:list-calendars',
-    listMicrosoft365GroupCalendars: 'calendar:list-ms365-group-calendars',
-    patchCalendarColor: 'calendar:patch-calendar-color',
-    createTeamsMeeting: 'calendar:create-teams-meeting',
-    suggestFromMessage: 'calendar:suggest-from-message',
-    createEvent: 'calendar:create-event',
-    updateEvent: 'calendar:update-event',
-    getEvent: 'calendar:get-event',
-    deleteEvent: 'calendar:delete-event',
-    /** Nur Start/Ende/Ganztaegig (Drag & Drop / Resize). */
-    patchEventSchedule: 'calendar:patch-event-schedule',
-    /** Nur `categories` am Graph-Termin patchen (ohne Body/Zeiten). */
-    patchEventCategories: 'calendar:patch-event-categories',
-    patchEventIcon: 'calendar:patch-event-icon',
-    transferEvent: 'calendar:transfer-event',
-    syncAccount: 'calendar:sync-account',
-    getAccountSyncStates: 'calendar:get-account-sync-states'
-  },
-  tasks: {
-    listLists: 'tasks:list-lists',
-    listTasks: 'tasks:list-tasks',
-    clearLocalTasksCache: 'tasks:clear-local-tasks-cache',
-    createTask: 'tasks:create-task',
-    updateTask: 'tasks:update-task',
-    patchTask: 'tasks:patch-task',
-    patchTaskDisplay: 'tasks:patch-task-display',
-    deleteTask: 'tasks:delete-task',
-    bulkDeleteCompletedFlaggedEmailTasks: 'tasks:bulk-delete-completed-flagged-email-tasks',
-    listPlannedSchedules: 'tasks:list-planned-schedules',
-    setPlannedSchedule: 'tasks:set-planned-schedule',
-    clearPlannedSchedule: 'tasks:clear-planned-schedule',
-    listMailCloudTaskLinks: 'tasks:list-mail-cloud-task-links',
-    createMailCloudTaskFromMessage: 'tasks:create-mail-cloud-task-from-message'
-  },
-  people: {
-    list: 'people:list',
-    getById: 'people:get-by-id',
-    getNavCounts: 'people:get-nav-counts',
-    syncAccount: 'people:sync-account',
-    syncAll: 'people:sync-all',
-    setFavorite: 'people:set-favorite',
-    getPhotoDataUrl: 'people:get-photo-data-url',
-    updateContact: 'people:update-contact',
-    setContactPhoto: 'people:set-contact-photo',
-    createContact: 'people:create-contact',
-    deleteContact: 'people:delete-contact'
-  },
-  workflow: {
-    listBoards: 'workflow:list-boards',
-    updateBoardColumns: 'workflow:update-board-columns'
-  },
-  vip: {
-    list: 'vip:list',
-    add: 'vip:add',
-    remove: 'vip:remove'
-  },
-  rules: {
-    list: 'rules:list',
-    get: 'rules:get',
-    create: 'rules:create',
-    update: 'rules:update',
-    delete: 'rules:delete',
-    dryRun: 'rules:dry-run',
-    applyManual: 'rules:apply-manual',
-    listAutomation: 'rules:list-automation',
-    undoAutomation: 'rules:undo-automation'
-  },
-  settingsBackup: {
-    exportToFile: 'settings-backup:export-to-file',
-    pickAndRead: 'settings-backup:pick-and-read',
-    applyFull: 'settings-backup:apply-full'
-  },
-  weather: {
-    geocode: 'weather:geocode',
-    forecast: 'weather:forecast'
-  },
-  location: {
-    search: 'location:search',
-    reverse: 'location:reverse'
-  },
-  notion: {
-    getStatus: 'notion:get-status',
-    connect: 'notion:connect',
-    connectInternal: 'notion:connect-internal',
-    disconnect: 'notion:disconnect',
-    searchPages: 'notion:search-pages',
-    getDestinations: 'notion:get-destinations',
-    setDestinations: 'notion:set-destinations',
-    appendMail: 'notion:append-mail',
-    appendEvent: 'notion:append-event',
-    addFavorite: 'notion:add-favorite',
-    removeFavorite: 'notion:remove-favorite',
-    createPage: 'notion:create-page',
-    createMailPage: 'notion:create-mail-page',
-    createEventPage: 'notion:create-event-page'
-  }
-} as const
+export { IPC } from './ipc-channels'
+
 
 export interface ComposeRecipient {
   address: string

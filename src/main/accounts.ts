@@ -1,6 +1,9 @@
 import { ACCOUNT_COLOR_PRESET_CLASSES } from '@shared/account-colors'
 import { readJsonSecure, writeJsonSecure } from './secure-store'
-import type { ConnectedAccount } from '@shared/types'
+import type {
+  ConnectedAccount,
+  SettingsBackupAccountPreferenceSnapshot
+} from '@shared/types'
 
 const ACCOUNTS_KEY = 'accounts'
 
@@ -49,6 +52,67 @@ export async function removeAccount(id: string): Promise<ConnectedAccount[]> {
  * Persistiert die Konten-Reihenfolge (Array-Reihenfolge im Secure Store).
  * `accountIds` muss dieselbe Menge und Laenge wie die gespeicherten Konten haben.
  */
+export function accountPreferencesForBackup(
+  accounts: ConnectedAccount[]
+): SettingsBackupAccountPreferenceSnapshot[] {
+  return accounts.map((a) => ({
+    accountId: a.id,
+    color: a.color,
+    calendarLoadAheadDays: a.calendarLoadAheadDays ?? null,
+    signatureTemplates: a.signatureTemplates,
+    defaultSignatureTemplateId: a.defaultSignatureTemplateId ?? null
+  }))
+}
+
+/**
+ * Uebernimmt gesicherte Konten-Praeferenzen in bestehende Konten (gleiche IDs).
+ * OAuth-Token und Anmeldedaten bleiben unveraendert.
+ */
+export async function mergeAccountPreferencesFromBackup(
+  prefs: SettingsBackupAccountPreferenceSnapshot[],
+  accountOrder?: string[]
+): Promise<ConnectedAccount[]> {
+  const current = await listAccounts()
+  if (current.length === 0 || prefs.length === 0) {
+    return current
+  }
+  const prefById = new Map(prefs.map((p) => [p.accountId, p] as const))
+  let next = current.map((acc) => {
+    const p = prefById.get(acc.id)
+    if (!p) return acc
+    const merged: ConnectedAccount = { ...acc }
+    if (typeof p.color === 'string' && p.color.trim()) {
+      merged.color = p.color.trim()
+    }
+    if ('calendarLoadAheadDays' in p) {
+      if (p.calendarLoadAheadDays == null) {
+        delete merged.calendarLoadAheadDays
+      } else if (Number.isFinite(p.calendarLoadAheadDays)) {
+        merged.calendarLoadAheadDays = Math.floor(p.calendarLoadAheadDays)
+      }
+    }
+    if (Array.isArray(p.signatureTemplates)) {
+      merged.signatureTemplates = p.signatureTemplates
+    }
+    if ('defaultSignatureTemplateId' in p) {
+      merged.defaultSignatureTemplateId = p.defaultSignatureTemplateId ?? null
+    }
+    return merged
+  })
+  if (accountOrder && accountOrder.length === next.length) {
+    const idSet = new Set(next.map((a) => a.id))
+    const orderOk =
+      accountOrder.every((id) => idSet.has(id)) &&
+      new Set(accountOrder).size === accountOrder.length
+    if (orderOk) {
+      const byId = new Map(next.map((a) => [a.id, a] as const))
+      next = accountOrder.map((id) => byId.get(id)!)
+    }
+  }
+  await writeJsonSecure(ACCOUNTS_KEY, next)
+  return next
+}
+
 export async function reorderAccounts(accountIds: string[]): Promise<ConnectedAccount[]> {
   const current = await listAccounts()
   if (accountIds.length !== current.length) {

@@ -1,5 +1,5 @@
 import { BrowserWindow } from 'electron'
-import type { ConnectedAccount, UserNoteKind } from '@shared/types'
+import type { ConnectedAccount, MailChangedPayload, UserNoteKind } from '@shared/types'
 
 export function broadcastAccountsChanged(accounts: ConnectedAccount[]): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -17,9 +17,13 @@ export function broadcastSyncStatus(status: {
   }
 }
 
-export function broadcastMailChanged(accountId: string): void {
+export function broadcastMailChanged(
+  accountId: string,
+  extra: Omit<MailChangedPayload, 'accountId'> = {}
+): void {
+  const payload: MailChangedPayload = { accountId, ...extra }
   for (const win of BrowserWindow.getAllWindows()) {
-    win.webContents.send('mail:changed', { accountId })
+    win.webContents.send('mail:changed', payload)
   }
 }
 

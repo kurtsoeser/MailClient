@@ -228,21 +228,46 @@ export const useMailStore = create<MailState>((set, get) => ({
     )
 
     unsubscribers.push(
-      events.onMailChanged(async ({ accountId }) => {
-        const folders = await window.mailClient.mail.listFolders(accountId)
-        set((s) => ({
-          foldersByAccount: { ...s.foldersByAccount, [accountId]: folders }
-        }))
+      events.onMailChanged(async (payload) => {
+        const { accountId, kind, folderIds } = payload
+        const isPoll = kind === 'poll'
 
-        let todoCounts: TodoCountsAll | undefined
-        try {
-          todoCounts = await window.mailClient.mail.listTodoCounts()
-        } catch (e) {
-          console.warn('[mail-store] listTodoCounts failed', e)
+        const stateBefore = get()
+        const viewUsesAccount =
+          stateBefore.selectedFolderAccountId === accountId ||
+          stateBefore.listKind === 'unified_inbox' ||
+          stateBefore.listKind === 'meta_folder' ||
+          stateBefore.listKind === 'todo' ||
+          stateBefore.listKind === 'snoozed' ||
+          stateBefore.listKind === 'waiting'
+
+        if (!isPoll || viewUsesAccount) {
+          const folders = await window.mailClient.mail.listFolders(accountId)
+          set((s) => ({
+            foldersByAccount: { ...s.foldersByAccount, [accountId]: folders }
+          }))
         }
-        if (todoCounts) set({ todoCounts })
+
+        if (!isPoll) {
+          try {
+            const todoCounts = await window.mailClient.mail.listTodoCounts()
+            set({ todoCounts })
+          } catch (e) {
+            console.warn('[mail-store] listTodoCounts failed', e)
+          }
+        }
 
         const state = get()
+
+        if (
+          isPoll &&
+          state.listKind === 'folder' &&
+          state.selectedFolderId != null &&
+          folderIds?.length &&
+          !folderIds.includes(state.selectedFolderId)
+        ) {
+          return
+        }
         if (state.listKind === 'todo') {
           try {
             const messages = state.todoDueKind
@@ -292,7 +317,7 @@ export const useMailStore = create<MailState>((set, get) => ({
 
         if (state.listKind === 'unified_inbox') {
           try {
-            const messages = await window.mailClient.mail.listUnifiedInbox()
+            const messages = await window.mailClient.mail.listUnifiedInbox(300)
             set({ messages })
             void loadCrossFolderThreadsUnified(messages, set)
             if (state.selectedMessageId) {
@@ -335,7 +360,8 @@ export const useMailStore = create<MailState>((set, get) => ({
             if (fresh) set({ selectedMessage: fresh })
           }
         } else if (state.listKind === 'folder' && !state.selectedFolderId) {
-          const inbox = folders.find((f) => f.wellKnown === 'inbox')
+          const accountFolders = get().foldersByAccount[accountId] ?? []
+          const inbox = accountFolders.find((f) => f.wellKnown === 'inbox')
           if (inbox) {
             await get().selectFolder(accountId, inbox.id)
           }
@@ -635,7 +661,7 @@ export const useMailStore = create<MailState>((set, get) => ({
     void window.mailClient.mail.setActiveFolder(null).catch(() => undefined)
 
     try {
-      const messages = await window.mailClient.mail.listUnifiedInbox()
+      const messages = await window.mailClient.mail.listUnifiedInbox(300)
       set({ messages, loading: false })
 
       void loadCrossFolderThreadsUnified(messages, set)
@@ -865,7 +891,7 @@ export const useMailStore = create<MailState>((set, get) => ({
 
     try {
       if (st.listKind === 'unified_inbox') {
-        await reloadCrossAccountView(() => window.mailClient.mail.listUnifiedInbox())
+        await reloadCrossAccountView(() => window.mailClient.mail.listUnifiedInbox(300))
       } else if (st.listKind === 'meta_folder' && st.selectedMetaFolderId != null) {
         const mfId = st.selectedMetaFolderId
         await reloadCrossAccountView(() => window.mailClient.mail.listMetaFolderMessages(mfId))
@@ -1471,18 +1497,21 @@ async function loadCrossFolderThreadsUnified(
 
   try {
     const grouped: Record<string, MailListItem[]> = {}
-    for (const [accountId, keys] of byAccount) {
-      const threadKeys = [...keys]
-      if (threadKeys.length === 0) continue
-      const all = await window.mailClient.mail.listMessagesByThreads({
-        accountId,
-        threadKeys
+    const entries = [...byAccount.entries()]
+    await Promise.all(
+      entries.map(async ([accountId, keys]) => {
+        const threadKeys = [...keys]
+        if (threadKeys.length === 0) return
+        const all = await window.mailClient.mail.listMessagesByThreads({
+          accountId,
+          threadKeys
+        })
+        for (const m of all) {
+          const composite = threadGroupingKey(m, true)
+          ;(grouped[composite] ??= []).push(m)
+        }
       })
-      for (const m of all) {
-        const composite = threadGroupingKey(m, true)
-        ;(grouped[composite] ??= []).push(m)
-      }
-    }
+    )
     for (const k of Object.keys(grouped)) {
       const arr = grouped[k]!
       const seen = new Set<number>()

@@ -1,5 +1,9 @@
 import { getDb } from './index'
-import type { CalendarGraphCalendarRow, CalendarM365GroupCalendarsPage } from '@shared/types'
+import type {
+  CalendarGraphCalendarRow,
+  CalendarM365GroupCalendarsPage,
+  SettingsBackupCalendarColorOverrideSnapshot
+} from '@shared/types'
 import { normalizeGraphHexColor } from '@shared/graph-calendar-colors'
 
 interface CalendarFolderDbRow {
@@ -250,6 +254,41 @@ export function setCalendarFolderDisplayColorOverride(
     calendar_id: calendarId,
     hex: normalized
   })
+}
+
+export function listCalendarColorOverridesForSettingsBackup(): SettingsBackupCalendarColorOverrideSnapshot[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT account_id, calendar_id, display_color_override_hex
+       FROM calendar_folders
+       WHERE display_color_override_hex IS NOT NULL AND TRIM(display_color_override_hex) != ''
+       ORDER BY account_id, calendar_id`
+    )
+    .all() as Array<{
+    account_id: string
+    calendar_id: string
+    display_color_override_hex: string
+  }>
+  return rows.map((r) => ({
+    accountId: r.account_id,
+    calendarId: r.calendar_id,
+    displayColorOverrideHex: r.display_color_override_hex
+  }))
+}
+
+export function applyCalendarColorOverridesFromBackup(
+  rows: SettingsBackupCalendarColorOverrideSnapshot[]
+): void {
+  for (const row of rows) {
+    const accountId = row.accountId?.trim()
+    const calendarId = row.calendarId?.trim()
+    if (!accountId || !calendarId) continue
+    setCalendarFolderDisplayColorOverride(
+      accountId,
+      calendarId,
+      row.displayColorOverrideHex
+    )
+  }
 }
 
 export function deleteCalendarFoldersDataForAccount(accountId: string): void {

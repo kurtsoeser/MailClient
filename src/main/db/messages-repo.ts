@@ -153,8 +153,8 @@ export function upsertMessages(input: UpsertMessageInput[]): void {
       cc_addrs         = excluded.cc_addrs,
       bcc_addrs        = excluded.bcc_addrs,
       snippet          = excluded.snippet,
-      body_html        = excluded.body_html,
-      body_text        = excluded.body_text,
+      body_html        = COALESCE(excluded.body_html, messages.body_html),
+      body_text        = COALESCE(excluded.body_text, messages.body_text),
       sent_at          = excluded.sent_at,
       received_at      = excluded.received_at,
       is_read          = excluded.is_read,
@@ -907,6 +907,19 @@ export function clearWaitingForReplyOnThreads(accountId: string, remoteThreadIds
        AND remote_thread_id IN (${placeholders})
        AND waiting_for_reply_until IS NOT NULL`
   ).run(accountId, ...ids)
+}
+
+export function updateMessageBodiesLocal(
+  id: number,
+  bodyHtml: string | null,
+  bodyText: string | null
+): void {
+  const db = getDb()
+  db.prepare('UPDATE messages SET body_html = ?, body_text = ? WHERE id = ?').run(
+    bodyHtml,
+    bodyText,
+    id
+  )
 }
 
 export function getMessageById(id: number): MailFull | null {

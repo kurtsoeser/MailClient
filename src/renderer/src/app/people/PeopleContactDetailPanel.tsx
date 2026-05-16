@@ -6,8 +6,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ComponentType,
-  type MouseEvent
 } from 'react'
 import {
   Building2,
@@ -31,6 +29,13 @@ import type { ConnectedAccount, PeopleContactView, PeopleListSort, PeopleUpdateC
 import { useComposeStore } from '@/stores/compose'
 import { showAppAlert, showAppConfirm } from '@/stores/app-dialog'
 import { Avatar } from '@/components/Avatar'
+import {
+  ModuleColumnHeaderIconButton,
+  moduleColumnHeaderActionsClass,
+  moduleColumnHeaderIconGlyphClass,
+  moduleColumnHeaderShellBarClass,
+  moduleColumnHeaderTitleClass
+} from '@/components/ModuleColumnHeader'
 import { cn } from '@/lib/utils'
 import { bgToRingClass, resolvedAccountColorCss } from '@/lib/avatar-color'
 import { peopleListPrimaryLabel } from '@/app/people/people-display-label'
@@ -79,50 +84,6 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
     binary += String.fromCharCode(bytes[i]!)
   }
   return btoa(binary)
-}
-
-/** Kompakte Icon-Aktionen wie in `ReadingPane` (Mail-Detail). */
-function PeopleDetailIconButton({
-  icon: Icon,
-  title,
-  onClick,
-  disabled,
-  destructive,
-  favoriteActive,
-  spin
-}: {
-  icon: ComponentType<{ className?: string }>
-  title: string
-  onClick: (e: MouseEvent<HTMLButtonElement>) => void
-  disabled?: boolean
-  destructive?: boolean
-  favoriteActive?: boolean
-  spin?: boolean
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={onClick}
-      title={title}
-      className={cn(
-        'flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors',
-        disabled
-          ? 'cursor-not-allowed text-muted-foreground/40'
-          : destructive
-            ? 'text-muted-foreground hover:bg-destructive/20 hover:text-destructive'
-            : favoriteActive
-              ? 'text-amber-400 hover:bg-secondary hover:text-amber-300'
-              : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
-      )}
-    >
-      {spin ? (
-        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-      ) : (
-        <Icon className={cn('h-4 w-4', favoriteActive && 'fill-amber-400 text-amber-400')} />
-      )}
-    </button>
-  )
 }
 
 interface PeopleContactDetailPanelProps {
@@ -285,8 +246,109 @@ export const PeopleContactDetailPanel = forwardRef<PeopleContactDetailPanelHandl
 
   const canCloudPhoto = selected.provider === 'microsoft' || selected.provider === 'google'
 
+  const detailTitle = peopleListPrimaryLabel(selected, listSortBy)
+
+  const detailActions = editing ? (
+    <>
+      <ModuleColumnHeaderIconButton
+        title={t('people.shell.save')}
+        disabled={saveBusy}
+        onClick={(): void => void saveEdit()}
+      >
+        {saveBusy ? (
+          <Loader2 className={cn(moduleColumnHeaderIconGlyphClass, 'animate-spin')} />
+        ) : (
+          <Check className={moduleColumnHeaderIconGlyphClass} />
+        )}
+      </ModuleColumnHeaderIconButton>
+      <ModuleColumnHeaderIconButton
+        title={t('people.shell.cancel')}
+        disabled={saveBusy}
+        onClick={(): void => {
+          setEditing(false)
+          resetForm()
+        }}
+      >
+        <X className={moduleColumnHeaderIconGlyphClass} />
+      </ModuleColumnHeaderIconButton>
+    </>
+  ) : (
+    <>
+      <ModuleColumnHeaderIconButton
+        title={t('people.shell.emailAction')}
+        disabled={!selected.primaryEmail?.trim()}
+        onClick={(): void => {
+          const to = selected.primaryEmail?.trim()
+          if (!to) return
+          openNewTo(selected.accountId, to)
+        }}
+      >
+        <Mail className={moduleColumnHeaderIconGlyphClass} />
+      </ModuleColumnHeaderIconButton>
+      <ModuleColumnHeaderIconButton
+        title={t('people.shell.edit')}
+        onClick={(): void => {
+          resetForm()
+          setEditing(true)
+        }}
+      >
+        <Pencil className={moduleColumnHeaderIconGlyphClass} />
+      </ModuleColumnHeaderIconButton>
+      {canCloudPhoto ? (
+        <ModuleColumnHeaderIconButton
+          title={t('people.shell.changeContactPhotoTitle')}
+          disabled={photoBusy}
+          onClick={(): void => photoFileRef.current?.click()}
+        >
+          {photoBusy ? (
+            <Loader2 className={cn(moduleColumnHeaderIconGlyphClass, 'animate-spin')} />
+          ) : (
+            <ImageUp className={moduleColumnHeaderIconGlyphClass} />
+          )}
+        </ModuleColumnHeaderIconButton>
+      ) : null}
+      <ModuleColumnHeaderIconButton
+        title={selected.isFavorite ? t('people.shell.unfavorite') : t('people.shell.favorite')}
+        onClick={(): void =>
+          void window.mailClient.people
+            .setFavorite({
+              accountId: selected.accountId,
+              provider: selected.provider,
+              remoteId: selected.remoteId,
+              isFavorite: !selected.isFavorite
+            })
+            .then(() => onUpdated())
+        }
+      >
+        <Star
+          className={cn(
+            moduleColumnHeaderIconGlyphClass,
+            selected.isFavorite && 'fill-amber-400 text-amber-400'
+          )}
+        />
+      </ModuleColumnHeaderIconButton>
+      <ModuleColumnHeaderIconButton
+        title={deleteBusy ? t('people.shell.deletingContact') : t('people.shell.deleteContact')}
+        disabled={deleteBusy}
+        onClick={(): void => void confirmDelete()}
+        className="hover:bg-destructive/20 hover:text-destructive"
+      >
+        {deleteBusy ? (
+          <Loader2 className={cn(moduleColumnHeaderIconGlyphClass, 'animate-spin')} />
+        ) : (
+          <Trash2 className={moduleColumnHeaderIconGlyphClass} />
+        )}
+      </ModuleColumnHeaderIconButton>
+    </>
+  )
+
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-card">
+      <header className={moduleColumnHeaderShellBarClass}>
+        <div className={cn(moduleColumnHeaderTitleClass, 'min-w-0 truncate')}>{detailTitle}</div>
+        <div className={moduleColumnHeaderActionsClass}>{detailActions}</div>
+      </header>
+
       {canCloudPhoto ? (
         <input
           ref={photoFileRef}
@@ -322,101 +384,18 @@ export const PeopleContactDetailPanel = forwardRef<PeopleContactDetailPanelHandl
             />
           </div>
 
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-              <div className="min-w-0 flex-1 text-center sm:text-left">
-                <h2 className="text-balance text-xl font-semibold leading-tight tracking-tight text-foreground sm:text-2xl">
-                  {peopleListPrimaryLabel(selected, listSortBy)}
-                </h2>
-                {selected.primaryEmail ? (
-                  <p className="mt-1.5 truncate text-sm text-muted-foreground">{selected.primaryEmail}</p>
-                ) : null}
-                <p className="mt-1 text-xs text-muted-foreground/90">
-                  {selected.provider === 'microsoft' ? 'Microsoft 365' : 'Google'}
-                </p>
-              </div>
-
-              <div className="flex shrink-0 flex-wrap items-center justify-center gap-0.5 sm:justify-end">
-            {editing ? (
-              <>
-                <PeopleDetailIconButton
-                  icon={Check}
-                  title={t('people.shell.save')}
-                  disabled={saveBusy}
-                  spin={saveBusy}
-                  onClick={(): void => void saveEdit()}
-                />
-                <PeopleDetailIconButton
-                  icon={X}
-                  title={t('people.shell.cancel')}
-                  disabled={saveBusy}
-                  onClick={(): void => {
-                    setEditing(false)
-                    resetForm()
-                  }}
-                />
-              </>
+          <div className="min-w-0 flex-1 text-center sm:text-left">
+            <h2 className="text-balance text-xl font-semibold leading-tight tracking-tight text-foreground sm:text-2xl">
+              {detailTitle}
+            </h2>
+            {selected.primaryEmail ? (
+              <p className="mt-1.5 truncate text-sm text-muted-foreground">{selected.primaryEmail}</p>
             ) : (
-              <>
-                <PeopleDetailIconButton
-                  icon={Mail}
-                  title={t('people.shell.emailAction')}
-                  disabled={!selected.primaryEmail?.trim()}
-                  onClick={(): void => {
-                    const to = selected.primaryEmail?.trim()
-                    if (!to) return
-                    openNewTo(selected.accountId, to)
-                  }}
-                />
-                <span className="mx-1 h-5 w-px shrink-0 bg-border" aria-hidden />
-                <div className="flex items-center gap-0.5">
-                  <PeopleDetailIconButton
-                    icon={Pencil}
-                    title={t('people.shell.edit')}
-                    onClick={(): void => {
-                      resetForm()
-                      setEditing(true)
-                    }}
-                  />
-                  {canCloudPhoto ? (
-                    <PeopleDetailIconButton
-                      icon={ImageUp}
-                      title={t('people.shell.changeContactPhotoTitle')}
-                      disabled={photoBusy}
-                      spin={photoBusy}
-                      onClick={(): void => photoFileRef.current?.click()}
-                    />
-                  ) : null}
-                </div>
-                <span className="mx-1 h-5 w-px shrink-0 bg-border" aria-hidden />
-                <PeopleDetailIconButton
-                  icon={Star}
-                  title={selected.isFavorite ? t('people.shell.unfavorite') : t('people.shell.favorite')}
-                  favoriteActive={selected.isFavorite}
-                  onClick={(): void =>
-                    void window.mailClient.people
-                      .setFavorite({
-                        accountId: selected.accountId,
-                        provider: selected.provider,
-                        remoteId: selected.remoteId,
-                        isFavorite: !selected.isFavorite
-                      })
-                      .then(() => onUpdated())
-                  }
-                />
-                <span className="mx-1 h-5 w-px shrink-0 bg-border" aria-hidden />
-                <PeopleDetailIconButton
-                  icon={Trash2}
-                  title={deleteBusy ? t('people.shell.deletingContact') : t('people.shell.deleteContact')}
-                  destructive
-                  disabled={deleteBusy}
-                  spin={deleteBusy}
-                  onClick={(): void => void confirmDelete()}
-                />
-              </>
+              <p className="mt-1.5 text-sm text-muted-foreground">{t('people.shell.noEmail')}</p>
             )}
-              </div>
-            </div>
+            <p className="mt-1 text-xs text-muted-foreground/90">
+              {selected.provider === 'microsoft' ? 'Microsoft 365' : 'Google'}
+            </p>
           </div>
         </div>
       </header>

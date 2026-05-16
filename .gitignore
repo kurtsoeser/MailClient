@@ -22,3 +22,13 @@ Thumbs.db
 
 # TypeScript incremental build
 *.tsbuildinfo
+
+# Vite / tooling caches
+.cache/
+.vite/
+
+# Test artifacts
+coverage/
+test-results/
+playwright-report/
+playwright/.cache/

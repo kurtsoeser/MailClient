@@ -215,6 +215,8 @@ npm run build:win
 
 Hinweis aus `electron-builder.yml`: ohne Codesigning (`signAndEditExecutable: false`) für einfachere lokale Builds; für breite Verteilung später **Authenticode**-Signatur empfohlen.
 
+Die Ordner `release/` (Installer, oft mehrere hundert MB) und `out/` (Vite/Electron-Build) sind **lokal** und stehen in `.gitignore` — bei Bedarf löschen und mit `npm run build` bzw. `npm run build:win` neu erzeugen.
+
 ---
 
 ## OAuth für Endnutzer und Unternehmen

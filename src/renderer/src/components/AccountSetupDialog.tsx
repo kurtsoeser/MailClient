@@ -40,7 +40,15 @@ import {
   readDashboardAlignStepPx,
   writeDashboardAlignStepPx
 } from '@/app/home/dashboard-layout'
-import type { ConnectedAccount, MailMasterCategory, MailFolder, CalendarGraphCalendarRow } from '@shared/types'
+import type {
+  ConnectedAccount,
+  MailMasterCategory,
+  MailFolder,
+  CalendarGraphCalendarRow,
+  LocalDataUsageReport
+} from '@shared/types'
+import { formatBytes } from '@/lib/format-bytes'
+import { AccountSetupLocalDataSection } from '@/components/AccountSetupLocalDataSection'
 import {
   Cloud,
   Contact,
@@ -59,7 +67,8 @@ import {
   RefreshCw,
   Download,
   Upload,
-  PanelLeft
+  PanelLeft,
+  HardDrive
 } from 'lucide-react'
 
 type SettingsTab = 'general' | 'accounts' | 'mail' | 'calendar' | 'contacts'
@@ -275,6 +284,9 @@ export function AccountSetupDialog({
   const [aheadSavingAccountId, setAheadSavingAccountId] = useState<string | null>(null)
   const [backupBusy, setBackupBusy] = useState(false)
   const [backupNotice, setBackupNotice] = useState<string | null>(null)
+  const [localDataUsage, setLocalDataUsage] = useState<LocalDataUsageReport | null>(null)
+  const [localDataScanning, setLocalDataScanning] = useState(false)
+  const [localDataBusy, setLocalDataBusy] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
   const [editColor, setEditColor] = useState('preset4')
@@ -612,6 +624,23 @@ export function AccountSetupDialog({
     if (!open || activeTab !== 'mail' || !wfAccountId) return
     void loadWorkflowFolderUi()
   }, [open, activeTab, wfAccountId, loadWorkflowFolderUi])
+
+  const refreshLocalDataUsage = useCallback(async (): Promise<void> => {
+    setLocalDataScanning(true)
+    try {
+      const report = await window.mailClient.localData.scanUsage()
+      setLocalDataUsage(report)
+    } catch (e) {
+      setLocalError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLocalDataScanning(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!open || activeTab !== 'general' || subNavId.general !== 'backup') return
+    void refreshLocalDataUsage()
+  }, [open, activeTab, subNavId.general, refreshLocalDataUsage])
 
   const calendarAheadTargetAccount = useMemo(
     () =>
@@ -1034,6 +1063,65 @@ export function AccountSetupDialog({
     }
   }
 
+  async function handleOptimizeLocalData(): Promise<void> {
+    setBackupNotice(null)
+    setLocalError(null)
+    setLocalDataBusy(true)
+    try {
+      const result = await window.mailClient.localData.optimize()
+      const lines = [
+        t('settings.localDataOptimized', {
+          freed: formatBytes(result.freedBytes),
+          total: formatBytes(result.afterTotalBytes)
+        })
+      ]
+      if (result.chromiumCacheNeedsRestart) {
+        lines.push(t('settings.localDataOptimizedRestartHint'))
+      }
+      setBackupNotice(lines.join(' '))
+      await refreshLocalDataUsage()
+    } catch (e) {
+      setLocalError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLocalDataBusy(false)
+    }
+  }
+
+  async function handleExportLocalDataArchive(mode: 'portable' | 'full'): Promise<void> {
+    setBackupNotice(null)
+    setLocalError(null)
+    setLocalDataBusy(true)
+    try {
+      const r = await window.mailClient.localData.exportArchive(mode)
+      if (!r.ok) return
+      setBackupNotice(t('settings.localDataArchiveSaved', { path: r.path }))
+    } catch (e) {
+      setLocalError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLocalDataBusy(false)
+    }
+  }
+
+  async function handleImportLocalDataArchive(): Promise<void> {
+    setBackupNotice(null)
+    setLocalError(null)
+    const ok = await showAppConfirm(t('settings.localDataImportConfirmBody'), {
+      title: t('settings.localDataImportConfirmTitle'),
+      variant: 'danger',
+      confirmLabel: t('common.import')
+    })
+    if (!ok) return
+    setLocalDataBusy(true)
+    try {
+      const r = await window.mailClient.localData.pickAndRestoreArchive()
+      if (!r.ok && 'error' in r) setLocalError(r.error)
+    } catch (e) {
+      setLocalError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLocalDataBusy(false)
+    }
+  }
+
   async function handleImportSettingsBackup(): Promise<void> {
     setBackupNotice(null)
     setLocalError(null)
@@ -1413,6 +1501,18 @@ export function AccountSetupDialog({
                 {backupNotice ? (
                   <p className="text-[10px] text-emerald-600 dark:text-emerald-500">{backupNotice}</p>
                 ) : null}
+
+                <AccountSetupLocalDataSection
+                  localDataUsage={localDataUsage}
+                  localDataScanning={localDataScanning}
+                  localDataBusy={localDataBusy}
+                  backupBusy={backupBusy}
+                  busy={busy}
+                  onOptimize={(): void => void handleOptimizeLocalData()}
+                  onExportPortable={(): void => void handleExportLocalDataArchive('portable')}
+                  onExportFull={(): void => void handleExportLocalDataArchive('full')}
+                  onImportArchive={(): void => void handleImportLocalDataArchive()}
+                />
               </section>
               )}
             </div>

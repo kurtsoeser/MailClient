@@ -15,6 +15,8 @@ import {
   openExternalIfAllowedSync
 } from './open-external'
 import { closeAllTeamsChatPopouts } from './teams-chat-popout'
+import { pruneStaleAttachmentCache } from './attachment-cache'
+import { applyPendingChromiumCachePurgeOnStartup } from './local-data-service'
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 const isDev = !app.isPackaged
@@ -119,7 +121,13 @@ function createMainWindow(): void {
 
 app.whenReady().then(async () => {
   registerMailFrameExternalRedirect()
+  await applyPendingChromiumCachePurgeOnStartup().catch((e) =>
+    console.warn('[startup] chromium-cache purge:', e)
+  )
   getDb()
+  void pruneStaleAttachmentCache().catch((e) =>
+    console.warn('[startup] attachment-cache prune:', e)
+  )
   registerIpcHandlers()
   createMainWindow()
   startConnectivityMonitoring()

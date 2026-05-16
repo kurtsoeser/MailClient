@@ -9,6 +9,7 @@ import {
   type MailFolder,
   type MailListItem,
   type MailFull,
+  type MailChangedPayload,
   type SearchHit,
   type SnoozedMessageItem,
   type SyncStatus,
@@ -81,6 +82,11 @@ import {
   type SettingsBackupExportResult,
   type SettingsBackupPickResult,
   type SettingsBackupPayload,
+  type LocalDataUsageReport,
+  type LocalDataOptimizeResult,
+  type LocalDataArchiveExportMode,
+  type LocalDataArchiveExportResult,
+  type LocalDataArchiveImportResult,
   type AppConfigWeatherLocation,
   type OpenMeteoForecast,
   type OpenMeteoGeocodeHit,
@@ -187,6 +193,16 @@ const api = {
       ipcRenderer.invoke(IPC.settingsBackup.pickAndRead),
     applyFull: (backup: SettingsBackupPayload): Promise<void> =>
       ipcRenderer.invoke(IPC.settingsBackup.applyFull, backup)
+  },
+  localData: {
+    scanUsage: (): Promise<LocalDataUsageReport> =>
+      ipcRenderer.invoke(IPC.localData.scanUsage),
+    optimize: (): Promise<LocalDataOptimizeResult> =>
+      ipcRenderer.invoke(IPC.localData.optimize),
+    exportArchive: (mode: LocalDataArchiveExportMode): Promise<LocalDataArchiveExportResult> =>
+      ipcRenderer.invoke(IPC.localData.exportArchive, mode),
+    pickAndRestoreArchive: (): Promise<LocalDataArchiveImportResult> =>
+      ipcRenderer.invoke(IPC.localData.pickAndRestoreArchive)
   },
   weather: {
     geocode: (query: string, language: 'de' | 'en'): Promise<OpenMeteoGeocodeHit | null> =>
@@ -371,8 +387,8 @@ const api = {
       limit === undefined
         ? ipcRenderer.invoke(IPC.mail.listInboxTriage, {})
         : ipcRenderer.invoke(IPC.mail.listInboxTriage, { limit }),
-    listUnifiedInbox: (): Promise<MailListItem[]> =>
-      ipcRenderer.invoke(IPC.mail.listUnifiedInbox),
+    listUnifiedInbox: (limit?: number | null): Promise<MailListItem[]> =>
+      ipcRenderer.invoke(IPC.mail.listUnifiedInbox, limit),
     listMetaFolders: (): Promise<MetaFolderSummary[]> =>
       ipcRenderer.invoke(IPC.mail.listMetaFolders),
     getMetaFolder: (id: number): Promise<MetaFolderSummary | null> =>
@@ -744,8 +760,8 @@ const api = {
         ipcRenderer.off('app:connectivity', listener)
       }
     },
-    onMailChanged: (handler: (payload: { accountId: string }) => void): (() => void) => {
-      const listener = (_e: IpcRendererEvent, payload: { accountId: string }): void =>
+    onMailChanged: (handler: (payload: MailChangedPayload) => void): (() => void) => {
+      const listener = (_e: IpcRendererEvent, payload: MailChangedPayload): void =>
         handler(payload)
       ipcRenderer.on('mail:changed', listener)
       return (): void => {

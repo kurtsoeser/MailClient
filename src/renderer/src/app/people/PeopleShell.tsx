@@ -41,10 +41,14 @@ import { PeopleShellSortableAccountNavRow } from '@/app/people/PeopleShellAccoun
 import { ContextMenu, type ContextMenuItem } from '@/components/ContextMenu'
 import { buildAccountColorAndNewContextItems } from '@/lib/account-sidebar-context-menu'
 import {
-  moduleColumnHeaderOutlineSmClass,
+  ModuleColumnHeaderIconButton,
+  moduleColumnHeaderIconGlyphClass,
+  moduleColumnHeaderNavShellBarClass,
   moduleColumnHeaderShellBarClass,
+  moduleColumnHeaderSubToolbarClass,
   moduleColumnHeaderTitleClass
 } from '@/components/ModuleColumnHeader'
+import { moduleNavColumnClass, moduleNavColumnScrollClass } from '@/components/module-shell-layout'
 
 import { GLOBAL_CREATE_EVENT, useGlobalCreateNavigateStore } from '@/lib/global-create'
 import { usePeoplePendingFocusStore } from '@/stores/people-pending-focus'
@@ -63,6 +67,8 @@ type NavKey =
 const PEOPLE_SORT_STORAGE_KEY = 'mailclient.people.sortBy'
 
 const PEOPLE_VIEW_STORAGE_KEY = 'mailclient.people.viewMode'
+
+const PEOPLE_NAV_WIDTH_KEY = 'mailclient.peopleShell.navWidth'
 
 type PeopleListViewMode = 'list' | 'tiles'
 
@@ -194,16 +200,18 @@ export function PeopleShell(): JSX.Element {
 
 
 
-  const [listColumnWidth, setListColumnWidth] = useResizableWidth({
-
-    storageKey: 'mailclient.peopleShell.listWidth',
-
-    defaultWidth: 260,
-
+  const [navWidth, setNavWidth] = useResizableWidth({
+    storageKey: PEOPLE_NAV_WIDTH_KEY,
+    defaultWidth: 240,
     minWidth: 200,
+    maxWidth: 400
+  })
 
+  const [listColumnWidth, setListColumnWidth] = useResizableWidth({
+    storageKey: 'mailclient.peopleShell.listWidth',
+    defaultWidth: 260,
+    minWidth: 200,
     maxWidth: 440
-
   })
 
 
@@ -595,7 +603,17 @@ export function PeopleShell(): JSX.Element {
 
   const accountById = useMemo(() => new Map(mailAccounts.map((a) => [a.id, a] as const)), [mailAccounts])
 
-
+  const listColumnTitle = useMemo((): string => {
+    if (nav.kind === 'all') return t('people.shell.navAll')
+    if (nav.kind === 'favorites') return t('people.shell.navFavorites')
+    if (nav.kind === 'provider') {
+      return nav.provider === 'microsoft'
+        ? t('people.shell.navMicrosoft')
+        : t('people.shell.navGoogle')
+    }
+    const acc = accountById.get(nav.accountId)
+    return acc?.displayName?.trim() || acc?.email || t('people.shell.navAccounts')
+  }, [nav, accountById, t])
 
   const listGroups = useMemo(() => groupPeopleListRows(rows, sortBy), [rows, sortBy])
 
@@ -868,52 +886,23 @@ export function PeopleShell(): JSX.Element {
       />
 
     ) : (
-
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-6 text-center text-sm text-muted-foreground">
-
-        <p className="font-medium text-foreground">{t('people.shell.selectContact')}</p>
-
-        <p className="text-xs">{t('people.shell.selectHint')}</p>
-
-      </div>
-
+      <>
+        <header className={moduleColumnHeaderShellBarClass}>
+          <div className={cn(moduleColumnHeaderTitleClass, 'min-w-0 truncate')}>
+            {t('people.shell.selectContact')}
+          </div>
+        </header>
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-6 text-center text-sm text-muted-foreground">
+          <p className="text-xs">{t('people.shell.selectHint')}</p>
+        </div>
+      </>
     )
 
 
 
   return (
 
-    <div className="flex min-h-0 flex-1 flex-col bg-background">
-
-      <header className={cn(moduleColumnHeaderShellBarClass, 'flex-wrap sm:flex-nowrap')}>
-
-        <h1 className={cn(moduleColumnHeaderTitleClass, 'min-w-0')}>{t('people.shell.title')}</h1>
-
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
-
-          <button
-
-            type="button"
-
-            disabled={syncBusy || peopleAccountSyncId != null}
-
-            onClick={(): void => void runSyncAll()}
-
-            className={cn(moduleColumnHeaderOutlineSmClass, 'bg-secondary hover:bg-secondary/80')}
-
-          >
-
-            {syncBusy ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5 shrink-0" />}
-
-            {syncBusy ? t('people.shell.syncing') : t('people.shell.syncAll')}
-
-          </button>
-
-        </div>
-
-      </header>
-
-
+    <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
 
       {error ? (
 
@@ -929,8 +918,42 @@ export function PeopleShell(): JSX.Element {
 
       <div className="flex min-h-0 flex-1 flex-row overflow-hidden">
 
-        <aside className={cn('module-nav-column w-60 min-w-[15rem] gap-3 p-3')}>
+        <div style={{ width: navWidth }} className="h-full shrink-0">
+          <aside className={cn(moduleNavColumnClass, 'h-full w-full')}>
+            <header className={moduleColumnHeaderNavShellBarClass}>
+              <span className={cn(moduleColumnHeaderTitleClass, 'min-w-0 truncate')}>
+                {t('people.shell.title')}
+              </span>
+              <div className="flex shrink-0 items-center gap-0.5">
+                <ModuleColumnHeaderIconButton
+                  type="button"
+                  disabled={syncBusy || peopleAccountSyncId != null}
+                  onClick={(): void => void runSyncAll()}
+                  aria-label={syncBusy ? t('people.shell.syncing') : t('people.shell.syncAll')}
+                  title={syncBusy ? t('people.shell.syncing') : t('people.shell.syncAll')}
+                >
+                  {syncBusy ? (
+                    <Loader2 className={cn(moduleColumnHeaderIconGlyphClass, 'animate-spin')} />
+                  ) : (
+                    <RefreshCw className={moduleColumnHeaderIconGlyphClass} />
+                  )}
+                </ModuleColumnHeaderIconButton>
+                <ModuleColumnHeaderIconButton
+                  type="button"
+                  disabled={mailAccounts.length === 0}
+                  onClick={(): void => {
+                    setNewContactAccountOverride(null)
+                    setCreateOpen(true)
+                  }}
+                  aria-label={t('people.shell.newContact')}
+                  title={t('people.shell.newContact')}
+                >
+                  <UserPlus className={moduleColumnHeaderIconGlyphClass} />
+                </ModuleColumnHeaderIconButton>
+              </div>
+            </header>
 
+            <div className={cn(moduleNavColumnScrollClass, 'space-y-4 p-3')}>
           <div className="space-y-1">
 
             <p className="px-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -1088,25 +1111,29 @@ export function PeopleShell(): JSX.Element {
             </DndContext>
 
           </div>
+            </div>
+          </aside>
+        </div>
 
-        </aside>
+        <VerticalSplitter
+          ariaLabel={t('people.shell.splitterNavAria')}
+          onDrag={(delta): void => setNavWidth((w) => w + delta)}
+        />
 
+        <div
+          style={{ width: listColumnWidth }}
+          className="flex min-h-0 shrink-0 flex-col border-r border-border bg-background"
+        >
+            <header className={moduleColumnHeaderShellBarClass}>
+              <div className={cn(moduleColumnHeaderTitleClass, 'min-w-0 truncate')}>
+                {listColumnTitle}
+              </div>
+              <span className="shrink-0 text-muted-foreground">
+                {t('people.shell.listCount', { count: rows.length })}
+              </span>
+            </header>
 
-
-        <div className="flex min-h-0 min-w-0 flex-1 flex-row">
-
-          <div
-
-            style={viewMode === 'tiles' ? undefined : { width: listColumnWidth }}
-
-            className={cn(
-              'flex flex-col bg-background',
-              viewMode === 'tiles' ? 'min-h-0 min-w-0 flex-1' : 'shrink-0 border-r border-border'
-            )}
-
-          >
-
-            <div className="shrink-0 space-y-2 border-b border-border p-2">
+            <div className={moduleColumnHeaderSubToolbarClass}>
 
               <div className="relative">
 
@@ -1362,26 +1389,14 @@ export function PeopleShell(): JSX.Element {
 
           </div>
 
-          {viewMode === 'list' ? (
-            <>
-              <VerticalSplitter
+        <VerticalSplitter
+          onDrag={(delta): void => setListColumnWidth((w) => w + delta)}
+          ariaLabel={t('people.shell.splitterListAria')}
+        />
 
-                onDrag={(delta): void => setListColumnWidth((w) => w + delta)}
-
-                ariaLabel={t('people.shell.splitterListAria')}
-
-              />
-
-              <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card">
-
-                {detailBody}
-
-              </div>
-            </>
-          ) : null}
-
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card">
+          {detailBody}
         </div>
-
       </div>
 
       <PeopleNewContactDialog
@@ -1426,7 +1441,7 @@ export function PeopleShell(): JSX.Element {
 
       ) : null}
 
-    </div>
+    </section>
 
   )
 

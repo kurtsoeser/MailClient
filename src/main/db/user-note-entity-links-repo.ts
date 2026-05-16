@@ -5,6 +5,7 @@ import type {
   NoteEntityLinkedItem,
   NoteLinksBundle
 } from '@shared/note-entity-links'
+import type { SettingsBackupEntityLinkSnapshot } from '@shared/types'
 import { noteEntityLinkTargetsEqual } from '@shared/note-entity-links'
 
 interface EntityLinkRow {
@@ -298,19 +299,6 @@ export function deleteAllEntityLinksForNote(noteId: number): void {
     noteId,
     noteId
   )
-}
-
-export interface SettingsBackupEntityLinkSnapshot {
-  fromNoteIndex: number
-  targetKind: NoteEntityLinkTargetKind
-  toNoteIndex?: number
-  mailMessageId?: number
-  calendarAccountId?: string
-  calendarGraphEventId?: string
-  taskAccountId?: string
-  taskListId?: string
-  taskId?: string
-  createdAt: string
 }
 
 export function listEntityLinksForSettingsBackup(

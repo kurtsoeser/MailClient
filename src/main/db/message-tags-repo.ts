@@ -19,6 +19,30 @@ export function removeMessageTag(messageId: number, tag: string): void {
 }
 
 /** Ersetzt alle Kategorie-Tags einer Mail (Reihenfolge wie uebergeben). */
+/** Ersetzt Kategorie-Tags fuer mehrere Mails in einer Transaktion (Sync-Batch). */
+export function replaceMessageTagsBatch(
+  entries: { messageId: number; accountId: string; tags: string[] }[]
+): void {
+  if (entries.length === 0) return
+  const db = getDb()
+  const del = db.prepare('DELETE FROM message_tags WHERE message_id = ?')
+  const ins = db.prepare(
+    'INSERT OR IGNORE INTO message_tags (message_id, account_id, tag) VALUES (?, ?, ?)'
+  )
+  const tx = db.transaction((items: typeof entries) => {
+    for (const { messageId, accountId, tags } of items) {
+      const normalized = Array.from(
+        new Set(tags.map((t) => t.trim()).filter((t) => t.length > 0))
+      )
+      del.run(messageId)
+      for (const t of normalized) {
+        ins.run(messageId, accountId, t)
+      }
+    }
+  })
+  tx(entries)
+}
+
 export function replaceMessageTags(messageId: number, accountId: string, tags: string[]): void {
   const normalized = Array.from(
     new Set(tags.map((t) => t.trim()).filter((t) => t.length > 0))
