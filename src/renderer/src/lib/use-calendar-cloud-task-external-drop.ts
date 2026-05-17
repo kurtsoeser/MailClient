@@ -1,5 +1,8 @@
 import { useLayoutEffect, type RefObject } from 'react'
-import { DateTime } from 'luxon'
+import {
+  appointmentRangeFromCalendarSlot,
+  defaultAppointmentRangeForCalendarDay
+} from '@/lib/zoned-iso-date'
 import {
   dataTransferLooksLikeCloudTaskDrag,
   readCloudTaskDragPayload,
@@ -7,21 +10,6 @@ import {
 } from '@/app/tasks/tasks-cloud-task-dnd'
 
 const DEFAULT_APPOINTMENT_MINUTES = 30
-
-function defaultScheduleForCalendarDay(
-  dateStr: string,
-  fcTimeZone: string
-): { startIso: string; endIso: string } {
-  const zone = fcTimeZone === 'local' ? 'local' : fcTimeZone
-  const start = DateTime.fromISO(`${dateStr}T09:00:00`, { zone })
-  if (!start.isValid) {
-    const d = new Date(`${dateStr}T09:00:00`)
-    const end = new Date(d.getTime() + DEFAULT_APPOINTMENT_MINUTES * 60 * 1000)
-    return { startIso: d.toISOString(), endIso: end.toISOString() }
-  }
-  const end = start.plus({ minutes: DEFAULT_APPOINTMENT_MINUTES })
-  return { startIso: start.toISO()!, endIso: end.toISO()! }
-}
 
 /**
  * Externes Drag&Drop von Cloud-Aufgaben auf den FullCalendar-Bereich (Planung + Due).
@@ -84,16 +72,15 @@ export function useCalendarCloudTaskExternalDrop(
         if (node.closest('.fc-timegrid-axis')) continue
         const t = node.getAttribute('data-time')
         if (t && /^\d{1,2}:\d{2}/.test(t)) {
-          const zone = fcTimeZone === 'local' ? 'local' : fcTimeZone
-          const normalized = t.length <= 5 ? `${t}:00` : t
-          const start = DateTime.fromISO(`${dateStr}T${normalized}`, { zone })
-          if (start.isValid) {
-            const end = start.plus({ minutes: DEFAULT_APPOINTMENT_MINUTES })
-            return { startIso: start.toISO()!, endIso: end.toISO()! }
-          }
+          return appointmentRangeFromCalendarSlot(
+            dateStr,
+            t,
+            fcTimeZone,
+            DEFAULT_APPOINTMENT_MINUTES
+          )
         }
       }
-      return defaultScheduleForCalendarDay(dateStr, fcTimeZone)
+      return defaultAppointmentRangeForCalendarDay(dateStr, fcTimeZone, 9, DEFAULT_APPOINTMENT_MINUTES)
     }
 
     const onDragHover = (e: DragEvent): void => {

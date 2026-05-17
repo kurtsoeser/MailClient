@@ -1,5 +1,28 @@
 import { BrowserWindow } from 'electron'
 import type { ConnectedAccount, MailChangedPayload, UserNoteKind } from '@shared/types'
+import { mergeMailChangedPayload } from '@shared/mail-changed-merge'
+
+const MAIL_CHANGED_COALESCE_MS = 100
+
+const pendingMailChanged = new Map<string, MailChangedPayload>()
+let mailChangedFlushTimer: ReturnType<typeof setTimeout> | null = null
+
+function flushMailChanged(): void {
+  mailChangedFlushTimer = null
+  if (pendingMailChanged.size === 0) return
+  const batch = [...pendingMailChanged.values()]
+  pendingMailChanged.clear()
+  for (const win of BrowserWindow.getAllWindows()) {
+    for (const payload of batch) {
+      win.webContents.send('mail:changed', payload)
+    }
+  }
+}
+
+function scheduleMailChangedFlush(): void {
+  if (mailChangedFlushTimer != null) return
+  mailChangedFlushTimer = setTimeout(flushMailChanged, MAIL_CHANGED_COALESCE_MS)
+}
 
 export function broadcastAccountsChanged(accounts: ConnectedAccount[]): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -21,10 +44,13 @@ export function broadcastMailChanged(
   accountId: string,
   extra: Omit<MailChangedPayload, 'accountId'> = {}
 ): void {
-  const payload: MailChangedPayload = { accountId, ...extra }
-  for (const win of BrowserWindow.getAllWindows()) {
-    win.webContents.send('mail:changed', payload)
-  }
+  const incoming: MailChangedPayload = { accountId, ...extra }
+  const prev = pendingMailChanged.get(accountId)
+  pendingMailChanged.set(
+    accountId,
+    prev ? mergeMailChangedPayload(prev, extra) : incoming
+  )
+  scheduleMailChangedFlush()
 }
 
 export function broadcastMailBulkUnflagProgress(payload: {

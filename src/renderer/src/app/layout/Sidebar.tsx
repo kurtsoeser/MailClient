@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useShallow } from 'zustand/react/shallow'
 import {
   DndContext,
   closestCenter,
@@ -89,31 +90,66 @@ export function Sidebar({ onOpenAccountDialog }: Props): JSX.Element {
   const accounts = useAccountsStore((s) => s.accounts)
   const patchAccountColor = useAccountsStore((s) => s.patchAccountColor)
   const profilePhotoDataUrls = useAccountsStore((s) => s.profilePhotoDataUrls)
-  const foldersByAccount = useMailStore((s) => s.foldersByAccount)
-  const selectedFolderId = useMailStore((s) => s.selectedFolderId)
-  const syncByAccount = useMailStore((s) => s.syncByAccount)
-  const selectFolder = useMailStore((s) => s.selectFolder)
-  const selectTodoView = useMailStore((s) => s.selectTodoView)
-  const selectSnoozedView = useMailStore((s) => s.selectSnoozedView)
-  const selectWaitingView = useMailStore((s) => s.selectWaitingView)
-  const selectUnifiedInbox = useMailStore((s) => s.selectUnifiedInbox)
-  const selectMetaFolder = useMailStore((s) => s.selectMetaFolder)
-  const createMetaFolder = useMailStore((s) => s.createMetaFolder)
-  const updateMetaFolder = useMailStore((s) => s.updateMetaFolder)
-  const deleteMetaFolder = useMailStore((s) => s.deleteMetaFolder)
-  const reorderMetaFolders = useMailStore((s) => s.reorderMetaFolders)
-  const metaFolders = useMailStore((s) => s.metaFolders)
-  const selectedMetaFolderId = useMailStore((s) => s.selectedMetaFolderId)
-  const listKind = useMailStore((s) => s.listKind)
-  const todoDueKind = useMailStore((s) => s.todoDueKind)
-  const todoCounts = useMailStore((s) => s.todoCounts)
-  const triggerSync = useMailStore((s) => s.triggerSync)
-  const createFolder = useMailStore((s) => s.createFolder)
-  const renameFolder = useMailStore((s) => s.renameFolder)
-  const deleteFolder = useMailStore((s) => s.deleteFolder)
-  const moveFolder = useMailStore((s) => s.moveFolder)
-  const toggleFolderFavorite = useMailStore((s) => s.toggleFolderFavorite)
-  const moveMessagesToFolder = useMailStore((s) => s.moveMessagesToFolder)
+  const {
+    foldersByAccount,
+    selectedFolderId,
+    syncByAccount,
+    metaFolders,
+    selectedMetaFolderId,
+    listKind,
+    todoDueKind,
+    todoCounts
+  } = useMailStore(
+    useShallow((s) => ({
+      foldersByAccount: s.foldersByAccount,
+      selectedFolderId: s.selectedFolderId,
+      syncByAccount: s.syncByAccount,
+      metaFolders: s.metaFolders,
+      selectedMetaFolderId: s.selectedMetaFolderId,
+      listKind: s.listKind,
+      todoDueKind: s.todoDueKind,
+      todoCounts: s.todoCounts
+    }))
+  )
+  const {
+    selectFolder,
+    selectTodoView,
+    selectSnoozedView,
+    selectWaitingView,
+    selectUnifiedInbox,
+    selectMetaFolder,
+    createMetaFolder,
+    updateMetaFolder,
+    deleteMetaFolder,
+    reorderMetaFolders,
+    triggerSync,
+    createFolder,
+    renameFolder,
+    deleteFolder,
+    moveFolder,
+    toggleFolderFavorite,
+    moveMessagesToFolder
+  } = useMailStore(
+    useShallow((s) => ({
+      selectFolder: s.selectFolder,
+      selectTodoView: s.selectTodoView,
+      selectSnoozedView: s.selectSnoozedView,
+      selectWaitingView: s.selectWaitingView,
+      selectUnifiedInbox: s.selectUnifiedInbox,
+      selectMetaFolder: s.selectMetaFolder,
+      createMetaFolder: s.createMetaFolder,
+      updateMetaFolder: s.updateMetaFolder,
+      deleteMetaFolder: s.deleteMetaFolder,
+      reorderMetaFolders: s.reorderMetaFolders,
+      triggerSync: s.triggerSync,
+      createFolder: s.createFolder,
+      renameFolder: s.renameFolder,
+      deleteFolder: s.deleteFolder,
+      moveFolder: s.moveFolder,
+      toggleFolderFavorite: s.toggleFolderFavorite,
+      moveMessagesToFolder: s.moveMessagesToFolder
+    }))
+  )
 
   function handleMailDropOnFolder(folder: MailFolder, e: React.DragEvent): void {
     e.preventDefault()

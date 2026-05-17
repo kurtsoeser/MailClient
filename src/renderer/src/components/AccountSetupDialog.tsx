@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { useAccountsStore } from '@/stores/accounts'
@@ -30,8 +30,14 @@ import {
 import { SIDEBAR_DEFAULT_CAL_ID } from '@/app/calendar/calendar-shell-storage'
 import { AccountPropertiesMenu } from '@/components/AccountPropertiesMenu'
 import { BulkUnflagServerDialog } from '@/components/BulkUnflagServerDialog'
-import { NotionSettingsPanel } from '@/components/NotionSettingsPanel'
-import { RulesShell } from '@/app/rules/RulesShell'
+import { AccountSetupPanelFallback } from '@/components/account-setup/AccountSetupPanelFallback'
+
+const AccountSetupNotionPanel = lazy(
+  () => import('@/components/account-setup/AccountSetupNotionPanel')
+)
+const AccountSetupRulesPanel = lazy(
+  () => import('@/components/account-setup/AccountSetupRulesPanel')
+)
 import { accountColorToCssBackground } from '@/lib/avatar-color'
 import {
   DASHBOARD_GRID_STEP_DEFAULT_PX,
@@ -1443,15 +1449,17 @@ export function AccountSetupDialog({
               )}
 
               {subNavId.general === 'notion' && (
-                <NotionSettingsPanel
-                  config={config}
-                  busy={busy}
-                  onBusy={setBusy}
-                  onError={setLocalError}
-                  onConfigSaved={(c): void => {
-                    useAccountsStore.setState({ config: c })
-                  }}
-                />
+                <Suspense fallback={<AccountSetupPanelFallback />}>
+                  <AccountSetupNotionPanel
+                    config={config}
+                    busy={busy}
+                    onBusy={setBusy}
+                    onError={setLocalError}
+                    onConfigSaved={(c): void => {
+                      useAccountsStore.setState({ config: c })
+                    }}
+                  />
+                </Suspense>
               )}
 
               {subNavId.general === 'backup' && (
@@ -2178,7 +2186,9 @@ export function AccountSetupDialog({
 
               {subNavId.mail === 'rules' && (
               <section className="-mx-5 -mb-5 flex min-h-0 flex-col">
-                <RulesShell embedded />
+                <Suspense fallback={<AccountSetupPanelFallback />}>
+                  <AccountSetupRulesPanel />
+                </Suspense>
               </section>
               )}
             </div>

@@ -703,8 +703,3 @@ export function writeDashboardLayoutToStorage(
     // ignore
   }
 }
-
-/** @deprecated Nutze clampDashboardTilePlacement */
-export function clampPlacementToGrid(p: DashboardTilePlacement): DashboardTilePlacement {
-  return clampDashboardTilePlacement(p)
-}

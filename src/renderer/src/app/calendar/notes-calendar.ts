@@ -1,7 +1,11 @@
 import type { EventApi, EventInput } from '@fullcalendar/core'
 import type { UserNoteListItem } from '@shared/types'
 import { NOTE_DEFAULT_APPOINTMENT_MINUTES, resolveNoteCalendarSpan } from '@shared/note-calendar-span'
-import { DateTime } from 'luxon'
+import {
+  addCalendarDaysIsoDate,
+  defaultAppointmentRangeForCalendarDay,
+  isoDateInTimeZone
+} from '@/lib/zoned-iso-date'
 
 export const CALENDAR_KIND_USER_NOTE = 'userNote' as const
 
@@ -71,16 +75,14 @@ export function computePersistTargetForUserNote(
   if (!start) return null
 
   if (event.allDay) {
-    const d0 = DateTime.fromJSDate(start, { zone: fcTimeZone === 'local' ? undefined : fcTimeZone })
-    if (!d0.isValid) return null
-    const startIso = d0.toISODate()!
-    const endDate = end
-      ? DateTime.fromJSDate(end, { zone: fcTimeZone === 'local' ? undefined : fcTimeZone })
-      : d0.plus({ days: 1 })
+    const startIso = isoDateInTimeZone(start, fcTimeZone)
+    const endIso = end
+      ? isoDateInTimeZone(end, fcTimeZone)
+      : addCalendarDaysIsoDate(startIso, 1, fcTimeZone)
     return {
       noteId,
       scheduledStartIso: startIso,
-      scheduledEndIso: endDate.isValid ? endDate.toISODate()! : startIso,
+      scheduledEndIso: endIso,
       scheduledAllDay: true
     }
   }
@@ -101,13 +103,10 @@ export function defaultScheduleForNoteCalendarDayFc(
   dateStr: string,
   fcTimeZone: string
 ): { startIso: string; endIso: string } {
-  const zone = fcTimeZone === 'local' ? 'local' : fcTimeZone
-  const start = DateTime.fromISO(`${dateStr}T09:00:00`, { zone })
-  if (!start.isValid) {
-    const d = new Date(`${dateStr}T09:00:00`)
-    const end = new Date(d.getTime() + NOTE_DEFAULT_APPOINTMENT_MINUTES * 60_000)
-    return { startIso: d.toISOString(), endIso: end.toISOString() }
-  }
-  const end = start.plus({ minutes: NOTE_DEFAULT_APPOINTMENT_MINUTES })
-  return { startIso: start.toISO()!, endIso: end.toISO()! }
+  return defaultAppointmentRangeForCalendarDay(
+    dateStr,
+    fcTimeZone,
+    9,
+    NOTE_DEFAULT_APPOINTMENT_MINUTES
+  )
 }

@@ -31,7 +31,6 @@ import {
 
   Tag,
   StickyNote,
-  FolderInput,
   SquareArrowOutUpRight,
   ListTodo
 
@@ -39,6 +38,7 @@ import {
 
 import type { TFunction } from 'i18next'
 import { useCreateCloudTaskUiStore } from '@/stores/create-cloud-task-ui'
+import { buildMailContextMoveMenuEntries } from '@/lib/mail-context-menu-move'
 
 const MAIL_CTX_TODO_FALLBACK = {
   today: 'ToDo: Heute',
@@ -805,27 +805,7 @@ export function buildMailContextItems(
 
       : []),
 
-    ...(ui.moveSubmenuContent != null
-
-      ? [
-
-          { id: 'sep-move-entry', label: '', separator: true },
-
-          {
-
-            id: 'move-mail',
-
-            label: ui.t ? ui.t('mail.move.menu') : 'Verschieben',
-
-            icon: FolderInput,
-
-            submenuContent: ui.moveSubmenuContent
-
-          }
-
-        ]
-
-      : []),
+    ...buildMailContextMoveMenuEntries(ui.moveSubmenuContent, ui.t),
 
     {
 

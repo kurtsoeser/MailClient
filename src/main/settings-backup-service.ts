@@ -22,7 +22,7 @@ import {
   listAccounts,
   mergeAccountPreferencesFromBackup
 } from './accounts'
-import { DEFAULT_APP_CONFIG, loadConfig, saveConfig } from './config'
+import { DEFAULT_APP_CONFIG, loadConfig, savePersistedPartial } from './config'
 import { broadcastAccountsChanged } from './ipc/ipc-broadcasts'
 import {
   readNotionDestinations,
@@ -809,7 +809,7 @@ export function parseSettingsBackupJson(raw: string): SettingsBackupPayload {
 
 export async function applySettingsBackupPayload(backup: SettingsBackupPayload): Promise<void> {
   const config: AppConfig = { ...DEFAULT_APP_CONFIG, ...backup.config }
-  await saveConfig(config)
+  await savePersistedPartial(config)
   app.setLoginItemSettings({ openAtLogin: Boolean(config.launchOnLogin), path: process.execPath })
 
   if (backup.secureExtras) {

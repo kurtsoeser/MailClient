@@ -19,7 +19,6 @@ import {
 } from '@/app/tasks/task-list-arrange'
 import { setCloudTaskDragData } from '@/app/tasks/tasks-cloud-task-dnd'
 import { taskItemKey, type TaskItemWithContext } from '@/app/tasks/tasks-types'
-
 function dueDateLabel(dueIso: string | null): string {
   if (!dueIso) return ''
   if (/^\d{4}-\d{2}-\d{2}/.test(dueIso)) return dueIso.slice(0, 10)

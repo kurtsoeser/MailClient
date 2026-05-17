@@ -1,4 +1,8 @@
-import { DateTime } from 'luxon'
+import {
+  calendarZonedPartsFromDateOnly,
+  calendarZonedPartsFromUtcIso,
+  utcIsoFromWallDateTime
+} from '@shared/calendar-datetime'
 import type { calendar_v3 } from 'googleapis'
 import type { CalendarGraphCalendarRow, CalendarSaveEventRecurrence } from '@shared/types'
 import { loadConfig } from '../config'
@@ -69,14 +73,8 @@ function googleDateToIso(
   }
   const s = dt.dateTime
   if (!s) return null
-  const norm = s.replace(/(\.\d{3})\d+/, '$1').trim()
-  if (/[zZ]$|[+-]\d{2}:?\d{2}$/.test(norm)) {
-    const d = DateTime.fromISO(norm, { setZone: true })
-    return d.isValid ? d.toUTC().toISO() : null
-  }
   const zone = dt.timeZone?.trim() || fallbackTz
-  const d = DateTime.fromISO(norm, { zone })
-  return d.isValid ? d.toUTC().toISO() : null
+  return utcIsoFromWallDateTime(s, zone, false, (z) => z?.trim() || fallbackTz)
 }
 
 function rowFromGoogleEvent(
@@ -293,9 +291,9 @@ export async function googleCreateEvent(
 
   if (input.recurrence) {
     const startLocal = input.isAllDay
-      ? DateTime.fromISO(input.startIso.slice(0, 10), { zone: tz })
-      : DateTime.fromISO(input.startIso, { zone: 'utc' }).setZone(tz)
-    if (!startLocal.isValid) {
+      ? calendarZonedPartsFromDateOnly(input.startIso.slice(0, 10), tz)
+      : calendarZonedPartsFromUtcIso(input.startIso, tz)
+    if (!startLocal) {
       throw new Error('Serientermin: Startdatum fuer Wiederholung ungueltig.')
     }
     body.recurrence = buildGoogleEventRecurrence(input.recurrence, startLocal, tz, input.isAllDay)

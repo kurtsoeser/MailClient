@@ -140,13 +140,22 @@ async function runFolderPollsWithConcurrency(
   await Promise.all(workers)
 }
 
+let backgroundPollGeneration = 0
+
 export async function runBackgroundPoll(extraFolderIds: number[] = []): Promise<void> {
+  backgroundPollGeneration++
+  const pollSecondaryFolders = backgroundPollGeneration % 2 === 0
+
   const accounts = await listAccounts()
   const visited = new Set<number>()
   const toPoll: number[] = []
 
+  const wellKnownPoll: Array<'inbox' | 'sentitems' | 'drafts'> = pollSecondaryFolders
+    ? ['inbox', 'sentitems', 'drafts']
+    : ['inbox']
+
   for (const acc of accounts) {
-    for (const alias of ['inbox', 'sentitems', 'drafts'] as const) {
+    for (const alias of wellKnownPoll) {
       const folder = findFolderByWellKnown(acc.id, alias)
       if (!folder || visited.has(folder.id)) continue
       visited.add(folder.id)

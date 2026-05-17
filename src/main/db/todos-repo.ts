@@ -370,6 +370,52 @@ function listOpenTodoMessagesByDueAtBucket(
   return rows.map(rowToTodoListItem)
 }
 
+/** Alle offenen Mail-ToDos (alle Buckets) in einer Abfrage — fuer vereinheitlichte ToDo-Liste. */
+export function listAllOpenTodoMessagesMerged(
+  accountId: string | null,
+  limit = 2000
+): MailListItem[] {
+  const db = getDb()
+  const accountClause = accountId != null ? 'AND m.account_id = ?' : ''
+  const sql = `SELECT
+         ${TODO_JOIN_SELECT},
+         ${M_LIST}
+       FROM todos t
+       INNER JOIN messages m ON m.id = t.message_id
+       WHERE t.status = 'open'
+         AND ${OPEN_TODO_MAIL_FOLLOW_UP_SQL}
+         ${accountClause}
+       ORDER BY
+         CASE WHEN t.due_at IS NULL THEN 1 ELSE 0 END,
+         t.due_at ASC,
+         m.received_at DESC NULLS LAST,
+         m.id DESC
+       LIMIT ?`
+  const rows =
+    accountId != null
+      ? (db.prepare(sql).all(accountId, limit) as Array<
+          MessageJoinRow & {
+            todo_id: number
+            todo_due_kind: string
+            todo_due_at: string | null
+            todo_completed_at: string | null
+            todo_start_at: string | null
+            todo_end_at: string | null
+          }
+        >)
+      : (db.prepare(sql).all(limit) as Array<
+          MessageJoinRow & {
+            todo_id: number
+            todo_due_kind: string
+            todo_due_at: string | null
+            todo_completed_at: string | null
+            todo_start_at: string | null
+            todo_end_at: string | null
+          }
+        >)
+  return rows.map(rowToTodoListItem)
+}
+
 export function listTodoMessagesWithMeta(
   accountId: string | null,
   dueKind: TodoDueKindList,

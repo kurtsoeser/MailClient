@@ -110,7 +110,8 @@
       "selectNote": "Notiz auswählen",
       "selectNoteHint": "Wähle links eine Notiz aus oder lege eine freie Notiz an.",
       "titlePlaceholder": "Titel",
-      "deleteConfirm": "Diese Notiz löschen?",
+      "deleteTitle": "Notiz löschen",
+      "deleteConfirm": "«{{title}}» wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.",
       "deleted": "Notiz gelöscht.",
       "invalidNote": "Diese Notiz kann nicht gespeichert werden.",
       "linkedObject": "Verknüpftes Objekt",
@@ -140,6 +141,7 @@
       "title": "Sektionen",
       "add": "Sektion",
       "namePlaceholder": "Name der Sektion",
+      "allNotes": "Alle Notizen",
       "ungrouped": "Ungruppiert",
       "moveTo": "Sektion",
       "deleteTitle": "Sektion löschen",
@@ -163,6 +165,28 @@
       "saveAs": "Speichern unter",
       "cloudRequiresM365": "Für OneDrive- und SharePoint-Dateien ein Microsoft-365-Konto verbinden.",
       "requiresSavedNote": "Speichern Sie die Notiz einmal, um Dateien anzuhängen."
+    },
+    "preview": {
+      "loading": "Vorschau wird geladen …",
+      "selectLink": "Verknüpfung in der Liste wählen.",
+      "showInPane": "In der Vorschau anzeigen",
+      "openExternal": "Im Modul öffnen",
+      "togglePane": "Vorschau-Spalte ein- oder ausblenden",
+      "togglePaneShort": "Vorschau",
+      "undockTitle": "Vorschau als Fenster",
+      "hideTitle": "Vorschau ausblenden",
+      "selfLink": "Die aktuelle Notiz kann nicht in der Vorschau angezeigt werden.",
+      "noteNotFound": "Notiz nicht gefunden.",
+      "eventNotFound": "Termin nicht gefunden.",
+      "taskNotFound": "Aufgabe nicht gefunden.",
+      "unsupported": "Vorschau für diesen Typ nicht verfügbar."
+    },
+    "pagesContextMenu": {
+      "copy": "Kopieren",
+      "move": "Verschieben",
+      "link": "Verknüpfen",
+      "linkDialogTitle": "Mit Objekt verknüpfen",
+      "copied": "Notiz kopiert."
     },
     "links": {
       "title": "Verknüpfungen",

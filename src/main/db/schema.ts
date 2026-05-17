@@ -966,5 +966,18 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_folders_well_known_account
         ON folders(well_known, account_id);
     `
+  },
+  {
+    version: 36,
+    description: 'FTS messages_au nur bei Such-relevanten Spalten',
+    sql: `
+      DROP TRIGGER IF EXISTS messages_au;
+      CREATE TRIGGER messages_au AFTER UPDATE OF subject, from_addr, from_name, body_text ON messages BEGIN
+        INSERT INTO messages_fts (messages_fts, rowid, subject, from_addr, from_name, body_text)
+        VALUES('delete', old.id, old.subject, old.from_addr, old.from_name, old.body_text);
+        INSERT INTO messages_fts (rowid, subject, from_addr, from_name, body_text)
+        VALUES (new.id, new.subject, new.from_addr, new.from_name, new.body_text);
+      END;
+    `
   }
 ]

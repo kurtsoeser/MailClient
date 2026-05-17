@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import { DateTime } from 'luxon'
+import { isValidIanaTimeZone } from '@shared/iana-timezone'
 import { IPC, type AppConfig, type AppConfigWeatherLocation } from '@shared/types'
 import { loadConfig, updateConfig } from '../config'
 
@@ -57,6 +57,17 @@ export function registerConfigIpc(): void {
   )
 
   ipcMain.handle(
+    IPC.config.setMailPollIntervalSeconds,
+    async (_event, seconds: number): Promise<AppConfig> => {
+      if (!Number.isFinite(seconds)) {
+        throw new Error('Ungueltiges Poll-Intervall.')
+      }
+      const clamped = Math.min(Math.max(Math.floor(seconds), 30), 600)
+      return updateConfig({ mailPollIntervalSeconds: clamped })
+    }
+  )
+
+  ipcMain.handle(
     IPC.config.setAutoLoadImages,
     async (_event, value: boolean): Promise<AppConfig> => {
       return updateConfig({ autoLoadImages: Boolean(value) })
@@ -73,8 +84,7 @@ export function registerConfigIpc(): void {
       if (!t) {
         return updateConfig({ calendarTimeZone: null })
       }
-      const probe = DateTime.now().setZone(t)
-      if (!probe.isValid) {
+      if (!isValidIanaTimeZone(t)) {
         throw new Error('Ungueltige Zeitzone (IANA-Name, z. B. Europe/Berlin).')
       }
       return updateConfig({ calendarTimeZone: t })

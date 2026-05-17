@@ -1,10 +1,15 @@
+import { useCallback, useState } from 'react'
 import { Loader2, Plus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import type { UserNoteListItem } from '@shared/types'
+import type { NoteSection, UserNoteListItem } from '@shared/types'
+import { sectionLabelForNote } from '@/lib/notes-nav-selection'
 import { NotesPageRow } from '@/app/notes/NotesPageRow'
 import { NotesPagesSortMenu } from '@/app/notes/NotesPagesSortMenu'
+import { NoteEntityLinkPickerDialog } from '@/app/notes/NoteEntityLinkPickerDialog'
 import type { NotesPagesSortKey } from '@/lib/notes-pages-sort'
+import { buildNotesPageContextMenuItems } from '@/lib/notes-page-context-menu'
 import { cn } from '@/lib/utils'
+import { ContextMenu } from '@/components/ContextMenu'
 import {
   ModuleColumnHeaderIconButton,
   moduleColumnHeaderIconGlyphClass,
@@ -16,18 +21,24 @@ import {
 export function NotesPagesPane({
   title,
   notes,
+  sections,
   loading,
   activeNoteId,
   onOpenNote,
   onRenameNoteTitle,
   onPatchNoteDisplay,
+  onDeleteNote,
+  onCopyNote,
+  onMoveNote,
   onCreateNote,
   creating = false,
   pagesSort,
-  onPagesSortChange
+  onPagesSortChange,
+  showSectionLabels = false
 }: {
   title: string
   notes: UserNoteListItem[]
+  sections: NoteSection[]
   loading: boolean
   activeNoteId: number | null
   onOpenNote: (note: UserNoteListItem) => void
@@ -36,12 +47,41 @@ export function NotesPagesPane({
     note: UserNoteListItem,
     patch: { iconId?: string | null; iconColor?: string | null }
   ) => void | Promise<void>
+  onDeleteNote: (note: UserNoteListItem) => void | Promise<void>
+  onCopyNote: (note: UserNoteListItem) => void | Promise<void>
+  onMoveNote: (note: UserNoteListItem, sectionId: number | null) => void | Promise<void>
   onCreateNote: () => void
   creating?: boolean
   pagesSort: NotesPagesSortKey
   onPagesSortChange: (key: NotesPagesSortKey) => void
+  showSectionLabels?: boolean
 }): JSX.Element {
   const { t } = useTranslation()
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; note: UserNoteListItem } | null>(
+    null
+  )
+  const [linkNoteId, setLinkNoteId] = useState<number | null>(null)
+
+  const openContextMenu = useCallback((note: UserNoteListItem, event: React.MouseEvent): void => {
+    setContextMenu({ x: event.clientX, y: event.clientY, note })
+  }, [])
+
+  const contextMenuItems =
+    contextMenu != null
+      ? buildNotesPageContextMenuItems({
+          t,
+          note: contextMenu.note,
+          sections,
+          onDelete: onDeleteNote,
+          onCopy: onCopyNote,
+          onMove: onMoveNote,
+          onLink: (note): void => {
+            setContextMenu(null)
+            setLinkNoteId(note.id)
+            onOpenNote(note)
+          }
+        })
+      : []
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-card">
@@ -102,11 +142,32 @@ export function NotesPagesPane({
                 onOpen={onOpenNote}
                 onRenameTitle={onRenameNoteTitle}
                 onPatchDisplay={onPatchNoteDisplay}
+                onContextMenu={openContextMenu}
+                sectionLabel={
+                  showSectionLabels ? sectionLabelForNote(note, sections, t) : undefined
+                }
               />
             ))}
           </div>
         )}
       </div>
+
+      {contextMenu ? (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={contextMenuItems}
+          onClose={(): void => setContextMenu(null)}
+        />
+      ) : null}
+
+      {linkNoteId != null ? (
+        <NoteEntityLinkPickerDialog
+          noteId={linkNoteId}
+          open
+          onClose={(): void => setLinkNoteId(null)}
+        />
+      ) : null}
     </div>
   )
 }

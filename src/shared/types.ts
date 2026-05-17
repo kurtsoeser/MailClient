@@ -99,6 +99,10 @@ export interface AppConfig {
    */
   syncWindowDays: number | null
   /**
+   * Hintergrund-Mail-Poll-Intervall in Sekunden (30–600). Standard: 60.
+   */
+  mailPollIntervalSeconds?: number
+  /**
    * Externe Bilder in HTML-Mails automatisch laden. Wenn `false` muss der
    * Benutzer pro Mail explizit auf "Bilder laden" klicken.
    */

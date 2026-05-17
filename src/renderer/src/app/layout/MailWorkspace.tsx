@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useResizableWidth, VerticalSplitter } from '@/components/ResizableSplitter'
 import { Sidebar } from '@/app/layout/Sidebar'
@@ -7,12 +7,21 @@ import { ReadingPane } from '@/app/layout/ReadingPane'
 import { InboxCalendarSidebar } from '@/app/layout/InboxCalendarSidebar'
 import { CalendarFloatingPanel } from '@/app/calendar/CalendarFloatingPanel'
 import { useMailWorkspaceLayoutStore } from '@/stores/mail-workspace-layout'
+import { useMailPendingFocusStore } from '@/stores/mail-pending-focus'
+import { useMailStore } from '@/stores/mail'
 
 const MAIL_FLOAT_READING_SIZE_KEY = 'mailclient.mailWorkspace.readingFloatSize'
 const MAIL_FLOAT_CALENDAR_SIZE_KEY = 'mailclient.mailWorkspace.calendarFloatSize'
 
 export function MailWorkspace(props: { onOpenAccountDialog: () => void }): JSX.Element {
   const { t } = useTranslation()
+  const takePendingMessageId = useMailPendingFocusStore((s) => s.takePendingMessageId)
+  const openMessageInFolder = useMailStore((s) => s.openMessageInFolder)
+
+  useEffect(() => {
+    const pendingId = takePendingMessageId()
+    if (pendingId != null) void openMessageInFolder(pendingId)
+  }, [takePendingMessageId, openMessageInFolder])
   const [sidebarWidth, setSidebarWidth] = useResizableWidth({
     storageKey: 'mailclient.sidebarWidth',
     defaultWidth: 256,

@@ -104,6 +104,52 @@ function parseRfcDate(s: string | undefined): string | null {
   return d.toISOString()
 }
 
+const GMAIL_MESSAGE_GET_CONCURRENCY = 6
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  if (items.length === 0) return []
+  const results = new Array<R>(items.length)
+  let index = 0
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (index < items.length) {
+      const i = index++
+      results[i] = await fn(items[i]!)
+    }
+  })
+  await Promise.all(workers)
+  return results
+}
+
+async function fetchGmailMessagesMetadata(
+  gmail: gmail_v1.Gmail,
+  messageIds: string[]
+): Promise<gmail_v1.Schema$Message[]> {
+  const fetched = await mapWithConcurrency(messageIds, GMAIL_MESSAGE_GET_CONCURRENCY, async (id) => {
+    const full = await gmail.users.messages.get({
+      userId: 'me',
+      id,
+      format: 'metadata',
+      metadataHeaders: [
+        'From',
+        'To',
+        'Cc',
+        'Bcc',
+        'Subject',
+        'Date',
+        'List-Unsubscribe',
+        'List-Unsubscribe-Post',
+        'List-Id'
+      ]
+    })
+    return full.data ?? null
+  })
+  return fetched.filter((m): m is gmail_v1.Schema$Message => m != null && Boolean(m.id))
+}
+
 function gmailQueryFromSyncWindow(days: number | null | undefined): string | null {
   if (days == null || !Number.isFinite(days) || days <= 0) return null
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
@@ -253,24 +299,16 @@ export async function syncGoogleMessagesInFolder(
   })
 
   const refs = listRes.data.messages ?? []
+  const messageIds = refs.map((r) => r.id).filter((id): id is string => Boolean(id))
+  const fullMessages = await fetchGmailMessagesMetadata(gmail, messageIds)
   const inputs: UpsertMessageInput[] = []
   let maxInternal = ''
-  for (const ref of refs) {
-    const id = ref.id
-    if (!id) continue
-    const full = await gmail.users.messages.get({
-      userId: 'me',
-      id,
-      format: 'metadata',
-      metadataHeaders: ['From', 'To', 'Cc', 'Bcc', 'Subject', 'Date', 'List-Unsubscribe', 'List-Unsubscribe-Post', 'List-Id']
-    })
-    if (full.data) {
-      inputs.push(gmailMessageToUpsert(full.data, accountId, folder.id))
-      const ms = full.data.internalDate ? Number(full.data.internalDate) : NaN
-      if (Number.isFinite(ms)) {
-        const iso = new Date(ms).toISOString()
-        if (!maxInternal || iso > maxInternal) maxInternal = iso
-      }
+  for (const msg of fullMessages) {
+    inputs.push(gmailMessageToUpsert(msg, accountId, folder.id))
+    const ms = msg.internalDate ? Number(msg.internalDate) : NaN
+    if (Number.isFinite(ms)) {
+      const iso = new Date(ms).toISOString()
+      if (!maxInternal || iso > maxInternal) maxInternal = iso
     }
   }
   upsertMailMessagesReconcilingTodos(accountId, inputs)
@@ -367,31 +405,30 @@ export async function pollGoogleInbox(accountId: string): Promise<{
         pageToken
       })
       const history = hist.data.history ?? []
+      const addedIds: string[] = []
       for (const h of history) {
-        const added = h.messagesAdded ?? []
-        for (const m of added) {
+        for (const m of h.messagesAdded ?? []) {
           const id = m.message?.id
-          if (!id) continue
-          const full = await gmail.users.messages.get({
-            userId: 'me',
-            id,
-            format: 'metadata',
-            metadataHeaders: ['From', 'To', 'Cc', 'Bcc', 'Subject', 'Date', 'List-Unsubscribe', 'List-Unsubscribe-Post', 'List-Id']
-          })
-          if (!full.data?.id) continue
-          const labelIds = full.data.labelIds ?? []
-          const primaryFolder =
-            labelIds.find((l) => l === 'INBOX') ??
-            labelIds.find((l) => l === 'SENT') ??
-            labelIds.find((l) => l === 'DRAFT') ??
-            labelIds[0]
-          if (!primaryFolder) continue
-          const f = findFolderByRemoteId(accountId, primaryFolder)
-          if (!f) continue
-          upsertMailMessagesReconcilingTodos(accountId, [gmailMessageToUpsert(full.data, accountId, f.id)])
-          remoteIds.push(id)
-          totalFetched += 1
+          if (id) addedIds.push(id)
         }
+      }
+      const uniqueAddedIds = [...new Set(addedIds)]
+      const fullMessages = await fetchGmailMessagesMetadata(gmail, uniqueAddedIds)
+      for (const msg of fullMessages) {
+        const id = msg.id
+        if (!id) continue
+        const labelIds = msg.labelIds ?? []
+        const primaryFolder =
+          labelIds.find((l) => l === 'INBOX') ??
+          labelIds.find((l) => l === 'SENT') ??
+          labelIds.find((l) => l === 'DRAFT') ??
+          labelIds[0]
+        if (!primaryFolder) continue
+        const f = findFolderByRemoteId(accountId, primaryFolder)
+        if (!f) continue
+        upsertMailMessagesReconcilingTodos(accountId, [gmailMessageToUpsert(msg, accountId, f.id)])
+        remoteIds.push(id)
+        totalFetched += 1
       }
       pageToken = hist.data.nextPageToken ?? undefined
       if (!pageToken) break

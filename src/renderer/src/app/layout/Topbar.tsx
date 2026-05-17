@@ -43,6 +43,7 @@ import { CSS } from '@dnd-kit/utilities'
 import { cn } from '@/lib/utils'
 import { resolvedAccountColorCss } from '@/lib/avatar-color'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { useAccountsStore } from '@/stores/accounts'
@@ -393,8 +394,11 @@ export function Topbar({ onOpenAccountDialog }: Props): JSX.Element {
   const accounts = useAccountsStore((s) => s.accounts)
   const openNew = useComposeStore((s) => s.openNew)
   const refreshNow = useMailStore((s) => s.refreshNow)
-  const syncByAccount = useMailStore((s) => s.syncByAccount)
-  const anyAccountSyncing = Object.values(syncByAccount).some((s) => s.state.startsWith('syncing'))
+  const anyAccountSyncing = useMailStore(
+    useShallow((s) =>
+      Object.values(s.syncByAccount).some((st) => st.state.startsWith('syncing'))
+    )
+  )
   const online = useConnectivityStore((s) => s.online)
 
   const [modeOrder, setModeOrder] = useState(readTopbarModuleOrder)

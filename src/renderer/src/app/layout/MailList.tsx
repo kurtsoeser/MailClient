@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState } from 'react'
+import { memo, useCallback, useMemo, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { GroupedVirtuoso } from 'react-virtuoso'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
@@ -96,37 +97,74 @@ interface MailRowHandlers {
 
 export function MailList(): JSX.Element {
   const { t } = useTranslation()
-  const messages = useMailStore((s) => s.messages)
-  const threadMessages = useMailStore((s) => s.threadMessages)
-  const selectedMessageId = useMailStore((s) => s.selectedMessageId)
-  const selectFolderId = useMailStore((s) => s.selectedFolderId)
-  const selectFolderAccountId = useMailStore((s) => s.selectedFolderAccountId)
-  const listKind = useMailStore((s) => s.listKind)
-  const todoDueKind = useMailStore((s) => s.todoDueKind)
-  const loading = useMailStore((s) => s.loading)
-  const selectMessage = useMailStore((s) => s.selectMessage)
-  const expandedThreads = useMailStore((s) => s.expandedThreads)
-  const toggleThreadExpanded = useMailStore((s) => s.toggleThreadExpanded)
-  const setMessageRead = useMailStore((s) => s.setMessageRead)
-  const toggleMessageFlag = useMailStore((s) => s.toggleMessageFlag)
-  const archiveMessage = useMailStore((s) => s.archiveMessage)
-  const deleteMessage = useMailStore((s) => s.deleteMessage)
-  const removeMailTodoRecordsForMessage = useMailStore((s) => s.removeMailTodoRecordsForMessage)
-  const moveMessagesToFolder = useMailStore((s) => s.moveMessagesToFolder)
-  const syncByAccount = useMailStore((s) => s.syncByAccount)
-  const accounts = useAccountsStore((s) => s.accounts)
-  const profilePhotoDataUrls = useAccountsStore((s) => s.profilePhotoDataUrls)
-  const foldersByAccount = useMailStore((s) => s.foldersByAccount)
-  const metaFolders = useMailStore((s) => s.metaFolders)
-  const selectedMetaFolderId = useMailStore((s) => s.selectedMetaFolderId)
+  const {
+    messages,
+    selectedMessageId,
+    selectedFolderId: selectFolderId,
+    selectedFolderAccountId: selectFolderAccountId,
+    listKind,
+    todoDueKind,
+    loading,
+    expandedThreads,
+    foldersByAccount,
+    syncByAccount,
+    metaFolders,
+    selectedMetaFolderId
+  } = useMailStore(
+    useShallow((s) => ({
+      messages: s.messages,
+      selectedMessageId: s.selectedMessageId,
+      selectedFolderId: s.selectedFolderId,
+      selectedFolderAccountId: s.selectedFolderAccountId,
+      listKind: s.listKind,
+      todoDueKind: s.todoDueKind,
+      loading: s.loading,
+      expandedThreads: s.expandedThreads,
+      foldersByAccount: s.foldersByAccount,
+      syncByAccount: s.syncByAccount,
+      metaFolders: s.metaFolders,
+      selectedMetaFolderId: s.selectedMetaFolderId
+    }))
+  )
+  const threadMessages = useMailStore(useShallow((s) => s.threadMessages))
+  const {
+    selectMessage,
+    toggleThreadExpanded,
+    setMessageRead,
+    toggleMessageFlag,
+    archiveMessage,
+    deleteMessage,
+    removeMailTodoRecordsForMessage,
+    moveMessagesToFolder,
+    setWaitingForMessage,
+    clearWaitingForMessage,
+    setTodoForMessage,
+    completeTodoForMessage,
+    refreshNow,
+    emptyTrashFolder
+  } = useMailStore(
+    useShallow((s) => ({
+      selectMessage: s.selectMessage,
+      toggleThreadExpanded: s.toggleThreadExpanded,
+      setMessageRead: s.setMessageRead,
+      toggleMessageFlag: s.toggleMessageFlag,
+      archiveMessage: s.archiveMessage,
+      deleteMessage: s.deleteMessage,
+      removeMailTodoRecordsForMessage: s.removeMailTodoRecordsForMessage,
+      moveMessagesToFolder: s.moveMessagesToFolder,
+      setWaitingForMessage: s.setWaitingForMessage,
+      clearWaitingForMessage: s.clearWaitingForMessage,
+      setTodoForMessage: s.setTodoForMessage,
+      completeTodoForMessage: s.completeTodoForMessage,
+      refreshNow: s.refreshNow,
+      emptyTrashFolder: s.emptyTrashFolder
+    }))
+  )
+  const { accounts, profilePhotoDataUrls } = useAccountsStore(
+    useShallow((s) => ({ accounts: s.accounts, profilePhotoDataUrls: s.profilePhotoDataUrls }))
+  )
   const openReply = useComposeStore((s) => s.openReply)
   const openForward = useComposeStore((s) => s.openForward)
-  const setWaitingForMessage = useMailStore((s) => s.setWaitingForMessage)
-  const clearWaitingForMessage = useMailStore((s) => s.clearWaitingForMessage)
-  const setTodoForMessage = useMailStore((s) => s.setTodoForMessage)
-  const completeTodoForMessage = useMailStore((s) => s.completeTodoForMessage)
-  const refreshNow = useMailStore((s) => s.refreshNow)
-  const emptyTrashFolder = useMailStore((s) => s.emptyTrashFolder)
   const openSnoozePicker = useSnoozeUiStore((s) => s.open)
 
   const [contextMenu, setContextMenu] = useState<MailContextState | null>(null)
@@ -708,7 +746,7 @@ function messageListDateIso(m: MailListItem): string | null {
   return iso && iso.trim().length > 0 ? iso : null
 }
 
-function ThreadHeadRow({
+const ThreadHeadRow = memo(function ThreadHeadRow({
   thread,
   threadMessages,
   account,
@@ -982,9 +1020,9 @@ function ThreadHeadRow({
       />
     </div>
   )
-}
+})
 
-function ThreadSubRow({
+const ThreadSubRow = memo(function ThreadSubRow({
   message,
   accounts,
   foldersByAccount,
@@ -1135,7 +1173,7 @@ function ThreadSubRow({
       />
     </div>
   )
-}
+})
 
 function MailCategoryBadges({ categories }: { categories?: string[] }): JSX.Element | null {
   const cats = (categories ?? []).map((c) => c.trim()).filter((c) => c.length > 0)

@@ -26,7 +26,6 @@ import {
 import { de as deFns, enUS as enUSFns } from 'date-fns/locale'
 import { useTranslation } from 'react-i18next'
 import type {
-  CalendarEventView,
   ConnectedAccount,
   NoteSection,
   UserNote,
@@ -36,8 +35,7 @@ import type {
 import type { MiniMonthSelectedRange } from '@/app/calendar/MiniMonthGrid'
 import { ModuleNavMiniMonth } from '@/components/ModuleNavMiniMonth'
 import { moduleNavColumnClass, moduleNavColumnInsetClass } from '@/components/module-shell-layout'
-import { CalendarEventPreview } from '@/app/calendar/CalendarEventPreview'
-import { ReadingPane } from '@/app/layout/ReadingPane'
+import { NotesLinkedPreviewPane } from '@/app/notes/NotesLinkedPreviewPane'
 import { NotesCalendarPane } from '@/app/notes/NotesCalendarPane'
 import { NotesCalendarToolbar } from '@/app/notes/NotesCalendarToolbar'
 import { readNotesCalendarFcView } from '@/app/notes/notes-calendar-view-storage'
@@ -54,6 +52,15 @@ import { NotesSidebarList } from '@/app/notes/NotesSidebarList'
 import { NotesShellSearch } from '@/app/notes/NotesShellSearch'
 import { NotesShellViewToggle, type NotesShellView } from '@/app/notes/NotesShellViewToggle'
 import { formatNoteDate, noteTitle } from '@/app/notes/notes-display-helpers'
+import { buildNotesPreviewLinkEntries, linkedItemToPreviewEntry } from '@/app/notes/notes-link-preview-items'
+import {
+  persistNotesLinkedPreviewOpen,
+  persistNotesLinkedPreviewPlacement,
+  readNotesLinkedPreviewOpen,
+  readNotesLinkedPreviewPlacement,
+  type NotesLinkedPreviewPlacement
+} from '@/app/notes/notes-shell-storage'
+import type { NoteLinksBundle, NoteEntityLinkedItem } from '@shared/note-entity-links'
 import { NoteDisplayIcon } from '@/components/NoteDisplayIcon'
 import { CalendarEventIconPicker } from '@/components/CalendarEventIconPicker'
 import { IconColorPickerFooter } from '@/components/IconColorPickerFooter'
@@ -75,6 +82,7 @@ import {
   notesForNavSelection,
   persistNotesNavSelection,
   readNotesNavSelection,
+  sectionIdForNewNote,
   type NotesNavSelection
 } from '@/lib/notes-nav-selection'
 import { parseNoteDragId, parseNoteNavDropId } from '@/lib/notes-sidebar-dnd'
@@ -89,6 +97,7 @@ import { cn } from '@/lib/utils'
 import { useAccountsStore } from '@/stores/accounts'
 import { useMailStore } from '@/stores/mail'
 import { useNotesPendingFocusStore } from '@/stores/notes-pending-focus'
+import { showAppConfirm } from '@/stores/app-dialog'
 import { useUndoStore } from '@/stores/undo'
 
 const ALL_KINDS: UserNoteKind[] = ['mail', 'calendar', 'standalone']
@@ -102,51 +111,6 @@ type ScheduleDraft = {
   scheduledEndIso: string | null
   scheduledAllDay: boolean
   clearSchedule?: boolean
-}
-
-function addMinutesIso(value: string, minutes: number): string {
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return value
-  d.setMinutes(d.getMinutes() + minutes)
-  return d.toISOString()
-}
-
-function calendarPreviewEvent(
-  note: Pick<
-    UserNote,
-    | 'id'
-    | 'accountId'
-    | 'calendarSource'
-    | 'calendarRemoteId'
-    | 'eventRemoteId'
-    | 'eventTitleSnapshot'
-    | 'eventStartIsoSnapshot'
-    | 'updatedAt'
-  >,
-  account: ConnectedAccount | null,
-  fallbackTitle: string
-): CalendarEventView | null {
-  if (note.accountId == null || note.calendarSource == null) return null
-  const startIso = note.eventStartIsoSnapshot ?? note.updatedAt
-  const title = note.eventTitleSnapshot?.trim() || fallbackTitle
-  return {
-    id: `note:${note.id}:event`,
-    source: note.calendarSource,
-    accountId: note.accountId,
-    accountEmail: account?.email ?? note.accountId,
-    accountColorClass: account?.color ?? 'bg-primary',
-    graphCalendarId: note.calendarRemoteId,
-    graphEventId: note.eventRemoteId ?? undefined,
-    title,
-    startIso,
-    endIso: addMinutesIso(startIso, 30),
-    isAllDay: false,
-    location: null,
-    webLink: null,
-    joinUrl: null,
-    organizer: null,
-    calendarCanEdit: false
-  }
 }
 
 function notesSelectedRange(dateFrom: string, dateTo: string): MiniMonthSelectedRange | null {
@@ -267,10 +231,16 @@ export function NotesShell(): JSX.Element {
   })
   const [previewColumnWidth, setPreviewColumnWidth] = useResizableWidth({
     storageKey: NOTES_PREVIEW_WIDTH_KEY,
-    defaultWidth: 420,
+    defaultWidth: 480,
     minWidth: 280,
-    maxWidth: 560
+    maxWidth: 900
   })
+  const [linksBundle, setLinksBundle] = useState<NoteLinksBundle>({ outgoing: [], incoming: [] })
+  const [linkedPreviewOpen, setLinkedPreviewOpen] = useState(readNotesLinkedPreviewOpen)
+  const [linkedPreviewPlacement, setLinkedPreviewPlacement] = useState<NotesLinkedPreviewPlacement>(
+    readNotesLinkedPreviewPlacement
+  )
+  const [selectedPreviewKey, setSelectedPreviewKey] = useState<string | null>(null)
 
   const loadSections = useCallback(async (): Promise<void> => {
     try {
@@ -337,6 +307,9 @@ export function NotesShell(): JSX.Element {
     return sortNotesPages(filtered, pagesSort, t('notes.shell.untitled'))
   }, [notes, navSelection, pagesSort, t])
 
+  const showSectionLabelsInPages =
+    navSelection.kind === 'sections' && navSelection.scope === 'all'
+
   const pagesColumnTitle = useMemo(
     () => navSelectionLabel(navSelection, sections, accounts, t),
     [navSelection, sections, accounts, t]
@@ -355,8 +328,13 @@ export function NotesShell(): JSX.Element {
   }, [listMode])
 
   useEffect(() => {
-    if (listMode === 'sections' && navSelection.kind === 'sections' && navSelection.sectionId != null) {
-      const exists = sections.some((s) => s.id === navSelection.sectionId)
+    if (
+      listMode === 'sections' &&
+      navSelection.kind === 'sections' &&
+      typeof navSelection.scope === 'object'
+    ) {
+      const sectionScope = navSelection.scope
+      const exists = sections.some((s) => s.id === sectionScope.sectionId)
       if (!exists) {
         setNavSelection(defaultNavSelection('sections'))
       }
@@ -371,15 +349,68 @@ export function NotesShell(): JSX.Element {
     }
   }, [listMode, navSelection, sections, accounts, notes])
 
-  const selectedAccount =
-    editing?.accountId != null ? accounts.find((a) => a.id === editing.accountId) ?? null : null
+  const previewLinkEntries = useMemo(() => {
+    if (!editing) return []
+    return buildNotesPreviewLinkEntries(editing, linksBundle, t)
+  }, [editing, linksBundle, t])
 
-  const selectedCalendarEvent =
-    editing?.kind === 'calendar'
-      ? calendarPreviewEvent(editing, selectedAccount, t('calendar.eventPreview.noTitle'))
-      : null
+  const hasPreviewableLinks = previewLinkEntries.length > 0
 
-  const showObjectPreview = editing?.kind === 'mail' || Boolean(selectedCalendarEvent)
+  useEffect(() => {
+    if (!editing) {
+      setLinksBundle({ outgoing: [], incoming: [] })
+      setSelectedPreviewKey(null)
+      return
+    }
+    void window.mailClient.notes.links
+      .list(editing.id)
+      .then((bundle) => {
+        setLinksBundle(bundle)
+        const entries = buildNotesPreviewLinkEntries(editing, bundle, t)
+        setSelectedPreviewKey((prev) => {
+          if (prev && entries.some((e) => e.key === prev)) return prev
+          return entries[0]?.key ?? null
+        })
+        if (entries.length > 0) {
+          setLinkedPreviewOpen((open) => open || readNotesLinkedPreviewOpen())
+        }
+      })
+      .catch(() => {
+        setLinksBundle({ outgoing: [], incoming: [] })
+      })
+  }, [editing?.id, t])
+
+  const handleSelectLinkForPreview = useCallback(
+    (item: NoteEntityLinkedItem, direction: 'outgoing' | 'incoming'): void => {
+      const entry = linkedItemToPreviewEntry(item, direction, t)
+      setSelectedPreviewKey(entry.key)
+      setLinkedPreviewOpen(true)
+      persistNotesLinkedPreviewOpen(true)
+    },
+    [t]
+  )
+
+  const handleToggleLinkedPreview = useCallback((): void => {
+    setLinkedPreviewOpen((open) => {
+      const next = !open
+      persistNotesLinkedPreviewOpen(next)
+      return next
+    })
+  }, [])
+
+  const handleCloseLinkedPreview = useCallback((): void => {
+    setLinkedPreviewOpen(false)
+    persistNotesLinkedPreviewOpen(false)
+  }, [])
+
+  const handleLinkedPreviewPlacement = useCallback((placement: NotesLinkedPreviewPlacement): void => {
+    setLinkedPreviewPlacement(placement)
+    persistNotesLinkedPreviewPlacement(placement)
+  }, [])
+
+  const handlePreviewDockWidthDrag = useCallback((delta: number): void => {
+    setPreviewColumnWidth((w) => w - delta)
+  }, [setPreviewColumnWidth])
 
   const applyNotePatch = useCallback((note: UserNote): void => {
     setEditing((prev) => (prev?.id === note.id ? { ...prev, ...note } : prev))
@@ -509,9 +540,7 @@ export function NotesShell(): JSX.Element {
     setError(null)
     try {
       const sectionId =
-        listMode === 'sections' && navSelection.kind === 'sections'
-          ? navSelection.sectionId
-          : null
+        listMode === 'sections' ? sectionIdForNewNote(navSelection) : null
       const note = await window.mailClient.notes.createStandalone({
         title: t('notes.shell.newStandaloneTitle'),
         body: '',
@@ -617,7 +646,13 @@ export function NotesShell(): JSX.Element {
   }
 
   async function deleteNote(note: UserNoteListItem): Promise<void> {
-    const ok = window.confirm(t('notes.shell.deleteConfirm'))
+    const title = noteTitle(note, t('notes.shell.untitled'))
+    const ok = await showAppConfirm(t('notes.shell.deleteConfirm', { title }), {
+      title: t('notes.shell.deleteTitle'),
+      confirmLabel: t('common.delete'),
+      cancelLabel: t('common.cancel'),
+      variant: 'danger'
+    })
     if (!ok) return
     setSaving(true)
     try {
@@ -636,6 +671,63 @@ export function NotesShell(): JSX.Element {
     }
   }
 
+  const copyNote = useCallback(
+    async (note: UserNoteListItem): Promise<void> => {
+      setSaving(true)
+      setError(null)
+      try {
+        const full = (await window.mailClient.notes.getById(note.id)) ?? note
+        const baseTitle = noteTitle(full, t('notes.shell.untitled')).trim()
+        const title = baseTitle
+          ? `${baseTitle}${t('calendar.context.duplicateSuffix')}`
+          : t('notes.shell.newStandaloneTitle')
+        let created = await window.mailClient.notes.createStandalone({
+          title,
+          body: full.body,
+          sectionId: full.sectionId ?? note.sectionId ?? null,
+          scheduledStartIso: full.scheduledStartIso ?? undefined,
+          scheduledEndIso: full.scheduledEndIso ?? undefined,
+          scheduledAllDay: full.scheduledAllDay
+        })
+        if (full.iconId || full.iconColor) {
+          created = await window.mailClient.notes.patchDisplay({
+            noteId: created.id,
+            iconId: full.iconId,
+            iconColor: full.iconColor
+          })
+        }
+        clearSelectedMessage()
+        openEdit(created)
+        pushToast({ label: t('notes.pagesContextMenu.copied'), variant: 'success' })
+        await load()
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+      } finally {
+        setSaving(false)
+      }
+    },
+    [t, clearSelectedMessage, openEdit, pushToast, load]
+  )
+
+  const moveNote = useCallback(
+    async (note: UserNoteListItem, sectionId: number | null): Promise<void> => {
+      setError(null)
+      try {
+        await window.mailClient.notes.moveToSection({ noteId: note.id, sectionId })
+        if (listMode === 'sections') {
+          setNavSelection({
+            kind: 'sections',
+            scope: sectionId == null ? 'ungrouped' : { sectionId }
+          })
+        }
+        await load()
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+      }
+    },
+    [listMode, load]
+  )
+
   const handleNoteDragEnd = useCallback(
     (ev: DragEndEvent): void => {
       if (listMode !== 'sections') return
@@ -648,21 +740,14 @@ export function NotesShell(): JSX.Element {
       const targetSectionId = drop.sectionId
       if ((note.sectionId ?? null) === targetSectionId) return
       void window.mailClient.notes.moveToSection({ noteId, sectionId: targetSectionId }).then(() => {
-        setNavSelection({ kind: 'sections', sectionId: targetSectionId })
+        setNavSelection({
+          kind: 'sections',
+          scope: targetSectionId == null ? 'ungrouped' : { sectionId: targetSectionId }
+        })
       })
     },
     [listMode, notes]
   )
-
-  const selectedObjectPreview =
-    editing?.kind === 'mail' ? (
-      <ReadingPane
-        emptySelectionTitle={t('notes.shell.linkedMailTitle')}
-        emptySelectionBody={t('notes.shell.linkedMailEmpty')}
-      />
-    ) : selectedCalendarEvent ? (
-      <CalendarEventPreview event={selectedCalendarEvent} onEdit={(): void => undefined} />
-    ) : null
 
   const notesNavColumn = (
     <aside
@@ -733,8 +818,8 @@ export function NotesShell(): JSX.Element {
                 listMode={listMode}
                 onListModeChange={setListMode}
                 navSelection={navSelection}
-                onSelectSection={(sectionId): void =>
-                  setNavSelection({ kind: 'sections', sectionId })
+                onSelectScope={(scope): void =>
+                  setNavSelection({ kind: 'sections', scope })
                 }
                 onSelectAccount={(accountKey): void =>
                   setNavSelection({ kind: 'accounts', accountKey })
@@ -761,11 +846,16 @@ export function NotesShell(): JSX.Element {
         <NotesPagesPane
           title={pagesColumnTitle}
           notes={pagesNotes}
+          sections={sections}
+          showSectionLabels={showSectionLabelsInPages}
           loading={loading}
           activeNoteId={editing?.id ?? null}
           onOpenNote={openEdit}
           onRenameNoteTitle={renameNoteTitleInList}
           onPatchNoteDisplay={patchNoteDisplayInList}
+          onDeleteNote={deleteNote}
+          onCopyNote={copyNote}
+          onMoveNote={moveNote}
           onCreateNote={(): void => void createStandalone()}
           creating={saving}
           pagesSort={pagesSort}
@@ -875,6 +965,11 @@ export function NotesShell(): JSX.Element {
                   <NotesLinkedObjectsPanel
                     noteId={editing.id}
                     onOpenNote={(id): void => void openNoteById(id)}
+                    selectedPreviewKey={selectedPreviewKey}
+                    onSelectForPreview={handleSelectLinkForPreview}
+                    onLinksLoaded={setLinksBundle}
+                    previewOpen={linkedPreviewOpen}
+                    onTogglePreview={handleToggleLinkedPreview}
                   />
 
                   <NotesAttachmentsPanel noteId={editing.id} />
@@ -914,24 +1009,20 @@ export function NotesShell(): JSX.Element {
                   </footer>
                 </div>
 
-                {showObjectPreview && selectedObjectPreview ? (
-                  <>
-                    <VerticalSplitter
-                      ariaLabel={t('notes.shell.splitterPreviewAria')}
-                      onDrag={(delta): void => setPreviewColumnWidth((w) => w + delta)}
-                    />
-                    <aside
-                      className="flex min-h-0 shrink-0 flex-col border-l border-border bg-card"
-                      style={{ width: previewColumnWidth }}
-                    >
-                      <div className="flex h-10 shrink-0 items-center border-b border-border px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        {t('notes.shell.linkedObject')}
-                      </div>
-                      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                        {selectedObjectPreview}
-                      </div>
-                    </aside>
-                  </>
+                {editing && linkedPreviewOpen && hasPreviewableLinks ? (
+                  <NotesLinkedPreviewPane
+                    open
+                    placement={linkedPreviewPlacement}
+                    onPlacementChange={handleLinkedPreviewPlacement}
+                    onClose={handleCloseLinkedPreview}
+                    entries={previewLinkEntries}
+                    selectedKey={selectedPreviewKey}
+                    onSelectKey={setSelectedPreviewKey}
+                    editing={editing}
+                    accounts={accounts}
+                    dockWidthPx={previewColumnWidth}
+                    onDockWidthDrag={handlePreviewDockWidthDrag}
+                  />
                 ) : null}
               </div>
             )}

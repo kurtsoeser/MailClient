@@ -1,6 +1,6 @@
 import type { EventApi, EventInput } from '@fullcalendar/core'
 import type { MailListItem } from '@shared/types'
-import { DateTime } from 'luxon'
+import { defaultAppointmentRangeForCalendarDay } from '@/lib/zoned-iso-date'
 import { threadGroupingKey } from '@/lib/thread-group'
 
 /** extendedProps.calendarKind: Mail-ToDos vs. Graph-Termine. */
@@ -261,15 +261,7 @@ export function defaultScheduleForCalendarDayFc(
   dateStr: string,
   fcTimeZone: string
 ): { startIso: string; endIso: string } {
-  const zone = fcTimeZone === 'local' ? 'local' : fcTimeZone
-  const start = DateTime.fromISO(`${dateStr}T09:00:00`, { zone })
-  if (!start.isValid) {
-    const d = new Date(`${dateStr}T09:00:00`)
-    const end = endDateFromStartForFc(d, FC_APPOINTMENT_MINUTES)
-    return { startIso: d.toISOString(), endIso: end.toISOString() }
-  }
-  const end = start.plus({ minutes: FC_APPOINTMENT_MINUTES })
-  return { startIso: start.toISO()!, endIso: end.toISO()! }
+  return defaultAppointmentRangeForCalendarDay(dateStr, fcTimeZone, 9, FC_APPOINTMENT_MINUTES)
 }
 
 /** Zeitraum fuer lokale Mail-Termin-Persistenz aus FullCalendar-Event. */

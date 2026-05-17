@@ -13,12 +13,26 @@
     "lang": "Language"
   },
   "hero": {
-    "tagline": "Stop managing your inbox. Start managing your time.",
+    "badge": "Indie software · built in Austria",
+    "taglineLine1": "Email becomes plan.",
+    "taglineLine2Prefix": "Plan becomes ",
+    "taglineLine2Accent": "day",
+    "taglineLine2Suffix": ".",
     "positioning": "Chronell is not an email client. It's a system to manage your time.",
     "subline": "Microsoft 365 and Google in one calm desktop workspace — local search, workflow triage, unified calendar. Built for Windows 11.",
     "ctaWaitlist": "Join the waitlist",
     "ctaMethod": "Discover the method",
-    "searchPlaceholder": "Search, decide, plan…"
+    "mockup": {
+      "inbox": "Inbox",
+      "today": "Today",
+      "inProgress": "In progress",
+      "waiting": "Waiting for",
+      "done": "Done",
+      "calendar": "Calendar",
+      "tasks": "Tasks",
+      "notes": "Core notes",
+      "badge": "→ Today · 2:00 PM"
+    }
   },
   "quote": {
     "text": "Your inbox is not a workplace."
@@ -94,7 +108,34 @@
       "weightC": "Lean Electron, virtualized lists",
       "weightT": "Full Office web or heavy suites"
     },
-    "disclaimer": "Chronell is not a replacement for every enterprise Outlook or Exchange admin scenario. Strengths: workflow, local data, multi-provider, modern UI for power users."
+    "disclaimer": "Chronell is not a replacement for every enterprise Outlook or Exchange admin scenario. Strengths: workflow, local data, multi-provider, modern UI for power users.",
+    "detailed": {
+      "feature": "Feature",
+      "typicalHeader": "Outlook / typical",
+      "chronellHeader": "Chronell",
+      "r1label": "Multiple accounts in one view",
+      "r1typical": "Limited, separated by profile",
+      "r1chronell": "M365 + Google + meta-folders across accounts",
+      "r2label": "Mail → task with due date",
+      "r2typical": "Flag, separate To-Do app",
+      "r2chronell": "One click, with calendar slot",
+      "r3label": "Local full-text search",
+      "r3typical": "Depends on Windows indexing",
+      "r3chronell": "SQLite + FTS5, offline, in milliseconds",
+      "r4label": "Modern UI",
+      "r4typical": "Classic, Ribbon",
+      "r4chronell": "Windows-11-native, dark, calm",
+      "r5label": "Apple Mail / iCloud",
+      "r5typical": "Apple ecosystem apps",
+      "r5chronell": "Intentionally not — focus on M365 and Google"
+    }
+  },
+  "limits": {
+    "eyebrow": "Honest limits",
+    "title": "What Chronell is not",
+    "p1": "Chronell isn't a full Outlook replacement for enterprise. Complex Exchange admin policies, mailbox delegation, or compliance archival workflows are out of scope — Outlook does that.",
+    "p2": "There is no Apple Mail or iCloud integration. Chronell focuses on Microsoft 365 and Google — the providers you typically use for work.",
+    "p3": "Chronell is a command center for people who juggle multiple accounts and want to own their day."
   },
   "features": {
     "eyebrow": "Built for action",

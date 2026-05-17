@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { Virtuoso } from 'react-virtuoso'
 import { CheckCircle2, ChevronDown, ChevronRight, Circle, Mail } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { format, parseISO } from 'date-fns'
@@ -18,6 +19,7 @@ import {
   type WorkListFilter
 } from '@/app/work-items/work-item-list-arrange'
 import { workItemsToViews } from '@/app/work-items/work-item-mapper'
+import { GROUPED_LIST_VIRTUALIZE_THRESHOLD } from '@/lib/grouped-list-virtuoso'
 
 function dueDateLabel(dueIso: string | null): string {
   if (!dueIso) return ''
@@ -113,6 +115,86 @@ export function WorkItemsGroupedList({
   }
 
   const flat = arrange === 'none'
+
+  const renderWorkRow = useCallback(
+    (item: WorkItem): JSX.Element | null => {
+      const view = workItemsToViews([item], accountById, timeZone)[0]
+      if (!view) return null
+      const active = selectedKey === view.stableKey
+      const acc = accountById.get(view.accountId)
+      const stripe = acc ? resolvedAccountColorCss(acc.color) : undefined
+      const isMail = view.kind === 'mail_todo'
+      return (
+        <div
+          key={view.stableKey}
+          className={cn('relative border-b border-border/60', active && 'bg-secondary/30')}
+          onContextMenu={
+            onContextMenu ? (e): void => onContextMenu(item, e) : undefined
+          }
+        >
+          {acc ? (
+            <AccountColorStripe
+              color={acc.color}
+              className="left-0 top-1 bottom-1 w-0.5 rounded-full opacity-70"
+            />
+          ) : stripe ? (
+            <span
+              className="pointer-events-none absolute left-0 top-1 bottom-1 w-0.5 rounded-full opacity-70"
+              style={{ backgroundColor: stripe }}
+              aria-hidden
+            />
+          ) : null}
+          <div className="flex items-start gap-1.5 px-2">
+            <button
+              type="button"
+              onClick={(): void => onItemClick(item)}
+              onDoubleClick={(): void => onSelect(item)}
+              className={cn(
+                'min-w-0 flex-1 py-2 pl-1 pr-1 text-left text-xs',
+                active ? 'font-semibold text-foreground' : 'text-foreground/90',
+                view.completed && 'text-muted-foreground line-through'
+              )}
+            >
+              <span className="line-clamp-2">{view.title}</span>
+              <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground">
+                {isMail ? <Mail className="h-3 w-3 shrink-0 opacity-70" aria-hidden /> : null}
+                {view.dueAtIso ? <span>{dueDateLabel(view.dueAtIso)}</span> : null}
+                <span className="truncate">{view.sourceLabel}</span>
+              </span>
+            </button>
+            <button
+              type="button"
+              title={view.completed ? t('work.shell.markOpen') : t('work.shell.markDone')}
+              onClick={(e): void => {
+                e.stopPropagation()
+                onToggleCompleted(item)
+              }}
+              className="shrink-0 self-start py-2 pl-0.5 text-muted-foreground hover:text-foreground"
+            >
+              {view.completed ? (
+                <CheckCircle2 className="h-4 w-4 text-primary" aria-hidden />
+              ) : (
+                <Circle className="h-4 w-4" aria-hidden />
+              )}
+            </button>
+          </div>
+        </div>
+      )
+    },
+    [accountById, onContextMenu, onItemClick, onSelect, onToggleCompleted, selectedKey, t, timeZone]
+  )
+
+  if (flat && items.length >= GROUPED_LIST_VIRTUALIZE_THRESHOLD) {
+    return (
+      <div className="h-full min-h-0">
+        <Virtuoso
+          style={{ height: '100%' }}
+          totalCount={items.length}
+          itemContent={(index): JSX.Element | null => renderWorkRow(items[index]!)}
+        />
+      </div>
+    )
+  }
 
   return (
     <div>

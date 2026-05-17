@@ -15,6 +15,7 @@ import {
   reopenTodo,
   getTodoById,
   listTodoMessagesWithMeta,
+  listAllOpenTodoMessagesMerged,
   listOpenTodoMessagesWithDueAtInRange,
   countOpenTodosGlobal,
   countDoneTodosGlobal,
@@ -70,6 +71,13 @@ export function listTodoMessagesMerged(
   limit = 200
 ): import('@shared/types').MailListItem[] {
   return listTodoMessagesWithMeta(accountId, dueKind, timeZone, limit)
+}
+
+export function listAllOpenTodoMessages(
+  accountId: string | null,
+  limit = 2000
+): import('@shared/types').MailListItem[] {
+  return listAllOpenTodoMessagesMerged(accountId, limit)
 }
 
 /** Offene Mail-ToDos mit `due_at` im sichtbaren Kalenderbereich (ISO-Strings, `end` exklusiv). */

@@ -1,8 +1,10 @@
 import { runBackgroundPoll } from './sync-runner'
 import { wakeDueSnoozes } from './snooze'
 import { isAppOnline } from './network-status'
+import { loadConfigSync } from './config'
 
-const POLL_INTERVAL_MS = 60_000
+const MIN_POLL_INTERVAL_MS = 30_000
+const MAX_POLL_INTERVAL_MS = 600_000
 
 let timer: NodeJS.Timeout | null = null
 let running = false
@@ -17,6 +19,22 @@ let activeFolderId: number | null = null
 
 export function setActivePollFolder(folderId: number | null): void {
   activeFolderId = folderId
+}
+
+function resolvePollIntervalMs(): number {
+  const sec = loadConfigSync().mailPollIntervalSeconds ?? 60
+  const clamped = Math.min(Math.max(Math.floor(sec), 30), 600)
+  return clamped * 1000
+}
+
+function scheduleNextPollTick(): void {
+  if (timer) {
+    clearInterval(timer)
+    timer = null
+  }
+  timer = setInterval(() => {
+    void tick()
+  }, resolvePollIntervalMs())
 }
 
 async function tick(): Promise<void> {
@@ -57,9 +75,13 @@ export function startMailPolling(): void {
   setTimeout(() => {
     void tick()
   }, 15_000)
-  timer = setInterval(() => {
-    void tick()
-  }, POLL_INTERVAL_MS)
+  scheduleNextPollTick()
+}
+
+/** Nach Aenderung von `mailPollIntervalSeconds` in den Einstellungen. */
+export function restartMailPollingInterval(): void {
+  if (!timer) return
+  scheduleNextPollTick()
 }
 
 export function stopMailPolling(): void {

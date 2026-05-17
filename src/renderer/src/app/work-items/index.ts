@@ -13,7 +13,6 @@ export type {
 export {
   mailTodoStableKey,
   cloudTaskStableKey,
-  cloudTaskStableKeyFromParts,
   parseMailTodoStableKey,
   parseCloudTaskStableKey,
   mailCloudTaskLinkKey

@@ -1,6 +1,6 @@
 import type { ComponentType } from 'react'
 import { CalendarDays, CheckSquare, Mail, StickyNote } from 'lucide-react'
-import type { UserNote, UserNoteKind, UserNoteListItem } from '@shared/types'
+import type { UserNote, UserNoteListItem } from '@shared/types'
 
 export type NoteDisplayIconKind = 'mail' | 'calendar' | 'task' | 'standalone'
 
@@ -19,13 +19,6 @@ export function noteDisplayIcon(kind: NoteDisplayIconKind): ComponentType<{ clas
   if (kind === 'mail') return Mail
   if (kind === 'calendar') return CalendarDays
   if (kind === 'task') return CheckSquare
-  return StickyNote
-}
-
-/** @deprecated Nutze {@link noteDisplayIcon} mit {@link resolveNoteDisplayIconKind}. */
-export function kindIcon(kind: UserNoteKind): ComponentType<{ className?: string }> {
-  if (kind === 'mail') return Mail
-  if (kind === 'calendar') return CalendarDays
   return StickyNote
 }
 

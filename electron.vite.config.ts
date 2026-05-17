@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { defineConfig, externalizeDepsPlugin, loadEnv } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import type { Plugin } from 'vite'
+import { visualizer } from 'rollup-plugin-visualizer'
 
 const __configDir = path.dirname(fileURLToPath(import.meta.url))
 
@@ -81,10 +82,32 @@ export default defineConfig(({ mode }) => {
         rollupOptions: {
           input: {
             index: path.resolve(__configDir, 'src/renderer/index.html')
+          },
+          output: {
+            manualChunks(id: string): string | undefined {
+              if (id.includes('node_modules/@fullcalendar')) return 'fullcalendar'
+              if (id.includes('node_modules/@tiptap') || id.includes('node_modules/prosemirror')) {
+                return 'tiptap'
+              }
+              if (id.includes('node_modules/@uiw/react-md-editor')) return 'md-editor'
+              if (id.includes('node_modules/lucide-react')) return 'lucide'
+              if (id.includes('node_modules/date-fns')) return 'date-fns'
+              if (id.includes('node_modules/@dnd-kit')) return 'dnd-kit'
+              return undefined
+            }
           }
         }
       },
-      plugins: [react()]
+      plugins: [
+        react(),
+        process.env.ANALYZE_BUNDLE === '1'
+          ? visualizer({
+              filename: path.resolve(__configDir, 'out/stats/renderer.html'),
+              gzipSize: true,
+              open: false
+            })
+          : undefined
+      ].filter(Boolean)
     }
   }
 })

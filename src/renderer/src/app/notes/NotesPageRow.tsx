@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type MouseEvent } from 'react'
 import { useDraggable } from '@dnd-kit/core'
 import { GripVertical } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -43,7 +43,9 @@ export function NotesPageRow({
   active,
   onOpen,
   onRenameTitle,
-  onPatchDisplay
+  onPatchDisplay,
+  onContextMenu,
+  sectionLabel
 }: {
   note: UserNoteListItem
   active: boolean
@@ -53,6 +55,8 @@ export function NotesPageRow({
     note: UserNoteListItem,
     patch: { iconId?: string | null; iconColor?: string | null }
   ) => void | Promise<void>
+  onContextMenu?: (note: UserNoteListItem, event: MouseEvent) => void
+  sectionLabel?: string
 }): JSX.Element {
   const { t } = useTranslation()
   const untitled = t('notes.shell.untitled')
@@ -83,6 +87,14 @@ export function NotesPageRow({
         'flex min-w-0 items-center gap-0.5 rounded-md transition-colors',
         active ? 'bg-secondary font-medium text-foreground' : 'hover:bg-secondary/60'
       )}
+      onContextMenu={
+        onContextMenu
+          ? (e): void => {
+              e.preventDefault()
+              onContextMenu(note, e)
+            }
+          : undefined
+      }
     >
       <NoteDragHandle noteId={note.id} />
       <CalendarEventIconPicker
@@ -127,10 +139,15 @@ export function NotesPageRow({
             setDraftTitle(note.title?.trim() ?? displayTitle)
             setRenaming(true)
           }}
-          className="min-w-0 flex-1 truncate py-2 pr-2 text-left text-xs"
+          className="min-w-0 flex-1 truncate py-1.5 pr-2 text-left text-xs"
           title={t('notes.sections.renameDoubleClick')}
         >
-          {displayTitle}
+          <span className="block truncate">{displayTitle}</span>
+          {sectionLabel ? (
+            <span className="block truncate text-[10px] font-normal text-muted-foreground">
+              {sectionLabel}
+            </span>
+          ) : null}
         </button>
       )}
     </div>

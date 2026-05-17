@@ -3,7 +3,7 @@ import type { AppShellMode } from '@/stores/app-mode'
 import { useCalendarPendingFocusStore } from '@/stores/calendar-pending-focus'
 import { useNotesPendingFocusStore } from '@/stores/notes-pending-focus'
 import { useTasksPendingFocusStore } from '@/stores/tasks-pending-focus'
-import { useMailStore } from '@/stores/mail'
+import { useMailPendingFocusStore } from '@/stores/mail-pending-focus'
 import { persistTasksViewSelection } from '@/app/tasks/tasks-view-storage'
 
 export async function openNoteEntityLinkTarget(
@@ -16,8 +16,8 @@ export async function openNoteEntityLinkTarget(
       setAppMode('notes')
       return
     case 'mail':
+      useMailPendingFocusStore.getState().setPendingMessageId(target.messageId)
       setAppMode('mail')
-      await useMailStore.getState().selectMessageWithThreadPreview(target.messageId)
       return
     case 'calendar_event': {
       setAppMode('calendar')

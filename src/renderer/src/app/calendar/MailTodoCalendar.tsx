@@ -17,7 +17,10 @@ import luxonPlugin from '@fullcalendar/luxon'
 import deLocale from '@fullcalendar/core/locales/de'
 import type { EventApi, EventDropArg } from '@fullcalendar/core'
 import type { EventResizeDoneArg } from '@fullcalendar/interaction'
-import { DateTime } from 'luxon'
+import {
+  appointmentRangeFromCalendarSlot,
+  defaultAppointmentRangeForCalendarDay
+} from '@/lib/zoned-iso-date'
 import type { MailListItem, ConnectedAccount } from '@shared/types'
 import { accountColorToCssBackground } from '@/lib/avatar-color'
 import { MIME_THREAD_IDS, readDraggedWorkflowMessageIds } from '@/lib/workflow-dnd'
@@ -33,22 +36,6 @@ function endDateFromStart(start: Date, minutes: number): Date {
   return new Date(start.getTime() + minutes * 60 * 1000)
 }
 
-/** Standard-Termin ab 09:00 mit {@link DEFAULT_APPOINTMENT_MINUTES} (Posteingang / Faelligkeit auf Tag). */
-function defaultScheduleForCalendarDay(
-  dateStr: string,
-  fcTimeZone: string
-): { startIso: string; endIso: string } {
-  const zone = fcTimeZone === 'local' ? 'local' : fcTimeZone
-  const start = DateTime.fromISO(`${dateStr}T09:00:00`, { zone })
-  if (!start.isValid) {
-    const d = new Date(`${dateStr}T09:00:00`)
-    const end = endDateFromStart(d, DEFAULT_APPOINTMENT_MINUTES)
-    return { startIso: d.toISOString(), endIso: end.toISOString() }
-  }
-  const end = start.plus({ minutes: DEFAULT_APPOINTMENT_MINUTES })
-  return { startIso: start.toISO()!, endIso: end.toISO()! }
-}
-
 function isoRangeFromMailTodoEvent(
   ev: EventApi,
   fcTimeZone: string
@@ -60,7 +47,12 @@ function isoRangeFromMailTodoEvent(
     const y = s.getFullYear()
     const mo = String(s.getMonth() + 1).padStart(2, '0')
     const d = String(s.getDate()).padStart(2, '0')
-    return defaultScheduleForCalendarDay(`${y}-${mo}-${d}`, fcTimeZone)
+    return defaultAppointmentRangeForCalendarDay(
+      `${y}-${mo}-${d}`,
+      fcTimeZone,
+      9,
+      DEFAULT_APPOINTMENT_MINUTES
+    )
   }
   let e = ev.end
   if (!e || e.getTime() <= s.getTime()) {
@@ -293,15 +285,19 @@ export function MailTodoCalendar({
         }
       }
       if (slotTime) {
-        const zone = fcTimeZone === 'local' ? 'local' : fcTimeZone
-        const normalized = slotTime.length <= 5 ? `${slotTime}:00` : slotTime
-        const start = DateTime.fromISO(`${dateStr}T${normalized}`, { zone })
-        if (start.isValid) {
-          const end = start.plus({ minutes: DEFAULT_APPOINTMENT_MINUTES })
-          return { startIso: start.toISO()!, endIso: end.toISO()! }
-        }
+        return appointmentRangeFromCalendarSlot(
+          dateStr,
+          slotTime,
+          fcTimeZone,
+          DEFAULT_APPOINTMENT_MINUTES
+        )
       }
-      return defaultScheduleForCalendarDay(dateStr, fcTimeZone)
+      return defaultAppointmentRangeForCalendarDay(
+        dateStr,
+        fcTimeZone,
+        9,
+        DEFAULT_APPOINTMENT_MINUTES
+      )
     }
 
     const onDragHoverNative = (e: DragEvent): void => {

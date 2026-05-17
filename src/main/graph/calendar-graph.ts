@@ -1,4 +1,9 @@
-import { DateTime } from 'luxon'
+import {
+  calendarZonedPartsFromDateOnly,
+  calendarZonedPartsFromUtcIso,
+  formatUtcIsoAsLocalDateTime,
+  utcIsoFromWallDateTime
+} from '@shared/calendar-datetime'
 import type {
   CalendarGraphCalendarRow,
   CalendarM365GroupCalendarsPage,
@@ -76,10 +81,6 @@ export interface GraphCalendarEventRow {
   calendarCanEdit?: boolean
 }
 
-function trimFractionalSeconds(isoLike: string): string {
-  return isoLike.replace(/(\.\d{3})\d+/, '$1').trim()
-}
-
 /**
  * Graph liefert dateTime oft ohne Offset; die Bedeutung ist dann in `timeZone`
  * (Windows- oder IANA-Name). Wandelt in UTC-ISO fuer FullCalendar.
@@ -90,20 +91,7 @@ function graphDateTimeToIso(
   graphTimeZone: string | null | undefined,
   isAllDay: boolean
 ): string | null {
-  if (!dateTime) return null
-  const trimmed = dateTime.trim()
-  if (isAllDay) {
-    const d = trimmed.slice(0, 10)
-    return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null
-  }
-  const norm = trimFractionalSeconds(trimmed)
-  if (/[zZ]$|[+-]\d{2}:?\d{2}$/.test(norm)) {
-    const dt = DateTime.fromISO(norm, { setZone: true })
-    return dt.isValid ? dt.toUTC().toISO() : null
-  }
-  const iana = graphWindowsZoneToIana(graphTimeZone)
-  const dt = DateTime.fromISO(norm, { zone: iana })
-  return dt.isValid ? dt.toUTC().toISO() : null
+  return utcIsoFromWallDateTime(dateTime, graphTimeZone, isAllDay, graphWindowsZoneToIana)
 }
 
 function rowFromGraph(e: GraphEvent): GraphCalendarEventRow | null {
@@ -606,13 +594,11 @@ async function graphEventDateFields(input: GraphEventWriteFields): Promise<{
   const iana =
     appCfg.calendarTimeZone?.trim() || Intl.DateTimeFormat().resolvedOptions().timeZone
   const graphWindowsTz = ianaToWindowsTimeZone(iana)
-  const startUtc = DateTime.fromISO(input.startIso, { zone: 'utc' })
-  const endUtc = DateTime.fromISO(input.endIso, { zone: 'utc' })
-  if (!startUtc.isValid || !endUtc.isValid) {
+  const startLocal = formatUtcIsoAsLocalDateTime(input.startIso, iana)
+  const endLocal = formatUtcIsoAsLocalDateTime(input.endIso, iana)
+  if (!startLocal || !endLocal) {
     throw new Error('Ungueltige Start- oder Endzeit.')
   }
-  const startLocal = startUtc.setZone(iana).toFormat("yyyy-MM-dd'T'HH:mm:ss")
-  const endLocal = endUtc.setZone(iana).toFormat("yyyy-MM-dd'T'HH:mm:ss")
   return {
     isAllDay: false,
     start: { dateTime: startLocal, timeZone: graphWindowsTz },
@@ -742,9 +728,9 @@ export async function graphCreateSimpleCalendarEvent(
       appCfg.calendarTimeZone?.trim() || Intl.DateTimeFormat().resolvedOptions().timeZone
     const graphWindowsTz = ianaToWindowsTimeZone(iana)
     const startLocal = input.isAllDay
-      ? DateTime.fromISO(input.startIso.trim().slice(0, 10), { zone: iana })
-      : DateTime.fromISO(input.startIso, { zone: 'utc' }).setZone(iana)
-    if (!startLocal.isValid) {
+      ? calendarZonedPartsFromDateOnly(input.startIso.trim().slice(0, 10), iana)
+      : calendarZonedPartsFromUtcIso(input.startIso, iana)
+    if (!startLocal) {
       throw new Error('Serientermin: Startdatum fuer Wiederholung ungueltig.')
     }
     const recPayload = buildMicrosoftGraphRecurrencePayload(
@@ -869,14 +855,11 @@ export async function graphCreateTeamsCalendarEvent(
       ? input.timeZone.trim()
       : ianaToWindowsTimeZone(iana)
 
-  const startUtc = DateTime.fromISO(input.startIso, { zone: 'utc' })
-  const endUtc = DateTime.fromISO(input.endIso, { zone: 'utc' })
-  if (!startUtc.isValid || !endUtc.isValid) {
+  const startLocal = formatUtcIsoAsLocalDateTime(input.startIso, iana)
+  const endLocal = formatUtcIsoAsLocalDateTime(input.endIso, iana)
+  if (!startLocal || !endLocal) {
     throw new Error('Ungueltige Start- oder Endzeit (ISO erwartet).')
   }
-
-  const startLocal = startUtc.setZone(iana).toFormat("yyyy-MM-dd'T'HH:mm:ss")
-  const endLocal = endUtc.setZone(iana).toFormat("yyyy-MM-dd'T'HH:mm:ss")
 
   const payload: Record<string, unknown> = {
     subject: input.subject,

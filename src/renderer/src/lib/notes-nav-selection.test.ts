@@ -37,13 +37,22 @@ function note(id: number, sectionId: number | null, accountId: string | null = n
 describe('notesForNavSelection', () => {
   it('filters by section', () => {
     const notes = [note(1, 10), note(2, 20), note(3, 10)]
-    const result = notesForNavSelection(notes, { kind: 'sections', sectionId: 10 })
+    const result = notesForNavSelection(notes, {
+      kind: 'sections',
+      scope: { sectionId: 10 }
+    })
     expect(result.map((n) => n.id)).toEqual([1, 3])
   })
 
   it('filters ungrouped', () => {
     const notes = [note(1, null), note(2, 10)]
-    const result = notesForNavSelection(notes, { kind: 'sections', sectionId: null })
+    const result = notesForNavSelection(notes, { kind: 'sections', scope: 'ungrouped' })
     expect(result.map((n) => n.id)).toEqual([1])
+  })
+
+  it('returns all notes for all scope', () => {
+    const notes = [note(1, null), note(2, 10), note(3, 20)]
+    const result = notesForNavSelection(notes, { kind: 'sections', scope: 'all' })
+    expect(result.map((n) => n.id)).toEqual([1, 2, 3])
   })
 })

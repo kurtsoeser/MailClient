@@ -4,7 +4,8 @@ import { useTranslation } from 'react-i18next'
 import type { UserNote, UserNoteCalendarSource } from '@shared/types'
 import { cn } from '@/lib/utils'
 import { useUndoStore } from '@/stores/undo'
-import { MarkdownNoteEditor, type MarkdownNoteEditorLayout } from './MarkdownNoteEditor'
+import { MarkdownNoteEditorLazy } from './MarkdownNoteEditorLazy'
+import type { MarkdownNoteEditorLayout } from './MarkdownNoteEditor'
 import { NotesAttachmentsPanel } from '@/app/notes/NotesAttachmentsPanel'
 
 export type ObjectNoteTarget =
@@ -234,7 +235,7 @@ export function ObjectNoteEditor({
       ) : !loading ? (
         <p className="mb-2 text-[11px] text-muted-foreground">{t('notes.attachments.requiresSavedNote')}</p>
       ) : null}
-      <MarkdownNoteEditor
+      <MarkdownNoteEditorLazy
         value={body}
         onChange={(nextBody): void => {
           setBody(nextBody)
@@ -442,7 +443,7 @@ export function ObjectNotePreview(props: {
         ) : null}
       </div>
       <div className="max-h-[min(40vh,360px)] overflow-y-auto rounded-md border border-border/80 bg-background">
-        <MarkdownNoteEditor
+        <MarkdownNoteEditorLazy
           value={body}
           onChange={(): void => undefined}
           disabled

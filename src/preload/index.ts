@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import { mergeMailChangedPayload } from '@shared/mail-changed-merge'
 import {
   IPC,
   type AppConfig,
@@ -150,6 +151,44 @@ import type {
   AutomationInboxEntry
 } from '@shared/mail-rules'
 
+const MAIL_CHANGED_RENDERER_DEBOUNCE_MS = 200
+
+const mailChangedHandlers = new Set<(payload: MailChangedPayload) => void>()
+const pendingMailChangedByAccount = new Map<string, MailChangedPayload>()
+let mailChangedRendererFlushTimer: ReturnType<typeof setTimeout> | null = null
+
+function flushMailChangedToHandlers(): void {
+  mailChangedRendererFlushTimer = null
+  if (pendingMailChangedByAccount.size === 0) return
+  const batch = [...pendingMailChangedByAccount.values()]
+  pendingMailChangedByAccount.clear()
+  for (const payload of batch) {
+    for (const handler of mailChangedHandlers) handler(payload)
+  }
+}
+
+function scheduleMailChangedRendererFlush(): void {
+  if (mailChangedRendererFlushTimer != null) return
+  mailChangedRendererFlushTimer = setTimeout(
+    flushMailChangedToHandlers,
+    MAIL_CHANGED_RENDERER_DEBOUNCE_MS
+  )
+}
+
+ipcRenderer.on('mail:changed', (_e: IpcRendererEvent, payload: MailChangedPayload) => {
+  const prev = pendingMailChangedByAccount.get(payload.accountId)
+  pendingMailChangedByAccount.set(
+    payload.accountId,
+    prev
+      ? mergeMailChangedPayload(prev, {
+          kind: payload.kind,
+          folderIds: payload.folderIds
+        })
+      : payload
+  )
+  scheduleMailChangedRendererFlush()
+})
+
 const api = {
   app: {
     getVersion: (): Promise<string> => ipcRenderer.invoke(IPC.app.getVersion),
@@ -173,6 +212,8 @@ const api = {
       ipcRenderer.invoke(IPC.config.setGoogleClientId, clientId, clientSecret),
     setSyncWindowDays: (days: number | null): Promise<AppConfig> =>
       ipcRenderer.invoke(IPC.config.setSyncWindowDays, days),
+    setMailPollIntervalSeconds: (seconds: number): Promise<AppConfig> =>
+      ipcRenderer.invoke(IPC.config.setMailPollIntervalSeconds, seconds),
     setAutoLoadImages: (value: boolean): Promise<AppConfig> =>
       ipcRenderer.invoke(IPC.config.setAutoLoadImages, value),
     setCalendarTimeZone: (iana: string | null): Promise<AppConfig> =>
@@ -387,8 +428,10 @@ const api = {
       limit === undefined
         ? ipcRenderer.invoke(IPC.mail.listInboxTriage, {})
         : ipcRenderer.invoke(IPC.mail.listInboxTriage, { limit }),
-    listUnifiedInbox: (limit?: number | null): Promise<MailListItem[]> =>
-      ipcRenderer.invoke(IPC.mail.listUnifiedInbox, limit),
+    listUnifiedInbox: (
+      limit?: number | null,
+      options?: { includeOpenTodo?: boolean }
+    ): Promise<MailListItem[]> => ipcRenderer.invoke(IPC.mail.listUnifiedInbox, limit, options),
     listMetaFolders: (): Promise<MetaFolderSummary[]> =>
       ipcRenderer.invoke(IPC.mail.listMetaFolders),
     getMetaFolder: (id: number): Promise<MetaFolderSummary | null> =>
@@ -471,6 +514,11 @@ const api = {
       dueKind: TodoDueKindList
       limit?: number
     }): Promise<MailListItem[]> => ipcRenderer.invoke(IPC.mail.listTodoMessages, args),
+    listAllOpenTodoMessages: (args?: {
+      accountId?: string | null
+      limit?: number
+    }): Promise<MailListItem[]> =>
+      ipcRenderer.invoke(IPC.mail.listAllOpenTodoMessages, args ?? {}),
     listTodoMessagesInRange: (args: {
       accountId: string | null
       rangeStartIso: string
@@ -761,11 +809,9 @@ const api = {
       }
     },
     onMailChanged: (handler: (payload: MailChangedPayload) => void): (() => void) => {
-      const listener = (_e: IpcRendererEvent, payload: MailChangedPayload): void =>
-        handler(payload)
-      ipcRenderer.on('mail:changed', listener)
+      mailChangedHandlers.add(handler)
       return (): void => {
-        ipcRenderer.off('mail:changed', listener)
+        mailChangedHandlers.delete(handler)
       }
     },
     onMailBulkUnflagProgress: (handler: (payload: MailBulkUnflagProgressPayload) => void): (() => void) => {

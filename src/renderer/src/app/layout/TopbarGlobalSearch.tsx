@@ -25,10 +25,10 @@ import { FOCUS_MAIN_SEARCH_EVENT } from '@/lib/search-focus'
 import { useSearchDropdownPortal } from '@/lib/use-search-dropdown-portal'
 import { useAccountsStore } from '@/stores/accounts'
 import { useAppModeStore } from '@/stores/app-mode'
-import { useMailStore } from '@/stores/mail'
 import { useCalendarPendingFocusStore } from '@/stores/calendar-pending-focus'
 import { useNotesPendingFocusStore } from '@/stores/notes-pending-focus'
 import { usePeoplePendingFocusStore } from '@/stores/people-pending-focus'
+import { useMailPendingFocusStore } from '@/stores/mail-pending-focus'
 import { useTasksPendingFocusStore } from '@/stores/tasks-pending-focus'
 import { persistTasksViewSelection } from '@/app/tasks/tasks-view-storage'
 function hasAnyResults(result: GlobalSearchResult | null): boolean {
@@ -63,7 +63,6 @@ function SearchSection({
 export function TopbarGlobalSearch(): JSX.Element {
   const { t, i18n } = useTranslation()
   const accounts = useAccountsStore((s) => s.accounts)
-  const openMessageInFolder = useMailStore((s) => s.openMessageInFolder)
   const setAppMode = useAppModeStore((s) => s.setMode)
 
   const [query, setQuery] = useState('')
@@ -157,11 +156,12 @@ export function TopbarGlobalSearch(): JSX.Element {
     setResults(null)
   }
 
-  async function handleSelectMail(hit: SearchHit): Promise<void> {
+  function handleSelectMail(hit: SearchHit): void {
     const q = query.trim()
     if (q.length >= 2) pushRecentSearch(q)
+    useMailPendingFocusStore.getState().setPendingMessageId(hit.id)
+    setAppMode('mail')
     closeSearch()
-    await openMessageInFolder(hit.id)
   }
 
   function handleSelectNote(note: GlobalSearchNoteHit): void {

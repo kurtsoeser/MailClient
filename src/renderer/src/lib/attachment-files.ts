@@ -1,16 +1,10 @@
+import { formatBytes } from '@/lib/format-bytes'
+
 /** Maximale Groesse pro lokaler Datei (wie Mail-Compose). */
 export const MAX_ATTACHMENT_FILE_BYTES = 24 * 1024 * 1024
 
 export function formatAttachmentBytes(bytes: number): string {
-  if (bytes <= 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB']
-  let i = 0
-  let v = bytes
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024
-    i++
-  }
-  return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${units[i]}`
+  return formatBytes(bytes)
 }
 
 export function arrayBufferToBase64(buf: ArrayBuffer): string {

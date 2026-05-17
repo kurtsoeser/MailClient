@@ -1,7 +1,11 @@
 import type { EventApi, EventInput } from '@fullcalendar/core'
 import type { WorkItemPlannedSchedule } from '@shared/work-item'
 import type { TaskItemRow } from '@shared/types'
-import { DateTime } from 'luxon'
+import {
+  defaultAppointmentRangeForCalendarDay,
+  dueIsoEndOfZonedDayFromScheduleStart,
+  jsDateHasNonMidnightTimeInZone
+} from '@/lib/zoned-iso-date'
 import { cloudTaskStableKey } from '@shared/work-item-keys'
 import type { TaskItemWithContext } from '@/app/tasks/tasks-types'
 
@@ -109,15 +113,12 @@ export function defaultScheduleForCalendarDayFc(
   dateStr: string,
   fcTimeZone: string
 ): { startIso: string; endIso: string } {
-  const zone = fcTimeZone === 'local' ? 'local' : fcTimeZone
-  const start = DateTime.fromISO(`${dateStr}T09:00:00`, { zone })
-  if (!start.isValid) {
-    const d = new Date(`${dateStr}T09:00:00`)
-    const end = endDateFromStart(d, DEFAULT_APPOINTMENT_MINUTES)
-    return { startIso: d.toISOString(), endIso: end.toISOString() }
-  }
-  const end = start.plus({ minutes: DEFAULT_APPOINTMENT_MINUTES })
-  return { startIso: start.toISO()!, endIso: end.toISO()! }
+  return defaultAppointmentRangeForCalendarDay(
+    dateStr,
+    fcTimeZone,
+    9,
+    DEFAULT_APPOINTMENT_MINUTES
+  )
 }
 
 export function cloudTaskEventId(taskKey: string): string {
@@ -202,20 +203,7 @@ export function dueIsoFromCloudTaskScheduleStart(
   start: Date | string,
   fcTimeZone: string
 ): string {
-  const zone = fcTimeZone === 'local' ? 'local' : fcTimeZone
-  const dt =
-    typeof start === 'string'
-      ? DateTime.fromISO(start, { setZone: true }).setZone(zone)
-      : DateTime.fromJSDate(start, { zone })
-  if (!dt.isValid) {
-    const fallback =
-      typeof start === 'string' ? start.slice(0, 10) : start.toISOString().slice(0, 10)
-    return `${fallback}T23:59:59.000Z`
-  }
-  const dateOnly = dt.toISODate()!
-  const end = DateTime.fromISO(`${dateOnly}T23:59:59`, { zone })
-  if (end.isValid) return end.toUTC().toISO()!
-  return `${dateOnly}T23:59:59.000Z`
+  return dueIsoEndOfZonedDayFromScheduleStart(start, fcTimeZone)
 }
 
 function dueIsoFromAllDayStart(start: Date, fcTimeZone: string): string {
@@ -234,9 +222,7 @@ export function cloudTaskDropLooksTimed(event: EventApi, fcTimeZone: string): bo
   if (!event.allDay) return true
   const s = event.start
   if (!s) return false
-  const zone = fcTimeZone === 'local' ? 'local' : fcTimeZone
-  const dt = DateTime.fromJSDate(s, { zone })
-  return dt.hour !== 0 || dt.minute !== 0 || dt.second !== 0
+  return jsDateHasNonMidnightTimeInZone(s, fcTimeZone)
 }
 
 function wasAllDayDueDisplay(oldEvent: EventApi | null, event: EventApi): boolean {

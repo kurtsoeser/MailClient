@@ -10,8 +10,10 @@ import {
 } from '@/lib/notes-section-tree'
 import {
   countNotesInSection,
+  isAllNotesNavSelected,
   isSectionNavSelected,
-  type NotesNavSelection
+  type NotesNavSelection,
+  type NotesSectionsNavScope
 } from '@/lib/notes-nav-selection'
 import { NOTE_DROP_UNGROUPED, noteSectionDropId } from '@/lib/notes-sidebar-dnd'
 import { NotesDropZone } from '@/app/notes/notes-dnd-ui'
@@ -40,7 +42,7 @@ function SectionNavRow({
   node: NoteSectionTreeNode
   notes: UserNoteListItem[]
   selection: NotesNavSelection
-  onSelect: (sectionId: number) => void
+  onSelect: (sectionId: number) => void // section row only
   collapsed: Partial<Record<string, boolean>>
   setCollapsed: React.Dispatch<React.SetStateAction<Partial<Record<string, boolean>>>>
   onRenameSection: (section: NoteSection, name: string) => void
@@ -225,14 +227,14 @@ export function NotesSidebarSections({
   sections,
   notes,
   selection,
-  onSelectSection,
+  onSelectScope,
   onSectionsChanged,
   embedded = false
 }: {
   sections: NoteSection[]
   notes: UserNoteListItem[]
   selection: NotesNavSelection
-  onSelectSection: (sectionId: number | null) => void
+  onSelectScope: (scope: NotesSectionsNavScope) => void
   onSectionsChanged: () => void
   embedded?: boolean
 }): JSX.Element {
@@ -245,6 +247,7 @@ export function NotesSidebarSections({
 
   const tree = useMemo(() => buildNoteSectionTree(sections, notes), [sections, notes])
   const ungroupedCount = tree.ungroupedNotes.length
+  const allNotesSelected = isAllNotesNavSelected(selection)
   const ungroupedSelected = isSectionNavSelected(null, selection)
 
   const createSection = useCallback(
@@ -353,10 +356,22 @@ export function NotesSidebarSections({
       </div>
 
       <div className="px-1 pb-2">
+        <button
+          type="button"
+          onClick={(): void => onSelectScope('all')}
+          className={cn(
+            'mb-1 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs font-medium',
+            allNotesSelected ? 'bg-primary/15 text-foreground' : 'text-muted-foreground hover:bg-secondary/40'
+          )}
+        >
+          <span className="flex-1 truncate">{t('notes.sections.allNotes')}</span>
+          <span className="shrink-0 text-[10px] tabular-nums">{notes.length}</span>
+        </button>
+
         <NotesDropZone id={NOTE_DROP_UNGROUPED}>
           <button
             type="button"
-            onClick={(): void => onSelectSection(null)}
+            onClick={(): void => onSelectScope('ungrouped')}
             className={cn(
               'mb-1 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs font-medium',
               ungroupedSelected ? 'bg-primary/15 text-foreground' : 'text-muted-foreground hover:bg-secondary/40'
@@ -376,7 +391,7 @@ export function NotesSidebarSections({
               node={node}
               notes={notes}
               selection={selection}
-              onSelect={onSelectSection}
+              onSelect={(sectionId): void => onSelectScope({ sectionId })}
               collapsed={collapsed}
               setCollapsed={setCollapsed}
               onRenameSection={renameSection}

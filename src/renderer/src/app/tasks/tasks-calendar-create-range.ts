@@ -1,4 +1,4 @@
-import { DateTime } from 'luxon'
+import { isoDateInTimeZone } from '@/lib/zoned-iso-date'
 
 const DEFAULT_APPOINTMENT_MINUTES = 30
 
@@ -18,16 +18,15 @@ export function scheduleFromCalendarCreateRange(
   range: CalendarCreateRange,
   timeZone: string
 ): CloudTaskCreateSchedule {
-  const zone = timeZone === 'local' ? 'local' : timeZone
   if (range.allDay) {
-    const dueDate = DateTime.fromJSDate(range.start, { zone }).toISODate()!
+    const dueDate = isoDateInTimeZone(range.start, timeZone)
     return { dueDate, plannedStartIso: null, plannedEndIso: null }
   }
   let end = range.end
   if (end.getTime() <= range.start.getTime()) {
     end = new Date(range.start.getTime() + DEFAULT_APPOINTMENT_MINUTES * 60 * 1000)
   }
-  const dueDate = DateTime.fromJSDate(range.start, { zone }).toISODate()!
+  const dueDate = isoDateInTimeZone(range.start, timeZone)
   return {
     dueDate,
     plannedStartIso: range.start.toISOString(),

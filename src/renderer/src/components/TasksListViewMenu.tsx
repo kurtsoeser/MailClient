@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
-import { Check, ChevronDown } from 'lucide-react'
+import { ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { MenuDivider, MenuRow, MenuSectionTitle } from '@/components/list-view-menu-parts'
+import { useAnchoredListViewMenu } from '@/hooks/useAnchoredListViewMenu'
 import type {
   TaskListArrangeBy,
   TaskListChronoOrder,
@@ -48,10 +49,7 @@ export function TasksListViewMenu({
   hideArrange = false
 }: Props): JSX.Element {
   const { t } = useTranslation()
-  const [open, setOpen] = useState(false)
-  const btnRef = useRef<HTMLButtonElement>(null)
-  const panelRef = useRef<HTMLDivElement>(null)
-  const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({})
+  const { open, setOpen, btnRef, panelRef, panelStyle } = useAnchoredListViewMenu()
 
   const arrangeLabel = useCallback(
     (key: TaskListArrangeBy): string => t(`tasks.listArrange.${key}` as const),
@@ -64,44 +62,6 @@ export function TasksListViewMenu({
   )
 
   const summary = useMemo(() => arrangeLabel(arrange), [arrange, arrangeLabel])
-
-  useLayoutEffect(() => {
-    if (!open || !btnRef.current) return
-    const r = btnRef.current.getBoundingClientRect()
-    const vw = window.innerWidth
-    const vh = window.innerHeight
-    const width = Math.min(320, vw - 16)
-    let left = r.left
-    if (left + width > vw - 8) left = vw - 8 - width
-    if (left < 8) left = 8
-    const maxH = Math.max(200, vh - r.bottom - 12)
-    setPanelStyle({
-      position: 'fixed',
-      top: r.bottom + 4,
-      left,
-      width,
-      maxHeight: maxH
-    })
-  }, [open])
-
-  useEffect(() => {
-    if (!open) return
-    function onKey(e: KeyboardEvent): void {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    function onDown(e: MouseEvent): void {
-      const target = e.target as Node
-      if (btnRef.current?.contains(target)) return
-      if (panelRef.current?.contains(target)) return
-      setOpen(false)
-    }
-    window.addEventListener('keydown', onKey)
-    window.addEventListener('mousedown', onDown)
-    return (): void => {
-      window.removeEventListener('keydown', onKey)
-      window.removeEventListener('mousedown', onDown)
-    }
-  }, [open])
 
   return (
     <div className="relative min-w-0 flex-1">

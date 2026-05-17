@@ -1,4 +1,5 @@
-import { DateTime } from 'luxon'
+import type { CalendarZonedParts } from '@shared/calendar-datetime'
+import { rruleUntilUtcFromDateOnly } from '@shared/calendar-datetime'
 import type { CalendarSaveEventRecurrence } from '@shared/types'
 
 const GRAPH_DOW = [
@@ -13,13 +14,13 @@ const GRAPH_DOW = [
 
 const GOOGLE_BYDAY = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU'] as const
 
-function graphDayOfWeekFromLuxon(dt: DateTime): (typeof GRAPH_DOW)[number] {
-  const idx = Math.min(Math.max(dt.weekday - 1, 0), 6)
+function graphDayOfWeek(parts: CalendarZonedParts): (typeof GRAPH_DOW)[number] {
+  const idx = Math.min(Math.max(parts.weekday - 1, 0), 6)
   return GRAPH_DOW[idx]!
 }
 
-function googleByDayFromLuxon(dt: DateTime): string {
-  return GOOGLE_BYDAY[dt.weekday - 1]!
+function googleByDay(parts: CalendarZonedParts): string {
+  return GOOGLE_BYDAY[parts.weekday - 1]!
 }
 
 /**
@@ -27,10 +28,10 @@ function googleByDayFromLuxon(dt: DateTime): string {
  */
 export function buildMicrosoftGraphRecurrencePayload(
   recurrence: CalendarSaveEventRecurrence,
-  startLocal: DateTime,
+  startLocal: CalendarZonedParts,
   recurrenceTimeZoneWindows: string
 ): { recurrence: Record<string, unknown> } {
-  const startDateStr = startLocal.toFormat('yyyy-MM-dd')
+  const startDateStr = startLocal.dateOnly
   let pattern: Record<string, unknown>
   switch (recurrence.frequency) {
     case 'daily':
@@ -40,7 +41,7 @@ export function buildMicrosoftGraphRecurrencePayload(
       pattern = {
         type: 'weekly',
         interval: 1,
-        daysOfWeek: [graphDayOfWeekFromLuxon(startLocal)],
+        daysOfWeek: [graphDayOfWeek(startLocal)],
         firstDayOfWeek: 'monday'
       }
       break
@@ -48,7 +49,7 @@ export function buildMicrosoftGraphRecurrencePayload(
       pattern = {
         type: 'weekly',
         interval: 2,
-        daysOfWeek: [graphDayOfWeekFromLuxon(startLocal)],
+        daysOfWeek: [graphDayOfWeek(startLocal)],
         firstDayOfWeek: 'monday'
       }
       break
@@ -105,11 +106,11 @@ export function buildMicrosoftGraphRecurrencePayload(
  */
 export function buildGoogleEventRecurrence(
   recurrence: CalendarSaveEventRecurrence,
-  startLocal: DateTime,
+  startLocal: CalendarZonedParts,
   calendarIanaTz: string,
   isAllDay: boolean
 ): string[] {
-  const byday = googleByDayFromLuxon(startLocal)
+  const byday = googleByDay(startLocal)
   let freqPart = ''
   switch (recurrence.frequency) {
     case 'daily':
@@ -146,11 +147,11 @@ export function buildGoogleEventRecurrence(
     if (isAllDay) {
       tail += `;UNTIL=${u.replace(/-/g, '')}`
     } else {
-      const dt = DateTime.fromISO(`${u}T23:59:59`, { zone: calendarIanaTz })
-      if (!dt.isValid) {
+      const untilUtc = rruleUntilUtcFromDateOnly(u, calendarIanaTz)
+      if (!untilUtc) {
         throw new Error('Serientermin: Enddatum ungueltig.')
       }
-      tail += `;UNTIL=${dt.toUTC().toFormat("yyyyMMdd'T'HHmmss'Z'")}`
+      tail += `;UNTIL=${untilUtc}`
     }
   }
 

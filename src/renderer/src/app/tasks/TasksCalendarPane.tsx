@@ -19,7 +19,7 @@ import deLocale from '@fullcalendar/core/locales/de'
 import enGbLocale from '@fullcalendar/core/locales/en-gb'
 import type { DateSelectArg, EventDropArg } from '@fullcalendar/core'
 import type { EventResizeDoneArg } from '@fullcalendar/interaction'
-import { DateTime } from 'luxon'
+import { appointmentRangeFromCalendarSlot } from '@/lib/zoned-iso-date'
 import { useTranslation } from 'react-i18next'
 import type { ConnectedAccount } from '@shared/types'
 import { cn } from '@/lib/utils'
@@ -333,13 +333,12 @@ export function TasksCalendarPane({
         if (node.closest('.fc-timegrid-axis')) continue
         const t = node.getAttribute('data-time')
         if (t && /^\d{1,2}:\d{2}/.test(t)) {
-          const zone = timeZone === 'local' ? 'local' : timeZone
-          const normalized = t.length <= 5 ? `${t}:00` : t
-          const start = DateTime.fromISO(`${dateStr}T${normalized}`, { zone })
-          if (start.isValid) {
-            const end = start.plus({ minutes: DEFAULT_APPOINTMENT_MINUTES })
-            return { startIso: start.toISO()!, endIso: end.toISO()! }
-          }
+          return appointmentRangeFromCalendarSlot(
+            dateStr,
+            t,
+            timeZone,
+            DEFAULT_APPOINTMENT_MINUTES
+          )
         }
       }
       return defaultScheduleForCalendarDayFc(dateStr, timeZone)

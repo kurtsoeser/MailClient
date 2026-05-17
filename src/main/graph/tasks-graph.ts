@@ -1,4 +1,9 @@
-import { DateTime } from 'luxon'
+import {
+  dueIsoFromClientInput,
+  dueIsoToGraphDateTimePayload,
+  trimFractionalSeconds,
+  utcIsoFromWallDateTime
+} from '@shared/calendar-datetime'
 
 import type { TaskItemRow, TaskListRow } from '@shared/types'
 
@@ -90,14 +95,6 @@ interface ODataCollection<T> {
 
 
 
-function trimFractionalSeconds(isoLike: string): string {
-
-  return isoLike.replace(/(\.\d{3})\d+/, '$1').trim()
-
-}
-
-
-
 async function graphTodoTimeZone(): Promise<{ iana: string; windows: string }> {
 
   const appCfg = await loadConfig()
@@ -124,27 +121,13 @@ function graphDueToIso(d: GraphDateTimeTimeZone | null | undefined): string | nu
 
   const iana = graphWindowsZoneToIana(d.timeZone)
 
-  if (/[zZ]$|[+-]\d{2}:?\d{2}$/.test(raw)) {
-
-    const x = DateTime.fromISO(raw, { setZone: true })
-
-    return x.isValid ? x.toUTC().toISO() : null
-
-  }
-
-  const dt = DateTime.fromISO(raw, { zone: iana })
-
-  if (!dt.isValid) return null
-
-  const dateOnly = dt.toISODate()
-
-  if (dateOnly && /T00:00:00/.test(raw)) {
-
+  const utcIso = utcIsoFromWallDateTime(raw, iana, false, () => iana)
+  if (!utcIso) return null
+  const dateOnly = utcIso.slice(0, 10)
+  if (/T00:00:00/.test(raw)) {
     return `${dateOnly}T12:00:00.000Z`
-
   }
-
-  return dt.toUTC().toISO()
+  return utcIso
 
 }
 
@@ -166,35 +149,10 @@ async function dueIsoToGraphPayload(dueIso: string): Promise<GraphDateTimeTimeZo
 
   }
 
-  const dt = DateTime.fromISO(s, { setZone: true }).setZone(iana)
-
-  if (!dt.isValid) return undefined
-
-  const dateTime = `${dt.toFormat("yyyy-MM-dd'T'HH:mm:ss")}.0000000`
-
-  return { dateTime, timeZone: windows }
-
+  return dueIsoToGraphDateTimePayload(s, windows, iana)
 }
 
-
-
-/** Fälligkeit aus UI/API in einheitliches Storage-ISO. */
-
-export function dueIsoFromClientInput(dueIso: string | null): string | null {
-
-  if (dueIso === null) return null
-
-  const s = String(dueIso).trim()
-
-  if (!s) return null
-
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return `${s}T12:00:00.000Z`
-
-  const dt = DateTime.fromISO(s, { setZone: true })
-
-  return dt.isValid ? dt.toUTC().toISO()! : s
-
-}
+export { dueIsoFromClientInput } from '@shared/calendar-datetime'
 
 
 

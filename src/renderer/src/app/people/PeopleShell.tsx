@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
+import { Virtuoso } from 'react-virtuoso'
 
 import { Loader2, RefreshCw, Search, Star, LayoutGrid, LayoutList, UserPlus } from 'lucide-react'
 
@@ -52,6 +53,7 @@ import { moduleNavColumnClass, moduleNavColumnScrollClass } from '@/components/m
 
 import { GLOBAL_CREATE_EVENT, useGlobalCreateNavigateStore } from '@/lib/global-create'
 import { usePeoplePendingFocusStore } from '@/stores/people-pending-focus'
+import { GROUPED_LIST_VIRTUALIZE_THRESHOLD } from '@/lib/grouped-list-virtuoso'
 type NavKey =
 
   | { kind: 'all' }
@@ -1263,7 +1265,15 @@ export function PeopleShell(): JSX.Element {
 
             </div>
 
-            <div key={`people-contact-list-${sortBy}-${viewMode}`} className="min-h-0 flex-1 overflow-y-auto">
+            <div
+              key={`people-contact-list-${sortBy}-${viewMode}`}
+              className={cn(
+                'min-h-0 flex-1',
+                viewMode === 'list' && rows.length >= GROUPED_LIST_VIRTUALIZE_THRESHOLD
+                  ? 'overflow-hidden'
+                  : 'overflow-y-auto'
+              )}
+            >
 
               {listLoading ? (
 
@@ -1288,6 +1298,18 @@ export function PeopleShell(): JSX.Element {
               ) : (
 
                 viewMode === 'list' ? (
+
+                  rows.length >= GROUPED_LIST_VIRTUALIZE_THRESHOLD ? (
+
+                    <Virtuoso
+                      style={{ height: '100%' }}
+                      data={rows}
+                      itemContent={(_index, c): JSX.Element | null =>
+                        c ? renderContactRow(c) : null
+                      }
+                    />
+
+                  ) : (
 
                   <div className="min-w-0 divide-y divide-border">
 
@@ -1331,6 +1353,8 @@ export function PeopleShell(): JSX.Element {
                     })}
 
                   </div>
+
+                  )
 
                 ) : (
 

@@ -1,5 +1,3 @@
-import { DateTime } from 'luxon'
-
 export function isoToDatetimeLocalValue(iso: string | null | undefined): string {
   if (!iso?.trim()) return ''
   const d = new Date(iso)
@@ -21,8 +19,8 @@ export function dueDateInputToStorageIso(value: string | null | undefined): stri
   if (!value?.trim()) return null
   const d = value.trim()
   if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d
-  const parsed = DateTime.fromISO(d, { setZone: true })
-  if (parsed.isValid) return parsed.toUTC().toISO()
+  const parsed = new Date(d)
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString()
   return d
 }
 

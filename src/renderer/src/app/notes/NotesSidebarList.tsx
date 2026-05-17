@@ -4,7 +4,7 @@ import type { ConnectedAccount, NoteSection, UserNoteListItem } from '@shared/ty
 import { cn } from '@/lib/utils'
 import { NotesSidebarAccounts } from '@/app/notes/NotesSidebarAccounts'
 import { NotesSidebarSections } from '@/app/notes/NotesSidebarSections'
-import type { NotesNavSelection } from '@/lib/notes-nav-selection'
+import type { NotesNavSelection, NotesSectionsNavScope } from '@/lib/notes-nav-selection'
 import {
   type NotesSidebarListMode,
   persistNotesSidebarListMode
@@ -17,7 +17,7 @@ export function NotesSidebarList({
   listMode,
   onListModeChange,
   navSelection,
-  onSelectSection,
+  onSelectScope,
   onSelectAccount,
   onSectionsChanged
 }: {
@@ -27,7 +27,7 @@ export function NotesSidebarList({
   listMode: NotesSidebarListMode
   onListModeChange: (mode: NotesSidebarListMode) => void
   navSelection: NotesNavSelection
-  onSelectSection: (sectionId: number | null) => void
+  onSelectScope: (scope: NotesSectionsNavScope) => void
   onSelectAccount: (accountKey: string) => void
   onSectionsChanged: () => void
 }): JSX.Element {
@@ -87,7 +87,7 @@ export function NotesSidebarList({
             sections={sections}
             notes={notes}
             selection={navSelection}
-            onSelectSection={onSelectSection}
+            onSelectScope={onSelectScope}
             onSectionsChanged={onSectionsChanged}
           />
         )}

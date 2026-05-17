@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   CalendarDays,
   CheckSquare,
+  ExternalLink,
+  Eye,
   Link2,
   Loader2,
   Mail,
@@ -18,6 +20,7 @@ import type {
   NoteEntityLinkTargetKind
 } from '@shared/note-entity-links'
 import { cn } from '@/lib/utils'
+import { noteEntityLinkTargetKey } from '@shared/note-entity-links'
 import { openNoteEntityLinkTarget } from '@/lib/note-entity-link-nav'
 import { useAppModeStore } from '@/stores/app-mode'
 
@@ -37,10 +40,20 @@ function kindIcon(kind: NoteEntityLinkTargetKind): typeof StickyNote {
 
 export function NotesLinkedObjectsPanel({
   noteId,
-  onOpenNote
+  onOpenNote,
+  selectedPreviewKey,
+  onSelectForPreview,
+  onLinksLoaded,
+  previewOpen,
+  onTogglePreview
 }: {
   noteId: number
   onOpenNote: (id: number) => void
+  selectedPreviewKey?: string | null
+  onSelectForPreview?: (item: NoteEntityLinkedItem, direction: 'outgoing' | 'incoming') => void
+  onLinksLoaded?: (bundle: NoteLinksBundle) => void
+  previewOpen?: boolean
+  onTogglePreview?: () => void
 }): JSX.Element {
   const { t } = useTranslation()
   const setAppMode = useAppModeStore((s) => s.setMode)
@@ -55,13 +68,17 @@ export function NotesLinkedObjectsPanel({
   const loadLinks = useCallback(async (): Promise<void> => {
     setLoading(true)
     try {
-      setBundle(await window.mailClient.notes.links.list(noteId))
+      const next = await window.mailClient.notes.links.list(noteId)
+      setBundle(next)
+      onLinksLoaded?.(next)
     } catch {
-      setBundle({ outgoing: [], incoming: [] })
+      const empty = { outgoing: [], incoming: [] }
+      setBundle(empty)
+      onLinksLoaded?.(empty)
     } finally {
       setLoading(false)
     }
-  }, [noteId])
+  }, [noteId, onLinksLoaded])
 
   useEffect(() => {
     void loadLinks()
@@ -130,19 +147,29 @@ export function NotesLinkedObjectsPanel({
 
   function renderLinkRow(
     item: NoteEntityLinkedItem,
+    direction: 'outgoing' | 'incoming',
     onRemove: (linkId: number) => void
   ): JSX.Element {
     const kind = item.target.kind
     const Icon = kindIcon(kind)
+    const key = noteEntityLinkTargetKey(item.target)
+    const selected = selectedPreviewKey === key
     return (
-      <div key={item.linkId} className="flex items-center gap-1.5 rounded-md px-1 py-0.5 hover:bg-secondary/40">
+      <div
+        key={item.linkId}
+        className={cn(
+          'flex items-center gap-1 rounded-md px-1 py-0.5',
+          selected ? 'bg-primary/10 ring-1 ring-primary/30' : 'hover:bg-secondary/40'
+        )}
+      >
         <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         <button
           type="button"
-          onClick={(): void => void openLink(item)}
+          onClick={(): void => onSelectForPreview?.(item, direction)}
           className="min-w-0 flex-1 text-left"
+          title={t('notes.preview.showInPane')}
         >
-          <span className="block truncate text-xs text-primary hover:underline">{item.title}</span>
+          <span className="block truncate text-xs text-foreground">{item.title}</span>
           {item.subtitle ? (
             <span className="block truncate text-[10px] text-muted-foreground">
               {t(`notes.links.kind.${kind}`)}
@@ -153,6 +180,16 @@ export function NotesLinkedObjectsPanel({
               {t(`notes.links.kind.${kind}`)}
             </span>
           )}
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={(): void => void openLink(item)}
+          className="rounded p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
+          aria-label={t('notes.preview.openExternal')}
+          title={t('notes.preview.openExternal')}
+        >
+          <ExternalLink className="h-3 w-3" />
         </button>
         <button
           type="button"
@@ -174,15 +211,33 @@ export function NotesLinkedObjectsPanel({
           <Link2 className="h-3.5 w-3.5" />
           {t('notes.links.title')}
         </div>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={(): void => setPickerOpen((v) => !v)}
-          className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] hover:bg-secondary"
-        >
-          <Plus className="h-3 w-3" />
-          {t('notes.links.add')}
-        </button>
+        <div className="flex items-center gap-1">
+          {onTogglePreview ? (
+            <button
+              type="button"
+              onClick={onTogglePreview}
+              className={cn(
+                'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px]',
+                previewOpen
+                  ? 'border-primary bg-primary/10 text-foreground'
+                  : 'border-border hover:bg-secondary'
+              )}
+              title={t('notes.preview.togglePane')}
+            >
+              <Eye className="h-3 w-3" />
+              {t('notes.preview.togglePaneShort')}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={(): void => setPickerOpen((v) => !v)}
+            className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] hover:bg-secondary"
+          >
+            <Plus className="h-3 w-3" />
+            {t('notes.links.add')}
+          </button>
+        </div>
       </div>
 
       {pickerOpen ? (
@@ -266,7 +321,7 @@ export function NotesLinkedObjectsPanel({
                 <p className="text-xs text-muted-foreground">{t('notes.links.emptyOutgoing')}</p>
               ) : (
                 <div className="space-y-0.5">
-                  {bundle.outgoing.map((item) => renderLinkRow(item, removeOutgoing))}
+                  {bundle.outgoing.map((item) => renderLinkRow(item, 'outgoing', removeOutgoing))}
                 </div>
               )}
             </div>
@@ -276,7 +331,7 @@ export function NotesLinkedObjectsPanel({
                   {t('notes.links.incoming')}
                 </p>
                 <div className="space-y-0.5">
-                  {bundle.incoming.map((item) => renderLinkRow(item, removeIncoming))}
+                  {bundle.incoming.map((item) => renderLinkRow(item, 'incoming', removeIncoming))}
                 </div>
               </div>
             ) : null}

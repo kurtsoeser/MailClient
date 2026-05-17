@@ -110,7 +110,8 @@
       "selectNote": "Select note",
       "selectNoteHint": "Select a note on the left or create a standalone note.",
       "titlePlaceholder": "Title",
-      "deleteConfirm": "Delete this note?",
+      "deleteTitle": "Delete note",
+      "deleteConfirm": "Delete «{{title}}»? This cannot be undone.",
       "deleted": "Note deleted.",
       "invalidNote": "This note cannot be saved.",
       "linkedObject": "Linked object",
@@ -140,6 +141,7 @@
       "title": "Sections",
       "add": "Section",
       "namePlaceholder": "Section name",
+      "allNotes": "All notes",
       "ungrouped": "Ungrouped",
       "moveTo": "Section",
       "deleteTitle": "Delete section",
@@ -163,6 +165,28 @@
       "saveAs": "Save as",
       "cloudRequiresM365": "Connect a Microsoft 365 account for OneDrive and SharePoint files.",
       "requiresSavedNote": "Save the note once to attach files."
+    },
+    "preview": {
+      "loading": "Loading preview…",
+      "selectLink": "Select a link from the list.",
+      "showInPane": "Show in preview",
+      "openExternal": "Open in module",
+      "togglePane": "Show or hide preview column",
+      "togglePaneShort": "Preview",
+      "undockTitle": "Preview as floating window",
+      "hideTitle": "Hide preview",
+      "selfLink": "The current note cannot be previewed here.",
+      "noteNotFound": "Note not found.",
+      "eventNotFound": "Event not found.",
+      "taskNotFound": "Task not found.",
+      "unsupported": "Preview not available for this type."
+    },
+    "pagesContextMenu": {
+      "copy": "Copy",
+      "move": "Move",
+      "link": "Link",
+      "linkDialogTitle": "Link to object",
+      "copied": "Note copied."
     },
     "links": {
       "title": "Links",

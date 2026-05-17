@@ -1,21 +1,20 @@
-import { DateTime } from 'luxon'
 import type { TodoDueKindList } from '@shared/types'
+import { addCalendarDaysIsoDate, isoDateInTimeZone } from '@/lib/zoned-iso-date'
 
 export type OpenTodoDueKind = Exclude<TodoDueKindList, 'done'>
 
 /** Ziel-Fälligkeit beim Verschieben in eine Bucket-Spalte (Cloud: `dueIso`, Mail: `dueKind`). */
 export function dueIsoForOpenTodoBucket(kind: OpenTodoDueKind, timeZone: string): string | null {
-  const zone = timeZone === 'local' ? 'local' : timeZone
-  const now = DateTime.now().setZone(zone)
+  const today = isoDateInTimeZone(new Date(), timeZone)
   switch (kind) {
     case 'overdue':
-      return now.minus({ days: 1 }).toISODate()
+      return addCalendarDaysIsoDate(today, -1, timeZone)
     case 'today':
-      return now.toISODate()
+      return today
     case 'tomorrow':
-      return now.plus({ days: 1 }).toISODate()
+      return addCalendarDaysIsoDate(today, 1, timeZone)
     case 'this_week':
-      return now.plus({ days: 4 }).toISODate()
+      return addCalendarDaysIsoDate(today, 4, timeZone)
     case 'later':
       return null
     default:

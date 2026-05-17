@@ -3,6 +3,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { existsSync, readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import type { AppConfig } from '@shared/types'
+import { restartMailPollingInterval } from './mail-poll-runner'
 import {
   fetchPublisherRemoteOAuthOnce,
   getPublisherEnvOAuthDefaults,
@@ -18,6 +19,7 @@ const PERSISTED_CONFIG_KEYS: (keyof AppConfig)[] = [
   'notionClientId',
   'notionClientSecret',
   'syncWindowDays',
+  'mailPollIntervalSeconds',
   'autoLoadImages',
   'launchOnLogin',
   'calendarTimeZone',
@@ -36,6 +38,7 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
   notionClientId: null,
   notionClientSecret: null,
   syncWindowDays: 90,
+  mailPollIntervalSeconds: 60,
   autoLoadImages: true,
   launchOnLogin: false,
   calendarTimeZone: null,
@@ -203,14 +206,6 @@ export async function savePersistedPartial(persisted: Partial<AppConfig>): Promi
   await writeFile(path, JSON.stringify(toWrite, null, 2), 'utf8')
 }
 
-/**
- * Schreibt nur persistierbare Schluessel (keine abgeleiteten Publisher-URLs).
- * @deprecated zugunsten {@link savePersistedPartial} — behalten fuer Einstellungs-Import.
- */
-export async function saveConfig(config: AppConfig): Promise<void> {
-  await savePersistedPartial(config)
-}
-
 export async function updateConfig(patch: Partial<AppConfig>): Promise<AppConfig> {
   const persisted = await readPersistedPartial()
   const mergedPersist: Partial<AppConfig> = { ...persisted }
@@ -221,5 +216,8 @@ export async function updateConfig(patch: Partial<AppConfig>): Promise<AppConfig
   }
   await savePersistedPartial(mergedPersist)
   remoteOAuthCache = undefined
+  if ('mailPollIntervalSeconds' in patch) {
+    restartMailPollingInterval()
+  }
   return resolveAppConfigAsync(mergedPersist)
 }

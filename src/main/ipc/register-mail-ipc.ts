@@ -28,9 +28,6 @@ import {
   type SearchHit,
   type WorkflowMailFolderUiState,
   type EnsureWorkflowMailFoldersResult,
-  type MetaFolderSummary,
-  type MetaFolderCreateInput,
-  type MetaFolderUpdateInput,
   type MailBulkUnflagInput,
   type MailBulkUnflagResult,
   type RemoveMailTodoRecordsResult
@@ -39,11 +36,6 @@ import { writeAttachmentCacheFile } from '../attachment-cache'
 import { loadConfig } from '../config'
 import { listAccounts } from '../accounts'
 import { gmailSendMail, gmailSaveDraft } from '../google/gmail-compose'
-import {
-  gmailCreateMailLabel,
-  gmailRenameMailLabel,
-  gmailDeleteMailLabel
-} from '../google/gmail-label-folders'
 import {
   gmailListAttachmentsMeta,
   gmailDownloadAttachmentBytes,
@@ -54,26 +46,10 @@ import { clearMailAccountLocalCacheAndResync } from '../mail-cache-reset'
 import { runBulkUnflagFlaggedMessages } from '../mail-bulk-unflag-service'
 import { triggerManualPoll, setActivePollFolder } from '../mail-poll-runner'
 import { assertAppOnline } from '../network-status'
-import {
-  listFoldersByAccount,
-  findFolderById,
-  findFolderByWellKnown,
-  findFolderByRemoteId,
-  renameFolderLocal,
-  deleteFolderLocal,
-  updateFolderParentLocal,
-  insertFolderLocal,
-  isProtectedFolder,
-  setFolderFavoriteLocal
-} from '../db/folders-repo'
-import { clearWorkflowFolderPrefsIfRemoteFolderRemoved } from '../db/workflow-folders-repo'
+import { findFolderById, findFolderByWellKnown } from '../db/folders-repo'
 import { peekLastUndoable, markUndone } from '../db/message-actions-repo'
 import {
-  listMessagesByFolder,
   listMessagesByAccount,
-  listInboxMessagesAllAccounts,
-  listMessagesByThread,
-  listMessagesByThreadKeys,
   getMessageById,
   setMessageHasAttachmentsLocal,
   searchMessages,
@@ -102,6 +78,7 @@ import {
   completeTodoForMessage,
   removeMailTodoRecordsForMessage,
   listTodoMessagesMerged,
+  listAllOpenTodoMessages,
   listTodoMessagesInRange,
   getTodoCountsAll
 } from '../todos-service'
@@ -116,12 +93,6 @@ import {
   applyPermanentDeleteMessage,
   applyEmptyTrashFolder
 } from '../message-graph-actions'
-import {
-  createFolder as graphCreateFolder,
-  renameFolder as graphRenameFolder,
-  deleteFolder as graphDeleteFolder,
-  moveFolder as graphMoveFolder
-} from '../graph/folder-actions'
 import {
   graphCreateMasterCategory,
   graphUpdateMasterCategory,
@@ -164,111 +135,22 @@ import {
 import { broadcastMailChanged } from './ipc-broadcasts'
 import { applyUndo } from './mail-ipc-undo'
 import { listDistinctTagsForAccount } from '../db/message-tags-repo'
-import {
-  listMetaFolders,
-  getMetaFolder,
-  createMetaFolder,
-  updateMetaFolder,
-  deleteMetaFolder,
-  reorderMetaFolders,
-  listMessagesForMetaFolder
-} from '../db/meta-folders-repo'
 import { registerMailComposeIpc } from './register-mail-compose-ipc'
+import { registerMailFoldersIpc } from './register-mail-folders-ipc'
+import { registerMailListIpc } from './register-mail-list-ipc'
+import { registerMailMetaIpc } from './register-mail-meta-ipc'
 
 export function registerMailIpc(): void {
   registerMailComposeIpc()
-  ipcMain.handle(
-    IPC.mail.listFolders,
-    (_event, accountId: string): MailFolder[] => listFoldersByAccount(accountId)
-  )
-  
-  ipcMain.handle(
-    IPC.mail.listMessages,
-    (_event, options: { folderId?: number; accountId?: string; limit?: number }): MailListItem[] => {
-      const limit = options.limit ?? 100
-      let rows: MailListItem[] = []
-      if (options.folderId != null) rows = listMessagesByFolder(options.folderId, limit)
-      else if (options.accountId) rows = listMessagesByAccount(options.accountId, limit)
-      return decorateMailList(rows)
-    }
-  )
-  
-  ipcMain.handle(
-    IPC.mail.listInboxTriage,
-    (_event, args?: { limit?: number | null }): MailListItem[] => {
-      let resolved: number | null
-      if (args?.limit === null) {
-        resolved = null
-      } else if (typeof args?.limit === 'number' && Number.isFinite(args.limit) && args.limit > 0) {
-        resolved = Math.floor(args.limit)
-      } else {
-        resolved = 200
-      }
-      return decorateMailList(listInboxMessagesAllAccounts(resolved))
-    }
-  )
-  
-  ipcMain.handle(
-    IPC.mail.listUnifiedInbox,
-    (_event, limit?: number | null): MailListItem[] => {
-      const resolved =
-        limit === null ? null : Math.min(Math.max(limit ?? 300, 1), 2000)
-      return decorateMailList(listInboxMessagesAllAccounts(resolved))
-    }
-  )
-
-  ipcMain.handle(IPC.mail.listMetaFolders, (): MetaFolderSummary[] => listMetaFolders())
-
-  ipcMain.handle(IPC.mail.getMetaFolder, (_event, id: number): MetaFolderSummary | null =>
-    getMetaFolder(id)
-  )
-
-  ipcMain.handle(
-    IPC.mail.createMetaFolder,
-    (_event, input: MetaFolderCreateInput): MetaFolderSummary => createMetaFolder(input)
-  )
-
-  ipcMain.handle(
-    IPC.mail.updateMetaFolder,
-    (_event, input: MetaFolderUpdateInput): MetaFolderSummary => updateMetaFolder(input)
-  )
-
-  ipcMain.handle(IPC.mail.deleteMetaFolder, (_event, id: number): void => {
-    deleteMetaFolder(id)
-  })
-
-  ipcMain.handle(IPC.mail.reorderMetaFolders, (_event, orderedIds: number[]): void => {
-    reorderMetaFolders(orderedIds)
-  })
-
-  ipcMain.handle(
-    IPC.mail.listMetaFolderMessages,
-    (_event, metaFolderId: number): MailListItem[] =>
-      decorateMailList(listMessagesForMetaFolder(metaFolderId))
-  )
+  registerMailFoldersIpc()
+  registerMailListIpc()
+  registerMailMetaIpc()
 
   ipcMain.handle(IPC.mail.getMessage, async (_event, id: number): Promise<MailFull | null> => {
     const { ensureMessageBodyLoaded } = await import('../message-body-fetch')
     const msg = await ensureMessageBodyLoaded(id)
     return decorateMailFull(msg)
   })
-  
-  ipcMain.handle(
-    IPC.mail.listThreadMessages,
-    (
-      _event,
-      args: { accountId: string; threadKey: string }
-    ): MailFull[] =>
-      listMessagesByThread(args.accountId, args.threadKey).map((m) => decorateMailFull(m)!)
-  )
-  
-  ipcMain.handle(
-    IPC.mail.listMessagesByThreads,
-    (
-      _event,
-      args: { accountId: string; threadKeys: string[] }
-    ): MailListItem[] => decorateMailList(listMessagesByThreadKeys(args.accountId, args.threadKeys))
-  )
   
   ipcMain.handle(
     IPC.mail.fetchInlineImages,
@@ -523,6 +405,14 @@ export function registerMailIpc(): void {
   )
   
   ipcMain.handle(
+    IPC.mail.listAllOpenTodoMessages,
+    (_event, args?: { accountId?: string | null; limit?: number }): MailListItem[] =>
+      decorateMailList(
+        listAllOpenTodoMessages(args?.accountId ?? null, args?.limit ?? 2000)
+      )
+  )
+
+  ipcMain.handle(
     IPC.mail.listTodoMessagesInRange,
     (
       _event,
@@ -742,172 +632,4 @@ export function registerMailIpc(): void {
       return { ok: false, error: message }
     }
   })
-  
-  ipcMain.handle(
-    IPC.folder.create,
-    async (
-      _event,
-      args: { accountId: string; parentFolderId: number | null; name: string }
-    ): Promise<MailFolder> => {
-      const name = args.name.trim()
-      if (!name) throw new Error('Ordnername darf nicht leer sein.')
-
-      const accounts = await listAccounts()
-      const acc = accounts.find((a) => a.id === args.accountId)
-      if (!acc) throw new Error('Konto nicht gefunden.')
-
-      if (acc.provider === 'google') {
-        const labelId = await gmailCreateMailLabel(args.accountId, name)
-        const folder = findFolderByRemoteId(args.accountId, labelId)
-        if (!folder) throw new Error('Gmail: Ordner nach Anlage nicht gefunden.')
-        broadcastMailChanged(args.accountId)
-        return folder
-      }
-
-      let parentRemoteId: string | null = null
-      if (args.parentFolderId != null) {
-        const parent = findFolderById(args.parentFolderId)
-        if (!parent || parent.accountId !== args.accountId) {
-          throw new Error('Eltern-Ordner nicht gefunden.')
-        }
-        parentRemoteId = parent.remoteId
-      }
-
-      const created = await graphCreateFolder(args.accountId, name, parentRemoteId)
-
-      const localId = insertFolderLocal({
-        accountId: args.accountId,
-        remoteId: created.id,
-        name: created.displayName,
-        parentRemoteId: created.parentFolderId ?? parentRemoteId,
-        wellKnown: null,
-        unreadCount: created.unreadItemCount ?? 0,
-        totalCount: created.totalItemCount ?? 0
-      })
-
-      broadcastMailChanged(args.accountId)
-      const folder = findFolderById(localId)
-      if (!folder) throw new Error('Erstellter Ordner konnte nicht gelesen werden.')
-      return folder
-    }
-  )
-  
-  ipcMain.handle(
-    IPC.folder.rename,
-    async (_event, args: { folderId: number; name: string }): Promise<void> => {
-      const folder = findFolderById(args.folderId)
-      if (!folder) throw new Error('Ordner nicht gefunden.')
-      if (isProtectedFolder(folder)) {
-        throw new Error('Systemordner koennen nicht umbenannt werden.')
-      }
-      const name = args.name.trim()
-      if (!name) throw new Error('Ordnername darf nicht leer sein.')
-      if (name === folder.name) return
-
-      const accounts = await listAccounts()
-      const acc = accounts.find((a) => a.id === folder.accountId)
-      if (acc?.provider === 'google') {
-        await gmailRenameMailLabel(folder.accountId, folder.remoteId, name)
-        renameFolderLocal(args.folderId, name)
-        broadcastMailChanged(folder.accountId)
-        return
-      }
-
-      await graphRenameFolder(folder.accountId, folder.remoteId, name)
-      renameFolderLocal(args.folderId, name)
-      broadcastMailChanged(folder.accountId)
-    }
-  )
-  
-  ipcMain.handle(
-    IPC.folder.delete,
-    async (_event, folderId: number): Promise<void> => {
-      const folder = findFolderById(folderId)
-      if (!folder) throw new Error('Ordner nicht gefunden.')
-      if (isProtectedFolder(folder)) {
-        throw new Error('Systemordner koennen nicht geloescht werden.')
-      }
-
-      const accounts = await listAccounts()
-      const acc = accounts.find((a) => a.id === folder.accountId)
-
-      if (acc?.provider === 'google') {
-        await gmailDeleteMailLabel(folder.accountId, folder.remoteId)
-        clearWorkflowFolderPrefsIfRemoteFolderRemoved(folder.accountId, folder.remoteId)
-        deleteFolderLocal(folderId)
-        const inbox = findFolderByWellKnown(folder.accountId, 'inbox')
-        if (inbox) {
-          void runFolderSync(inbox.id).catch((e) =>
-            console.warn('[ipc] Gmail: Posteingang nach Label-Loeschen sync:', e)
-          )
-        }
-        broadcastMailChanged(folder.accountId)
-        return
-      }
-
-      await graphDeleteFolder(folder.accountId, folder.remoteId)
-      clearWorkflowFolderPrefsIfRemoteFolderRemoved(folder.accountId, folder.remoteId)
-      deleteFolderLocal(folderId)
-      broadcastMailChanged(folder.accountId)
-    }
-  )
-  
-  ipcMain.handle(
-    IPC.folder.toggleFavorite,
-    (
-      _event,
-      args: { folderId: number; value: boolean }
-    ): MailFolder => {
-      const folder = findFolderById(args.folderId)
-      if (!folder) throw new Error('Ordner nicht gefunden.')
-      setFolderFavoriteLocal(args.folderId, args.value)
-      broadcastMailChanged(folder.accountId)
-      const refreshed = findFolderById(args.folderId)
-      if (!refreshed) throw new Error('Ordner konnte nach Update nicht gelesen werden.')
-      return refreshed
-    }
-  )
-  
-  ipcMain.handle(
-    IPC.folder.move,
-    async (
-      _event,
-      args: { folderId: number; destinationFolderId: number | null }
-    ): Promise<void> => {
-      const folder = findFolderById(args.folderId)
-      if (!folder) throw new Error('Ordner nicht gefunden.')
-      if (isProtectedFolder(folder)) {
-        throw new Error('Systemordner koennen nicht verschoben werden.')
-      }
-
-      const accounts = await listAccounts()
-      const acc = accounts.find((a) => a.id === folder.accountId)
-      if (acc?.provider === 'google') {
-        throw new Error(
-          'Gmail-Labels sind nicht hierarchisch: «Verschieben» wie bei Exchange ist nicht moeglich. Neues Label anlegen und Mails per Regel/Triage zuordnen.'
-        )
-      }
-
-      let destinationRemoteId: string
-      if (args.destinationFolderId == null) {
-        // Move to root: Graph erlaubt das ueber den Spezialwert 'msgfolderroot'.
-        destinationRemoteId = 'msgfolderroot'
-      } else {
-        const dest = findFolderById(args.destinationFolderId)
-        if (!dest || dest.accountId !== folder.accountId) {
-          throw new Error('Ziel-Ordner nicht gefunden.')
-        }
-        if (dest.id === folder.id) {
-          throw new Error('Ordner kann nicht in sich selbst verschoben werden.')
-        }
-        destinationRemoteId = dest.remoteId
-      }
-  
-      const moved = await graphMoveFolder(folder.accountId, folder.remoteId, destinationRemoteId)
-      updateFolderParentLocal(args.folderId, moved.parentFolderId ?? null)
-      broadcastMailChanged(folder.accountId)
-    }
-  )
-
-  void findFolderByRemoteId
 }

@@ -27,6 +27,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useShallow } from 'zustand/react/shallow'
 import { useMailStore } from '@/stores/mail'
 import { formatBytes } from '@/lib/format-bytes'
 import { useAccountsStore } from '@/stores/accounts'
@@ -88,23 +89,50 @@ export function ReadingPane({
   onRequestUndock
 }: ReadingPaneProps = {}): JSX.Element {
   const { t, i18n } = useTranslation()
-  const selectedMessage = useMailStore((s) => s.selectedMessage)
-  const selectedMessageId = useMailStore((s) => s.selectedMessageId)
-  const listKind = useMailStore((s) => s.listKind)
-  const foldersByAccount = useMailStore((s) => s.foldersByAccount)
-  const messageLoading = useMailStore((s) => s.messageLoading)
-  const setMessageRead = useMailStore((s) => s.setMessageRead)
-  const toggleMessageFlag = useMailStore((s) => s.toggleMessageFlag)
-  const archiveMessage = useMailStore((s) => s.archiveMessage)
-  const deleteMessage = useMailStore((s) => s.deleteMessage)
-  const removeMailTodoRecordsForMessage = useMailStore((s) => s.removeMailTodoRecordsForMessage)
-  const setTodoForMessage = useMailStore((s) => s.setTodoForMessage)
-  const setTodoScheduleForMessage = useMailStore((s) => s.setTodoScheduleForMessage)
-  const completeTodoForMessage = useMailStore((s) => s.completeTodoForMessage)
-  const setWaitingForMessage = useMailStore((s) => s.setWaitingForMessage)
-  const clearWaitingForMessage = useMailStore((s) => s.clearWaitingForMessage)
-  const threadMessages = useMailStore((s) => s.threadMessages)
-  const selectMessage = useMailStore((s) => s.selectMessage)
+  const {
+    selectedMessage,
+    selectedMessageId,
+    listKind,
+    foldersByAccount,
+    messageLoading,
+    threadMessages
+  } = useMailStore(
+    useShallow((s) => ({
+      selectedMessage: s.selectedMessage,
+      selectedMessageId: s.selectedMessageId,
+      listKind: s.listKind,
+      foldersByAccount: s.foldersByAccount,
+      messageLoading: s.messageLoading,
+      threadMessages: s.threadMessages
+    }))
+  )
+  const {
+    setMessageRead,
+    toggleMessageFlag,
+    archiveMessage,
+    deleteMessage,
+    removeMailTodoRecordsForMessage,
+    setTodoForMessage,
+    setTodoScheduleForMessage,
+    completeTodoForMessage,
+    setWaitingForMessage,
+    clearWaitingForMessage,
+    selectMessage
+  } = useMailStore(
+    useShallow((s) => ({
+      setMessageRead: s.setMessageRead,
+      toggleMessageFlag: s.toggleMessageFlag,
+      archiveMessage: s.archiveMessage,
+      deleteMessage: s.deleteMessage,
+      removeMailTodoRecordsForMessage: s.removeMailTodoRecordsForMessage,
+      setTodoForMessage: s.setTodoForMessage,
+      setTodoScheduleForMessage: s.setTodoScheduleForMessage,
+      completeTodoForMessage: s.completeTodoForMessage,
+      setWaitingForMessage: s.setWaitingForMessage,
+      clearWaitingForMessage: s.clearWaitingForMessage,
+      selectMessage: s.selectMessage
+    }))
+  )
   const accounts = useAccountsStore((s) => s.accounts)
   const profilePhotoDataUrls = useAccountsStore((s) => s.profilePhotoDataUrls)
   const autoLoadImages = useAccountsStore((s) => s.config?.autoLoadImages ?? true)

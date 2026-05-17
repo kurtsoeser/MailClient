@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import i18n, { readStoredLocale, type AppLocale, LOCALE_STORAGE_KEY } from '@/i18n'
+import { changeAppLocale, readStoredLocale, type AppLocale, LOCALE_STORAGE_KEY } from '@/i18n'
 
 interface LocaleState {
   locale: AppLocale
@@ -14,7 +14,8 @@ export const useLocaleStore = create<LocaleState>((set) => ({
     } catch {
       // ignore
     }
-    void i18n.changeLanguage(locale)
-    set({ locale })
+    void changeAppLocale(locale).then(() => {
+      set({ locale })
+    })
   }
 }))

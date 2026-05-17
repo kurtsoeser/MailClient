@@ -1,15 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Topbar } from './app/layout/Topbar'
-import { AccountSetupDialog } from './components/AccountSetupDialog'
-import { FirstRunWizard } from './components/FirstRunWizard'
-import { WorkflowMailFoldersIntro } from './components/WorkflowMailFoldersIntro'
-import { ComposerStack } from './components/Composer'
 import { ToastStack } from './components/ToastStack'
-import { AppDialogHost } from './components/AppDialogHost'
-import { NotionDestinationPickerDialog } from './components/NotionDestinationPickerDialog'
-import { SnoozePickerHost } from './components/SnoozePickerHost'
-import { CreateCloudTaskFromMailDialogHost } from './components/CreateCloudTaskFromMailDialogHost'
 import { useAccountsStore } from './stores/accounts'
 import { useMailStore } from './stores/mail'
 import { useCalendarSyncStore } from './stores/calendar-sync'
@@ -20,6 +11,42 @@ import {
 } from './lib/open-account-settings'
 import { PENDING_MAIL_RULES_SETTINGS_KEY, useAppModeStore } from './stores/app-mode'
 import { subscribeConnectivityFromMain } from './stores/connectivity'
+import { useSnoozeUiStore } from './stores/snooze-ui'
+import { useCreateCloudTaskUiStore } from './stores/create-cloud-task-ui'
+import { useNotionDestinationPickerStore } from './stores/notion-destination-picker'
+
+const Topbar = lazy(async () => {
+  const m = await import('./app/layout/Topbar')
+  return { default: m.Topbar }
+})
+const AccountSetupDialog = lazy(async () => {
+  const m = await import('./components/AccountSetupDialog')
+  return { default: m.AccountSetupDialog }
+})
+const FirstRunWizard = lazy(async () => {
+  const m = await import('./components/FirstRunWizard')
+  return { default: m.FirstRunWizard }
+})
+const WorkflowMailFoldersIntro = lazy(async () => {
+  const m = await import('./components/WorkflowMailFoldersIntro')
+  return { default: m.WorkflowMailFoldersIntro }
+})
+const AppDialogHost = lazy(async () => {
+  const m = await import('./components/AppDialogHost')
+  return { default: m.AppDialogHost }
+})
+const NotionDestinationPickerDialog = lazy(async () => {
+  const m = await import('./components/NotionDestinationPickerDialog')
+  return { default: m.NotionDestinationPickerDialog }
+})
+const SnoozePickerHost = lazy(async () => {
+  const m = await import('./components/SnoozePickerHost')
+  return { default: m.SnoozePickerHost }
+})
+const CreateCloudTaskFromMailDialogHost = lazy(async () => {
+  const m = await import('./components/CreateCloudTaskFromMailDialogHost')
+  return { default: m.CreateCloudTaskFromMailDialogHost }
+})
 
 const HomeDashboard = lazy(async () => {
   const m = await import('./app/home/HomeDashboard')
@@ -53,6 +80,10 @@ const PeopleShell = lazy(async () => {
   const m = await import('./app/people/PeopleShell')
   return { default: m.PeopleShell }
 })
+const ComposerStack = lazy(async () => {
+  const m = await import('./components/Composer')
+  return { default: m.ComposerStack }
+})
 
 function AppShellFallback(): JSX.Element {
   const { t } = useTranslation()
@@ -64,6 +95,10 @@ function AppShellFallback(): JSX.Element {
       </div>
     </div>
   )
+}
+
+function TopbarFallback(): JSX.Element {
+  return <div className="h-12 shrink-0 border-b border-border bg-card" aria-hidden />
 }
 
 export function App(): JSX.Element {
@@ -79,6 +114,9 @@ export function App(): JSX.Element {
   const accountsLoading = useAccountsStore((s) => s.loading)
   const refreshAccounts = useMailStore((s) => s.refreshAccounts)
   const mode = useAppModeStore((s) => s.mode)
+  const snoozePickerOpen = useSnoozeUiStore((s) => s.pendingMessageId != null)
+  const cloudTaskDialogOpen = useCreateCloudTaskUiStore((s) => s.pendingMessage != null)
+  const notionPickerOpen = useNotionDestinationPickerStore((s) => s.open)
 
   const workflowMailTriageAccounts = useMemo(
     () => accounts.filter((a) => a.provider === 'microsoft' || a.provider === 'google'),
@@ -113,7 +151,6 @@ export function App(): JSX.Element {
   }
 
   useEffect(() => {
-    // Einmalig beim Mount — nicht an Store-Funktions-Referenzen koppeln (vermeidet Re-Inits).
     useMailStore.getState().initialize()
     useCalendarSyncStore.getState().initialize()
     void useAccountsStore.getState().initialize()
@@ -157,7 +194,9 @@ export function App(): JSX.Element {
 
   return (
     <div className="app-chrome-root flex h-full min-h-0 flex-col text-foreground">
-      <Topbar onOpenAccountDialog={(): void => openAccountSettings('general')} />
+      <Suspense fallback={<TopbarFallback />}>
+        <Topbar onOpenAccountDialog={(): void => openAccountSettings('general')} />
+      </Suspense>
       <div className="flex min-h-0 flex-1 flex-col">
         <Suspense fallback={<AppShellFallback />}>
           {mode === 'home' && <HomeDashboard />}
@@ -175,30 +214,56 @@ export function App(): JSX.Element {
         </Suspense>
       </div>
       {showFirstRunWizard ? (
-        <FirstRunWizard
-          onOpenSettings={(tab): void => {
-            openAccountSettings(tab)
-          }}
-        />
+        <Suspense fallback={null}>
+          <FirstRunWizard
+            onOpenSettings={(tab): void => {
+              openAccountSettings(tab)
+            }}
+          />
+        </Suspense>
       ) : null}
-      <AccountSetupDialog
-        open={accountDialogOpen}
-        initialTab={accountDialogInitialTab}
-        initialMailSubNav={accountDialogInitialMailSubNav}
-        onClose={closeAccountSettings}
-      />
-      <WorkflowMailFoldersIntro
-        open={showWorkflowFoldersIntro}
-        workflowMailAccounts={workflowMailTriageAccounts}
-        onClose={(): void => undefined}
-        onOpenMailSettings={(): void => openAccountSettings('mail')}
-      />
-      <ComposerStack />
-      <SnoozePickerHost />
-      <CreateCloudTaskFromMailDialogHost />
+      {accountDialogOpen ? (
+        <Suspense fallback={null}>
+          <AccountSetupDialog
+            open={accountDialogOpen}
+            initialTab={accountDialogInitialTab}
+            initialMailSubNav={accountDialogInitialMailSubNav}
+            onClose={closeAccountSettings}
+          />
+        </Suspense>
+      ) : null}
+      {showWorkflowFoldersIntro ? (
+        <Suspense fallback={null}>
+          <WorkflowMailFoldersIntro
+            open={showWorkflowFoldersIntro}
+            workflowMailAccounts={workflowMailTriageAccounts}
+            onClose={(): void => undefined}
+            onOpenMailSettings={(): void => openAccountSettings('mail')}
+          />
+        </Suspense>
+      ) : null}
+      <Suspense fallback={<div className="pointer-events-none fixed inset-0 z-[200]" aria-hidden />}>
+        <ComposerStack />
+      </Suspense>
+      {snoozePickerOpen ? (
+        <Suspense fallback={null}>
+          <SnoozePickerHost />
+        </Suspense>
+      ) : null}
+      {cloudTaskDialogOpen ? (
+        <Suspense fallback={null}>
+          <CreateCloudTaskFromMailDialogHost />
+        </Suspense>
+      ) : null}
       <ToastStack />
-      <AppDialogHost />
-      <NotionDestinationPickerDialog />
+      <Suspense fallback={null}>
+        <AppDialogHost />
+      </Suspense>
+      {notionPickerOpen ? (
+        <Suspense fallback={null}>
+          <NotionDestinationPickerDialog />
+        </Suspense>
+      ) : null}
     </div>
   )
 }
